@@ -138,46 +138,55 @@ function formatoMilisegundo(selector, msec)
 function do_checkstatus()
 {
 /*
-	var clientstate = {};
-	for (var k in estadoCliente) {
-		clientstate[k] = {
-			status:			estadoCliente[k]['status'],
-			oncallupdate:	estadoCliente[k]['oncallupdate']
-		};
-	}
+  var clientstate = {};
+  for (var k in estadoCliente) {
+    clientstate[k] = {
+      status:      estadoCliente[k]['status'],
+      oncallupdate:  estadoCliente[k]['oncallupdate']
+    };
+  }
 */
-	var params = {
-			menu:		module_name,
-			rawmode:	'yes',
-			action:		'checkStatus',
-			//clientstate: clientstate
-			clientstatehash: estadoClienteHash
-		};
+  var params = {
+      menu:    module_name,
+      rawmode:  'yes',
+      action:    'checkStatus',
+      //clientstate: clientstate
+      clientstatehash: estadoClienteHash
+    };
+  // Antes utilizabamos EventSource, ahora solo dejaremos el poling
+  /*
+  if (window.EventSource) {
+    params['serverevents'] = true;
+    evtSource = new EventSource('index.php?' + $.param(params));
+    evtSource.onmessage = function(event) {
+      manejarRespuestaStatus($.parseJSON(event.data));
+    };
+    evtSource.onerror = function(event) {
+      event.target.close();
+      setTimeout(function() { location.reload(); }, 3000);
+    };
+  } else {
+    $.post('index.php?menu=' + module_name + '&rawmode=yes', params,
+    function (respuesta) {
+      verificar_error_session(respuesta);
+      manejarRespuestaStatus(respuesta);
 
-	if (window.EventSource) {
-		params['serverevents'] = true;
-		evtSource = new EventSource('index.php?' + $.param(params));
-		evtSource.onmessage = function(event) {
-			manejarRespuestaStatus($.parseJSON(event.data));
-		};
-		evtSource.onerror = function(event) {
-			/* NO QUIERO REINTENTOS EN CASO DE ERROR: para cuando se
-			 * realiza el reintento, se lo hace con el mismo hash que
-			 * se usó iniciamente, pero ese hash ya no es válido porque
-			 * el estado es volátil. */
-			event.target.close();
-			setTimeout(function() { location.reload(); }, 3000);
-		};
-	} else {
-		$.post('index.php?menu=' + module_name + '&rawmode=yes', params,
-		function (respuesta) {
-			verificar_error_session(respuesta);
-			manejarRespuestaStatus(respuesta);
+      // Lanzar el método de inmediato
+      setTimeout(do_checkstatus, 1);
+    }, 'json');
+  }
+  */
+  
+  $.post('index.php?menu=' + module_name + '&rawmode=yes', params,
+  function (respuesta) {
+    verificar_error_session(respuesta);
+    manejarRespuestaStatus(respuesta);
 
-			// Lanzar el método de inmediato
-			setTimeout(do_checkstatus, 1);
-		}, 'json');
-	}
+    // Lanzar el método de inmediato
+    setTimeout(do_checkstatus, 1);
+  }, 'json');
+  
+  
 }
 
 function manejarRespuestaStatus(respuesta)
