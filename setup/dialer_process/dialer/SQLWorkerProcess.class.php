@@ -1050,6 +1050,10 @@ SQL_EXISTE_AUDIT;
 
     private function _construirEventoProgresoLlamada($prop)
     {
+// CUSTOMIZATIONS WC 05/08/2025
+	$temp_data=var_export($prop,true);   
+        $this->_log->output('LOGDATA: '.$temp_data); 
+// CUSTOMIZATIONS WC 05/08/2025	    
         $id_campaignlog = NULL;
         $ev = NULL;
         $evlist = array();
@@ -1063,7 +1067,14 @@ SQL_EXISTE_AUDIT;
         }
 
         /* Se leen las propiedades del último log de la llamada, o NULL si no
-         * hay cambio de estado previo. */
+	 * hay cambio de estado previo. */
+// CUSTOMIZATIONS WC 05/08/2025
+	if($campaign_type=="")
+	{
+	    $campaign_type="incoming";
+	    $this->_log->output('LOGDATA: no se encontro la informacion de campaign_type, utilizando incoming...');
+	}
+// CUSTOMIZATIONS WC 05/08/2025 	
         $recordset = $this->_db->prepare(
             "SELECT retry, uniqueid, trunk, id_agent, duration ".
             "FROM call_progress_log WHERE id_call_{$campaign_type} = ? ".
