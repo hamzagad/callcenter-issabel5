@@ -1,0 +1,583 @@
+diff --git a/modules/agents/libs/Agentes.class.php b/modules/agents/libs/Agentes.class.php
+index 07d9c2e..ff52bd9 100755
+--- a/modules/agents/libs/Agentes.class.php
++++ b/modules/agents/libs/Agentes.class.php
+@@ -235,32 +235,75 @@ class Agentes
+             }
+         }
+ 
+-        // Leer el archivo y buscar la línea del agente a modificar
++        // Update agent in agents.conf (app_agent_pool format)
+         $bExito = TRUE;
+         $contenido = file($this->AGENT_FILE);
+         if (!is_array($contenido)) {
+             $bExito = FALSE;
+             $this->errMsg = '(internal) Unable to read agent file';
+         } else {
+-            $sLineaAgente = "agent => {$agent[0]},{$agent[1]},{$agent[2]}\n";
++            $agentId = $agent[0];
++            $agentName = $agent[2];
+             $bModificado = FALSE;
+-            for ($i = 0; $i < count($contenido); $i++) {
+-                $regs = NULL;
+-                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),/', $contenido[$i], $regs) &&
+-                    $regs[1] == $agent[0]) {
+-                    // Se ha encontrado la línea del agente modificado
+-                    $contenido[$i] = $sLineaAgente;
++            $bEnSeccionAgente = FALSE;
++            $contenidoNuevo = array();
++
++            foreach ($contenido as $sLinea) {
++                // Check if this is the start of the agent's section
++                if (preg_match('/^\[' . preg_quote($agentId, '/') . '\]/', trim($sLinea))) {
++                    $bEnSeccionAgente = TRUE;
++                    $bModificado = TRUE;
++                    // Write updated section
++                    $contenidoNuevo[] = "[{$agentId}]\n";
++                    $contenidoNuevo[] = "fullname={$agentName}\n";
++                    $contenidoNuevo[] = "ackcall=yes\n";
++                    $contenidoNuevo[] = "acceptdtmf=#\n";
++                    $contenidoNuevo[] = "autologoff=60\n";
++                    $contenidoNuevo[] = "wrapuptime=2000\n";
++                    continue;
++                }
++
++                // If we're in the agent section, skip until we hit a new section
++                if ($bEnSeccionAgente) {
++                    if (preg_match('/^\[[^\]]+\]/', trim($sLinea))) {
++                        $bEnSeccionAgente = FALSE;
++                        $contenidoNuevo[] = $sLinea;
++                    }
++                    continue;
++                }
++
++                // Also handle old chan_agent format
++                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($agentId, '/') . ',/', $sLinea)) {
++                    // Replace old format with new app_agent_pool format
++                    $contenidoNuevo[] = "\n[{$agentId}]\n";
++                    $contenidoNuevo[] = "fullname={$agentName}\n";
++                    $contenidoNuevo[] = "ackcall=yes\n";
++                    $contenidoNuevo[] = "acceptdtmf=#\n";
++                    $contenidoNuevo[] = "autologoff=60\n";
++                    $contenidoNuevo[] = "wrapuptime=2000\n";
+                     $bModificado = TRUE;
++                    continue;
+                 }
++
++                $contenidoNuevo[] = $sLinea;
++            }
++
++            // If agent wasn't found, add new section
++            if (!$bModificado) {
++                $contenidoNuevo[] = "\n[{$agentId}]\n";
++                $contenidoNuevo[] = "fullname={$agentName}\n";
++                $contenidoNuevo[] = "ackcall=yes\n";
++                $contenidoNuevo[] = "acceptdtmf=#\n";
++                $contenidoNuevo[] = "autologoff=60\n";
++                $contenidoNuevo[] = "wrapuptime=2000\n";
+             }
+-            if (!$bModificado) $contenido[] = $sLineaAgente;
+ 
+             $hArchivo = fopen($this->AGENT_FILE, 'w');
+             if (!$hArchivo) {
+                 $bExito = FALSE;
+                 $this->errMsg = '(internal) Unable to write agent file';
+             } else {
+-                foreach ($contenido as $sLinea) fwrite($hArchivo, $sLinea);
++                foreach ($contenidoNuevo as $sLinea) fwrite($hArchivo, $sLinea);
+                 fclose($hArchivo);
+             }
+         }
+@@ -311,13 +354,20 @@ class Agentes
+     /**
+      * Procedimiento para agregar un agente estático al archivo agents.conf y
+      * reiniciar Asterisk para que lea los cambios de agentes.
+-     * 
++     *
++     * Uses app_agent_pool format (Asterisk 12+):
++     * [agent-id]
++     * fullname=Agent Name
++     * ackcall=yes
++     * autologoff=60
++     * wrapuptime=2000
++     *
+      * @param   array   $agent  Información del agente. Se recogen los valores:
+      *                  0   =>  Número del agente
+-     *                  1   =>  Contraseña telefónica del agente
++     *                  1   =>  Contraseña telefónica del agente (ignored in app_agent_pool)
+      *                  2   =>  Nombre descriptivo del agente
+      *                  Otras claves o posiciones se ignoran.
+-     * 
++     *
+      * @return  VERDADERO si se puede escribir el archivo y reiniciar Asterisk,
+      *          FALSO si ocurre algún error.
+      */
+@@ -328,31 +378,47 @@ class Agentes
+             return FALSE;
+         }
+ 
+-        // GRABAR EN EL ARCHIVO
+-        $archivo=$this->AGENT_FILE;
+-        $tamanio_linea = 4096;
+-        $open = fopen ($archivo,"a+");
+-
+-        $nuevo_agente="agent => {$agent[0]},{$agent[1]},{$agent[2]}\n";
+-        // vas leyendo linea a linea , hasta llegar al final del archivo en
+-        //donde  fgets() retorna false
++        $archivo = $this->AGENT_FILE;
++        $agentId = $agent[0];
++        $agentName = $agent[2];
+ 
+-        while ($sLinea = fgets($open,$tamanio_linea))  // [0]
+-        {
+-            $regs = NULL;
+-            if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),/', $sLinea, $regs) &&
+-                $regs[1] == $agent[0]) {
+-                $this->errMsg = "Agent number already exists.";
+-                fclose($open);
+-                return false;
++        // Check if agent already exists in app_agent_pool format
++        $contenido = file($archivo);
++        if (is_array($contenido)) {
++            foreach ($contenido as $sLinea) {
++                // Check for [agent-id] section or old format
++                if (preg_match('/^\[' . preg_quote($agentId, '/') . '\]/', trim($sLinea)) ||
++                    preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($agentId, '/') . ',/', $sLinea)) {
++                    $this->errMsg = "Agent number already exists.";
++                    return FALSE;
++                }
+             }
+         }
+ 
+-        $escribir = fwrite ( $open, $nuevo_agente);
++        // Build app_agent_pool section
++        $nuevo_agente = "\n[{$agentId}]\n";
++        $nuevo_agente .= "fullname={$agentName}\n";
++        $nuevo_agente .= "ackcall=yes\n";
++        $nuevo_agente .= "acceptdtmf=#\n";
++        $nuevo_agente .= "autologoff=60\n";
++        $nuevo_agente .= "wrapuptime=2000\n";
++
++        // Append to file
++        $open = fopen($archivo, "a");
++        if (!$open) {
++            $this->errMsg = '(internal) Unable to open agent file for writing';
++            return FALSE;
++        }
++        fwrite($open, $nuevo_agente);
+         fclose($open);
++
+         return $this->_reloadAsterisk();
+     }
+ 
++    /**
++     * Delete agent from agents.conf (app_agent_pool format)
++     * Removes the entire [agent-id] section and all its settings
++     */
+     function deleteAgentFile($id_agent)
+     {
+         if (!preg_match('/^[[:digit:]]+$/', $id_agent)) {
+@@ -360,7 +426,6 @@ class Agentes
+             return FALSE;
+         }
+ 
+-        // Leer el archivo y buscar la línea del agente a eliminar
+         $bExito = TRUE;
+         $contenido = file($this->AGENT_FILE);
+         if (!is_array($contenido)) {
+@@ -369,15 +434,29 @@ class Agentes
+         } else {
+             $bModificado = FALSE;
+             $contenidoNuevo = array();
++            $bEnSeccionAgente = FALSE;
+ 
+-            // Filtrar las líneas, y setear bandera si se eliminó alguna
+             foreach ($contenido as $sLinea) {
+-                $regs = NULL;
+-                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),/', $sLinea, $regs) &&
+-                    $regs[1] == $id_agent) {
+-                    // Se ha encontrado la línea del agente eliminado
++                // Check if this is the start of the agent's section [agent-id]
++                if (preg_match('/^\[' . preg_quote($id_agent, '/') . '\]/', trim($sLinea))) {
++                    $bEnSeccionAgente = TRUE;
+                     $bModificado = TRUE;
+-                } else {
++                    continue; // Skip this line
++                }
++
++                // Check if we've reached a new section (end of agent's section)
++                if ($bEnSeccionAgente && preg_match('/^\[[^\]]+\]/', trim($sLinea))) {
++                    $bEnSeccionAgente = FALSE;
++                }
++
++                // Also handle old chan_agent format: agent => number,password,name
++                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($id_agent, '/') . ',/', $sLinea)) {
++                    $bModificado = TRUE;
++                    continue; // Skip this line
++                }
++
++                // Keep lines that are not part of the deleted agent's section
++                if (!$bEnSeccionAgente) {
+                     $contenidoNuevo[] = $sLinea;
+                 }
+             }
+@@ -397,19 +476,58 @@ class Agentes
+         return $this->_reloadAsterisk();
+     }
+ 
++    /**
++     * Read agents from agents.conf - supports both app_agent_pool format and legacy chan_agent format
++     */
+     private function _read_agents()
+     {
+         $contenido = file($this->AGENT_FILE);
+         if (!is_array($contenido)) {
+-            $bExito = FALSE;
+             $this->errMsg = '(internal) Unable to read agent file';
+-        } else {
+-            $this->arrAgents = array();
+-            foreach ($contenido as $sLinea) {
+-                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),([[:digit:]]+),(.*)/', trim($sLinea), $regs)) {
+-                    $this->arrAgents[$regs[1]] = array($regs[1], $regs[2], $regs[3]);
++            return;
++        }
++
++        $this->arrAgents = array();
++        $currentAgentId = NULL;
++        $currentAgentName = '';
++
++        foreach ($contenido as $sLinea) {
++            $sLinea = trim($sLinea);
++
++            // app_agent_pool format: [agent-id] section
++            if (preg_match('/^\[([0-9]+)\]$/', $sLinea, $regs)) {
++                // Save previous agent if exists
++                if ($currentAgentId !== NULL) {
++                    $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
+                 }
++                $currentAgentId = $regs[1];
++                $currentAgentName = '';
++                continue;
++            }
++
++            // Parse fullname within section
++            if ($currentAgentId !== NULL && preg_match('/^fullname\s*=\s*(.*)$/', $sLinea, $regs)) {
++                $currentAgentName = $regs[1];
++                continue;
++            }
++
++            // Check for new section (non-agent) - save current agent and reset
++            if ($currentAgentId !== NULL && preg_match('/^\[[^\]]+\]$/', $sLinea)) {
++                $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
++                $currentAgentId = NULL;
++                $currentAgentName = '';
++                continue;
+             }
++
++            // Legacy chan_agent format: agent => number,password,name
++            if (preg_match('/^agent\s*=>\s*([0-9]+),([^,]*),(.*)$/', $sLinea, $regs)) {
++                $this->arrAgents[$regs[1]] = array($regs[1], $regs[2], $regs[3]);
++            }
++        }
++
++        // Don't forget the last agent if file doesn't end with another section
++        if ($currentAgentId !== NULL) {
++            $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
+         }
+     }
+ 
+@@ -427,14 +545,17 @@ class Agentes
+         }
+     }
+ 
++    /**
++     * Reload Asterisk app_agent_pool module after agents.conf changes
++     */
+     private function _reloadAsterisk()
+     {
+         $astman = $this->_get_AGI_AsteriskManager();
+         if (is_null($astman)) {
+             return FALSE;
+         } else {
+-            // TODO: verify whether reload actually succeeded
+-            $strReload = $astman->Command("module reload chan_agent.so");
++            // Reload app_agent_pool module (Asterisk 12+ replacement for chan_agent)
++            $strReload = $astman->Command("module reload app_agent_pool.so");
+             $astman->disconnect();
+             return TRUE;
+         }
+diff --git a/setup/dialer_process/dialer/AMIClientConn.class.php b/setup/dialer_process/dialer/AMIClientConn.class.php
+index 4355d77..33d2053 100644
+--- a/setup/dialer_process/dialer/AMIClientConn.class.php
++++ b/setup/dialer_process/dialer/AMIClientConn.class.php
+@@ -65,8 +65,10 @@ class AMIClientConn extends MultiplexConn
+                 'AckCall' => array('required' => FALSE, 'default' => 'true')),
+         'AgentLogin' =>
+             array('Agent'=> TRUE, 'Channel' => TRUE),
+-        'Agentlogoff' =>
+-            array('Agent' => TRUE),
++        // Deprecated: Agentlogoff not available in app_agent_pool (Asterisk 12+)
++        // Use Hangup on the AgentLogin channel instead
++        // 'Agentlogoff' =>
++        //     array('Agent' => TRUE),
+         'Agents' =>
+             array('ActionID' => FALSE),
+         'Atxfer' =>
+@@ -142,6 +144,7 @@ class AMIClientConn extends MultiplexConn
+             array('Queue' => TRUE, 'Interface' => TRUE,
+                 'Penalty' => array('required' => FALSE, 'default' => 0, 'cast' => 'int'),
+                 'MemberName' => FALSE,
++                'StateInterface' => FALSE,  // For app_agent_pool: Agent:XXXX device state
+                 'Paused' => array('required' => FALSE, 'default' => FALSE, 'cast' => 'bool')),
+         'QueueRemove' =>
+             array('Queue' => TRUE, 'Interface' => TRUE),
+diff --git a/setup/dialer_process/dialer/AMIEventProcess.class.php b/setup/dialer_process/dialer/AMIEventProcess.class.php
+index 16b5f71..135f5a3 100644
+--- a/setup/dialer_process/dialer/AMIEventProcess.class.php
++++ b/setup/dialer_process/dialer/AMIEventProcess.class.php
+@@ -2607,10 +2607,22 @@ Uniqueid: 1429642067.241008
+                     $this->_log->output('INFO: agente '.$sAgente.' debe ser '.
+                         'agregado a las colas ['.implode(' ', array_keys($diffcolas[0])).']');
+                     foreach ($diffcolas[0] as $q => $p) {
+-                        $this->_ami->asyncQueueAdd(
+-                            array($this, '_cb_QueueAdd'),
+-                            NULL,
+-                            $q, $sAgente, $p, $a->name, $bAgentePausado);
++                        // For app_agent_pool (Asterisk 12+): Agent type uses Local channel
++                        // with StateInterface for device state tracking
++                        if ($a->type == 'Agent') {
++                            $interface = 'Local/'.$a->number.'@agent-connect';
++                            $stateInterface = 'Agent:'.$a->number;
++                            $this->_ami->asyncQueueAdd(
++                                array($this, '_cb_QueueAdd'),
++                                NULL,
++                                $q, $interface, $p, $a->name, $bAgentePausado, $stateInterface);
++                        } else {
++                            // SIP/IAX2/PJSIP: direct channel interface
++                            $this->_ami->asyncQueueAdd(
++                                array($this, '_cb_QueueAdd'),
++                                NULL,
++                                $q, $sAgente, $p, $a->name, $bAgentePausado);
++                        }
+                     }
+                 }
+ 
+@@ -2619,10 +2631,19 @@ Uniqueid: 1429642067.241008
+                     $this->_log->output('INFO: agente '.$sAgente.' debe ser '.
+                         'quitado de las colas ['.implode(' ', $diffcolas[1]).']');
+                     foreach ($diffcolas[1] as $q) {
+-                        $this->_ami->asyncQueueRemove(
+-                            array($this, '_cb_QueueRemove'),
+-                            NULL,
+-                            $q, $sAgente);
++                        // For app_agent_pool: Agent type uses Local channel interface
++                        if ($a->type == 'Agent') {
++                            $interface = 'Local/'.$a->number.'@agent-connect';
++                            $this->_ami->asyncQueueRemove(
++                                array($this, '_cb_QueueRemove'),
++                                NULL,
++                                $q, $interface);
++                        } else {
++                            $this->_ami->asyncQueueRemove(
++                                array($this, '_cb_QueueRemove'),
++                                NULL,
++                                $q, $sAgente);
++                        }
+                     }
+                 }
+             }
+diff --git a/setup/dialer_process/dialer/Agente.class.php b/setup/dialer_process/dialer/Agente.class.php
+index 4709213..89e6fa5 100644
+--- a/setup/dialer_process/dialer/Agente.class.php
++++ b/setup/dialer_process/dialer/Agente.class.php
+@@ -599,15 +599,32 @@ class Agente
+             $colasAtencion);
+     }
+ 
+-    // Iniciar el proceso de logoff desde el punto de vista de Asterisk
++    /**
++     * Initiate agent logoff from Asterisk's perspective
++     * For app_agent_pool (Asterisk 12+): Hangup the login channel
++     * For dynamic agents (SIP/IAX2/PJSIP): QueueRemove from all queues
++     */
+     public function forzarLogoffAgente($ami, $log)
+     {
+         if ($this->type == 'Agent') {
+-            $ami->asyncAgentlogoff(
+-                array($this, '_cb_Agentlogoff'),
+-                array($log),
+-                $this->number);
++            // app_agent_pool: Hangup the AgentLogin channel to logout
++            // No Agentlogoff AMI command exists in app_agent_pool
++            if (!is_null($this->_login_channel)) {
++                $ami->asyncHangup(
++                    array($this, '_cb_HangupLogoff'),
++                    array($log),
++                    $this->_login_channel);
++            } elseif (!is_null($this->_extension)) {
++                // Fallback to extension if login_channel not tracked
++                $ami->asyncHangup(
++                    array($this, '_cb_HangupLogoff'),
++                    array($log),
++                    $this->_extension);
++            } else {
++                $this->_log->output('WARN: '.__METHOD__.': no channel to hangup for agent '.$this->number);
++            }
+         } else {
++            // Dynamic agents: remove from all queues
+             foreach ($this->colas_actuales as $q) {
+                 $ami->asyncQueueRemove(
+                     array($this, '_cb_QueueRemove'),
+@@ -617,10 +634,10 @@ class Agente
+         }
+     }
+ 
+-    public function _cb_Agentlogoff($r, $log)
++    public function _cb_HangupLogoff($r, $log)
+     {
+         if ($r['Response'] != 'Success') {
+-            $this->_log->output('ERR: No se puede completar Agentlogoff('.$this->number.'): '.$r['Message']);
++            $this->_log->output('ERR: Cannot hangup agent login channel ('.$this->number.'): '.$r['Message']);
+         }
+     }
+ 
+diff --git a/setup/dialer_process/dialer/ECCPConn.class.php b/setup/dialer_process/dialer/ECCPConn.class.php
+index 9dd08e4..9460dca 100644
+--- a/setup/dialer_process/dialer/ECCPConn.class.php
++++ b/setup/dialer_process/dialer/ECCPConn.class.php
+@@ -1503,16 +1503,20 @@ class ECCPConn
+         $r = NULL;
+         $agentFields = $this->_parseAgent($sAgente);
+         if ($agentFields['type'] == 'Agent') {
++            // app_agent_pool (Asterisk 12+): Originate call to agent-login context
++            // The agent-login context runs AgentLogin() application
+             $this->_tuberia->AMIEventProcess_agregarIntentoLoginAgente($sAgente, $sExtension, $iTimeout);
+             $r = $this->_ami->Originate(
+-                $sExtension,        // channel
+-                NULL, NULL, NULL,   // extension, context, priority
+-                'AgentLogin',       // application
+-                $agentFields['number'],        // data
+-                NULL,
+-                $sAgente.' Login', // CallerID
++                $sExtension,                    // channel (SIP/1064)
++                $agentFields['number'],         // exten (agent number)
++                'agent-login',                  // context (runs AgentLogin app)
++                1,                              // priority
++                NULL,                           // application (use context instead)
++                NULL,                           // data
++                30000,                          // timeout in ms
++                $sAgente.' Login',              // CallerID
+                 NULL, NULL,
+-                TRUE,               // async
++                TRUE,                           // async
+                 'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente     // action-id
+                 );
+             if ($r['Response'] != 'Success') {
+@@ -1619,29 +1623,29 @@ class ECCPConn
+         // Canal que hizo el logoneo hacia la cola
+         $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+ 
+-        /* Ejecutar Agentlogoff. Esto asume que el agente está de la forma
+-         * Agent/9000. La actualización de las bases de datos de auditoría y
+-         * breaks se delega a los manejadores de eventos */
+         $agentFields = $this->_parseAgent($sAgente);
+         if ($agentFields['type'] == 'Agent') {
+-            $r = $this->_ami->Agentlogoff($agentFields['number']);
+-
+-            /* Si el agente todavía no ha introducido la clave, el Agentlogoff
+-             * anterior no tiene efecto, así que se manda a colgar el canal
+-             * directamente.
+-             */
+-            if (!is_null($infoAgente) && $infoAgente['estado_consola'] == 'logging') {
+-                $sCanalExt = $infoAgente['login_channel'];
+-                if (is_null($sCanalExt)) $sCanalExt = $infoAgente['extension'];
+-                if (!is_null($sCanalExt)) $this->_ami->Hangup($sCanalExt);
++            // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
++            // There is no Agentlogoff AMI command in app_agent_pool
++            $sCanalLogin = NULL;
++            if (!is_null($infoAgente)) {
++                $sCanalLogin = $infoAgente['login_channel'];
++                if (is_null($sCanalLogin)) {
++                    $sCanalLogin = $infoAgente['extension'];
++                }
++            }
++            if (!is_null($sCanalLogin)) {
++                $this->_ami->Hangup($sCanalLogin);
++            } else {
++                $this->_log->output('WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
+             }
+         } else {
+-            // Si hay cliente conectado, le cierro el canal.
+-            if (!is_null($infoAgente['clientchannel'])) {
++            // SIP/IAX2/PJSIP: Close client channel if connected
++            if (!is_null($infoAgente) && !is_null($infoAgente['clientchannel'])) {
+                 $this->_ami->Hangup($infoAgente['clientchannel']);
+             }
+ 
+-            // AMIEventProcess sabe de qué colas hay que quitar al agente
++            // Remove from all queues
+             $listaColas = $this->_tuberia->AMIEventProcess_listarTotalColasTrabajoAgente(array($sAgente));
+             foreach ($listaColas[$sAgente][0] as $cola) {
+                 $r = $this->_ami->QueueRemove($cola, $sAgente);
+diff --git a/setup/installer.php b/setup/installer.php
+index f711d8a..45910c8 100644
+--- a/setup/installer.php
++++ b/setup/installer.php
+@@ -77,7 +77,9 @@ if (file_exists($path_script_db))
+         "ADD COLUMN trunk varchar(20) NOT NULL");
+     crearColumnaSiNoExiste($pDB, 'call_center', 'agent',
+         'type',
+-        "ADD COLUMN type enum('Agent','SIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id");
++        "ADD COLUMN type enum('Agent','SIP','IAX2','PJSIP') DEFAULT 'Agent' NOT NULL AFTER id");
++    // Update existing enum to include PJSIP if column exists but enum is outdated
++    actualizarEnumAgentType($pDB);
+     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
+         'scheduled',
+         "ALTER TABLE calls ADD COLUMN scheduled BOOLEAN NOT NULL DEFAULT 0");
+@@ -163,6 +165,26 @@ EXISTE_COLUMNA;
+     }
+ }
+ 
++/**
++ * Update agent.type enum to include PJSIP if not already present
++ */
++function actualizarEnumAgentType($pDB)
++{
++    // Check current enum values
++    $sql = "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
++            WHERE TABLE_SCHEMA = 'call_center' AND TABLE_NAME = 'agent' AND COLUMN_NAME = 'type'";
++    $r = $pDB->getFirstRowQuery($sql, FALSE);
++    if (is_array($r) && !empty($r[0])) {
++        // If PJSIP is not in the enum, update it
++        if (strpos($r[0], 'PJSIP') === FALSE) {
++            fputs(STDERR, "INFO: Updating agent.type enum to include PJSIP\n");
++            $sql = "ALTER TABLE agent MODIFY COLUMN type enum('Agent','SIP','IAX2','PJSIP') DEFAULT 'Agent' NOT NULL";
++            $result = $pDB->genQuery($sql);
++            if (!$result) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
++        }
++    }
++}
++
+ function crearIndiceSiNoExiste($pDB, $sDatabase, $sTabla, $sIndice, $sIndiceDef)
+ {
+     $sPeticionSQL = <<<EXISTE_INDICE
+@@ -226,6 +248,19 @@ exten => _X.,n,Set(CDR(userfield)=audio:${CALLFILENAME}.${MIXMON_FORMAT})
+ exten => _X.,n(skiprecord),Dial(${AGENTCHANNEL},300,tw)
+ exten => h,1,Macro(hangupcall,)
+ 
++; app_agent_pool contexts for Asterisk 12+ (replaces chan_agent)
++[agent-login]
++; Called by Originate when agent logs in - runs AgentLogin application
++exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
++ same => n,AgentLogin(${EXTEN})
++ same => n,Hangup()
++
++[agent-connect]
++; Used by Queue() to connect callers to logged-in agents via AgentRequest
++exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
++ same => n,AgentRequest(${EXTEN})
++ same => n,Hangup()
++
+ ';
+         $contenido[] = $sFinalContenido;
+         file_put_contents($sArchivo, $contenido);
