@@ -705,4 +705,5 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     $oPaloConsola->desconectarTodo();
 }
 
+
 ?>

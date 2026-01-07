@@ -378,5 +378,4 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     } while ($bSSE && connection_status() == CONNECTION_NORMAL);
     $oPaloConsola->desconectarTodo();
 }
-
 ?>

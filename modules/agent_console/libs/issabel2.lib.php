@@ -247,7 +247,7 @@ function initSSE($bSSE) {
  */
 if (!function_exists('printflush')) {
 function printflush($s) {
-    echo $s;
+    print $s;
     while (ob_get_level() > 0) {
         ob_end_flush();
     }
@@ -261,13 +261,12 @@ function printflush($s) {
  * @param mixed $data Data to encode
  */
 if (!function_exists('jsonflush')) {
-function jsonflush($bSSE, $data) {
-    $json = json_encode($data);
-    if ($bSSE) {
-        printflush("data: $json\n\n");
-    } else {
-        printflush($json);
-    }
+function jsonflush($bSSE, $respuesta){
+    $json = new Services_JSON();
+    $r = $json->encode($respuesta);
+    if ($bSSE)
+        printflush("data: $r\n\n");
+    else printflush($r);
 }
 }
 
