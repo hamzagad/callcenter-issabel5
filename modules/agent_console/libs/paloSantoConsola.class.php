@@ -953,6 +953,9 @@ class PaloSantoConsola
             $respuestaResumen = $oECCP->getagentactivitysummary();
             $resumenColas = array();
 
+            // Get list of valid Call Center queues (incoming queues + campaign queues)
+            $colasCallCenter = $this->_obtenerColasCallCenter($oECCP);
+
             // Reunir los agentes involucrados
             $agentlist = array();
             foreach ($respuestaResumen->agents->agent as $xml_agent) {
@@ -966,7 +969,11 @@ class PaloSantoConsola
             foreach ($pertenenciaColas->agents->agent as $xml_queue) {
                 $colas = array();
                 foreach ($xml_queue->queues->queue as $xml_q) {
-                    $colas[] = (string)$xml_q;
+                    $sCola = (string)$xml_q;
+                    // Only include queues that are configured in Call Center module
+                    if (in_array($sCola, $colasCallCenter)) {
+                        $colas[] = $sCola;
+                    }
                 }
                 $agenteColas[(string)$xml_queue->agent_number] = $colas;
             }
@@ -1074,6 +1081,50 @@ class PaloSantoConsola
             $this->errMsg = '(internal) '.__METHOD__.': '.$e->getMessage();
             return NULL;
         }
+    }
+
+    /**
+     * Get all queues configured in Call Center module (incoming queues + campaign queues)
+     * Used to filter out PBX-only queues from agent monitoring reports
+     */
+    private function _obtenerColasCallCenter($oECCP)
+    {
+        $colasCallCenter = array();
+
+        // Get queues from incoming queue list (queue_call_entry table)
+        try {
+            $respuesta = $oECCP->getincomingqueuelist();
+            if (isset($respuesta->queues->queue)) {
+                foreach ($respuesta->queues->queue as $xml_queue) {
+                    $colasCallCenter[] = (string)$xml_queue->queue;
+                }
+            }
+        } catch (Exception $e) {
+            // Ignore errors, continue with campaigns
+        }
+
+        // Get queues from all campaigns (incoming and outgoing)
+        try {
+            $respuesta = $oECCP->getcampaignlist();
+            if (isset($respuesta->campaigns->campaign)) {
+                foreach ($respuesta->campaigns->campaign as $xml_campaign) {
+                    $sType = (string)$xml_campaign->type;
+                    $iId = (int)$xml_campaign->id;
+                    try {
+                        $infoResp = $oECCP->getcampaigninfo($sType, $iId);
+                        if (isset($infoResp->queue)) {
+                            $colasCallCenter[] = (string)$infoResp->queue;
+                        }
+                    } catch (Exception $e) {
+                        // Ignore individual campaign errors
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Ignore errors
+        }
+
+        return array_unique($colasCallCenter);
     }
 
     function leerListaCampanias()
