@@ -320,9 +320,7 @@ function manejarMonitoreo_loadPreviousLogEntries($module_name, $smarty, $sDirLoc
 function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantillas)
 {
     $respuesta = array();
-
-    ignore_user_abort(true);
-    set_time_limit(0);
+    setupSSESession();
 
     // Estado del lado del cliente
     $estadoHash = getParameter('clientstatehash');
@@ -336,14 +334,8 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     }
 
     // Modo a funcionar: Long-Polling, o Server-sent Events
-    $sModoEventos = getParameter('serverevents');
-    $bSSE = (!is_null($sModoEventos) && $sModoEventos);
-    if ($bSSE) {
-        Header('Content-Type: text/event-stream');
-        printflush("retry: 5000\n");
-    } else {
-        Header('Content-Type: application/json');
-    }
+    $bSSE = detectSSEMode();
+    initSSE($bSSE);
 
     // Verificar hash correcto
     if (!is_null($estadoHash) && $estadoHash != $_SESSION[$module_name]['estadoClienteHash']) {
@@ -887,31 +879,6 @@ function modificarReferenciasLibreriasJS($smarty)
     array_unshift($listaLibsJS_modulo, $sHandleBarsRef);
     $smarty->assign('HEADER_MODULES', implode("\n", $listaLibsJS_modulo));
     $smarty->assign('HEADER_LIBS_JQUERY', implode("\n", $listaLibsJS_framework));
-}
-
-function jsonflush($bSSE, $respuesta)
-{
-    $json = new Services_JSON();
-    $r = $json->encode($respuesta);
-    if ($bSSE)
-        printflush("data: $r\n\n");
-    else printflush($r);
-}
-
-function printflush($s)
-{
-    print $s;
-    ob_flush();
-    flush();
-}
-
-function generarEstadoHash($module_name, $estadoCliente)
-{
-    $estadoHash = md5(serialize($estadoCliente));
-    $_SESSION[$module_name]['estadoCliente'] = $estadoCliente;
-    $_SESSION[$module_name]['estadoClienteHash'] = $estadoHash;
-
-    return $estadoHash;
 }
 
 ?>

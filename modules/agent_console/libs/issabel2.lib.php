@@ -183,4 +183,106 @@ function existeSoporteTituloFramework()
     }
     return $bExisteSoporteTitulo;
 }
+
+/**
+ * SSE (Server-Sent Events) Helper Functions for PHP-FPM compatibility
+ * These functions handle output buffering and flushing required for SSE
+ * to work correctly with PHP-FPM's FastCGI protocol.
+ */
+
+/**
+ * Detect SSE mode from request parameter
+ * @return bool True if SSE mode requested
+ */
+if (!function_exists('detectSSEMode')) {
+function detectSSEMode() {
+    $sModoEventos = getParameter('serverevents');
+    return (!is_null($sModoEventos) && $sModoEventos);
+}
+}
+
+/**
+ * Setup long-polling/SSE session parameters
+ */
+if (!function_exists('setupSSESession')) {
+function setupSSESession() {
+    ignore_user_abort(true);
+    set_time_limit(0);
+}
+}
+
+/**
+ * Initialize SSE connection with PHP-FPM compatible settings
+ * @param bool $bSSE True for SSE mode, false for JSON polling
+ */
+if (!function_exists('initSSE')) {
+function initSSE($bSSE) {
+    if ($bSSE) {
+        // Clear all output buffers
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('Connection: keep-alive');
+
+        @ini_set('output_buffering', 'off');
+        @ini_set('zlib.output_compression', 0);
+        @ini_set('implicit_flush', 1);
+        ob_implicit_flush(1);
+
+        // 4KB padding to prime browser buffer
+        printflush(":" . str_repeat(' ', 4096) . "\n");
+        printflush("retry: 5000\n");
+    } else {
+        header('Content-Type: application/json');
+    }
+}
+}
+
+/**
+ * Print and flush output (PHP-FPM compatible)
+ * @param string $s Output string
+ */
+if (!function_exists('printflush')) {
+function printflush($s) {
+    echo $s;
+    while (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    flush();
+}
+}
+
+/**
+ * JSON encode and flush with optional SSE format
+ * @param bool $bSSE True for SSE format, false for raw JSON
+ * @param mixed $data Data to encode
+ */
+if (!function_exists('jsonflush')) {
+function jsonflush($bSSE, $data) {
+    $json = json_encode($data);
+    if ($bSSE) {
+        printflush("data: $json\n\n");
+    } else {
+        printflush($json);
+    }
+}
+}
+
+/**
+ * Generate and store state hash for incremental updates
+ * @param string $module_name Module identifier
+ * @param array $estadoCliente Client state array
+ * @return string MD5 hash of state
+ */
+if (!function_exists('generarEstadoHash')) {
+function generarEstadoHash($module_name, $estadoCliente) {
+    $estadoHash = md5(serialize($estadoCliente));
+    $_SESSION[$module_name]['estadoCliente'] = $estadoCliente;
+    $_SESSION[$module_name]['estadoClienteHash'] = $estadoHash;
+    return $estadoHash;
+}
+}
 ?>

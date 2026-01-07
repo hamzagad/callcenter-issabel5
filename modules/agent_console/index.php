@@ -1261,9 +1261,7 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     _debug(__FUNCTION__.' start');
 
     $respuesta = array();
-
-    ignore_user_abort(true);
-    set_time_limit(0);
+    setupSSESession();
 
     $sNombrePausa = NULL;
     $iDuracionLlamada = NULL;
@@ -1295,14 +1293,8 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     _debug(__FUNCTION__.' after sanitizing clientstate='.print_r($estadoCliente, TRUE));
 
     // Modo a funcionar: Long-Polling, o Server-sent Events
-    $sModoEventos = getParameter('serverevents');
-    $bSSE = (!is_null($sModoEventos) && $sModoEventos);
-    if ($bSSE) {
-        Header('Content-Type: text/event-stream');
-        printflush("retry: 5000\n");
-    } else {
-    	Header('Content-Type: application/json');
-    }
+    $bSSE = detectSSEMode();
+    initSSE($bSSE);
 
     _debug(__FUNCTION__.' using Server-sent Events: '.($bSSE ? 'YES' : 'NO'));
     _debug(__FUNCTION__.' server state for agent='.print_r($estado, TRUE));
@@ -1645,23 +1637,6 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
 
     } while($bSSE && !$bReinicioSesion && connection_status() == CONNECTION_NORMAL);
     $oPaloConsola->desconectarTodo();
-}
-
-function jsonflush($bSSE, $respuesta)
-{
-    $json = new Services_JSON();
-    $r = $json->encode($respuesta);
-    if ($bSSE)
-        printflush("data: $r\n\n");
-    else printflush($r);
-}
-
-function printflush($s)
-{
-    print $s;
-    ob_flush();
-    flush();
-    _debug('json: '.$s);
 }
 
 /*

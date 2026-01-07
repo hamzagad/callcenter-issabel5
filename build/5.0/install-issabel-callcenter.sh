@@ -43,6 +43,10 @@ mv CHANGELOG /usr/share/issabel/module_installer/callcenter/
 
 issabel-menumerge /usr/share/issabel/module_installer/callcenter/menu.xml
 
+# Install SSE Apache config for PHP-FPM compatibility
+cp /usr/share/issabel/module_installer/callcenter/setup/issabel-sse.conf /etc/httpd/conf.d/
+systemctl reload httpd 2>/dev/null
+
 mkdir -p /tmp/new_module/callcenter
 cp -r /usr/share/issabel/module_installer/callcenter/* /tmp/new_module/callcenter/
 chown -R asterisk.asterisk /tmp/new_module/callcenter
@@ -51,6 +55,7 @@ php /tmp/new_module/callcenter/setup/installer.php
 rm -rf /tmp/new_module
 
 # Be sure to set shell for user asterisk
+dnf install util-linux-user -y >/dev/null 2>&1
 chsh -s /bin/bash asterisk 2>&1 >/dev/null
 
 # Add dialer to startup scripts, and enable it by default

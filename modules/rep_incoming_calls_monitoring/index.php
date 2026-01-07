@@ -199,15 +199,6 @@ function agregarInformacionColaCampania($oPaloConsola, $sFechaHoy, $tuplaCampani
     }
 }
 
-function generarEstadoHash($module_name, $estadoCliente)
-{
-    $estadoHash = md5(serialize($estadoCliente));
-    $_SESSION[$module_name]['estadoCliente'] = $estadoCliente;
-    $_SESSION[$module_name]['estadoClienteHash'] = $estadoHash;
-
-    return $estadoHash;
-}
-
 function construirDatosJSON(&$estadoMonitor)
 {
     global $keylist;
@@ -225,9 +216,7 @@ function construirDatosJSON(&$estadoMonitor)
 function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola)
 {
     $respuesta = array();
-
-    ignore_user_abort(true);
-    set_time_limit(0);
+    setupSSESession();
 
     // Estado del lado del cliente
     $estadoHash = getParameter('clientstatehash');
@@ -241,14 +230,8 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     }
 
     // Modo a funcionar: Long-Polling, o Server-sent Events
-    $sModoEventos = getParameter('serverevents');
-    $bSSE = (!is_null($sModoEventos) && $sModoEventos);
-    if ($bSSE) {
-        Header('Content-Type: text/event-stream');
-        printflush("retry: 5000\n");
-    } else {
-        Header('Content-Type: application/json');
-    }
+    $bSSE = detectSSEMode();
+    initSSE($bSSE);
 
     // Verificar hash correcto
     if (!is_null($estadoHash) && $estadoHash != $_SESSION[$module_name]['estadoClienteHash']) {
@@ -394,22 +377,6 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
 
     } while ($bSSE && connection_status() == CONNECTION_NORMAL);
     $oPaloConsola->desconectarTodo();
-}
-
-function jsonflush($bSSE, $respuesta)
-{
-    $json = new Services_JSON();
-    $r = $json->encode($respuesta);
-    if ($bSSE)
-        printflush("data: $r\n\n");
-    else printflush($r);
-}
-
-function printflush($s)
-{
-    print $s;
-    ob_flush();
-    flush();
 }
 
 ?>
