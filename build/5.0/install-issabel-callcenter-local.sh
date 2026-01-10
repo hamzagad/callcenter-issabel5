@@ -34,17 +34,16 @@ chown asterisk.asterisk modules/* -R
 cp -prf modules/* /var/www/html/modules/
 
 # Install dialer
-mkdir -p /opt/issabel/
+mkdir -p /opt/issabel/dialer/
+chmod 755 /opt/issabel/dialer/
 cp -rf setup/dialer_process/dialer/ /opt/issabel/
 chmod +x /opt/issabel/dialer/dialerd
 
 # Install init script
-mkdir -p /etc/rc.d/init.d/
 cp -f setup/dialer_process/issabeldialer /etc/rc.d/init.d/
 chmod +x /etc/rc.d/init.d/issabeldialer
 
 # Install logrotate config
-mkdir -p /etc/logrotate.d/
 cp -f setup/issabeldialer.logrotate /etc/logrotate.d/issabeldialer
 
 # Install DNC script

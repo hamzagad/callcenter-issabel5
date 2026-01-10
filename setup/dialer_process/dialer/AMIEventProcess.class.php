@@ -494,8 +494,8 @@ class AMIEventProcess extends TuberiaProcess
         if (!is_null($llamada->agente)) {
             $a = $llamada->agente;
             $sAgente = $a->channel;
-            assert('$llamada->agente === $a');
-            assert('$llamada === $a->llamada');
+            assert($llamada->agente === $a);
+            assert($llamada === $a->llamada);
             $estadoCola[$sAgente] = $a->resumenSeguimientoLlamada();
         } elseif (in_array($llamada->status, array('Placing', 'Dialing', 'Ringing', 'OnQueue'))) {
             $llamadasPendientes[] = $llamada->resumenLlamada();

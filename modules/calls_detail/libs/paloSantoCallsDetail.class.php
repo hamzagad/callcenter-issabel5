@@ -26,7 +26,7 @@ class paloSantoCallsDetail
     private $_DB;   // Conexión a la base de datos
     var $errMsg;    // Último mensaje de error
 
-    function paloSantoCallsDetail(&$pDB)
+    function __construct(&$pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
         if (is_object($pDB)) {

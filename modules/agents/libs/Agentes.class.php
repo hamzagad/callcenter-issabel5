@@ -37,7 +37,7 @@ class Agentes
     private $_DB; // instancia de la clase paloDB
     var $errMsg;
 
-    function Agentes(&$pDB, $file = "/etc/asterisk/agents.conf")
+    function __construct(&$pDB, $file = "/etc/asterisk/agents.conf")
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
         if (is_object($pDB)) {
@@ -282,6 +282,7 @@ class Agentes
 
             // If agent wasn't found, add new section using template
             if (!$bModificado) {
+                $this->_ensureAgentDefaultsTemplate();
                 $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
                 $contenidoNuevo[] = "fullname={$agentName}\n";
             }
@@ -382,6 +383,9 @@ class Agentes
                 }
             }
         }
+
+        // Ensure [agent-defaults] template exists
+        $this->_ensureAgentDefaultsTemplate();
 
         // Build app_agent_pool section using template inheritance
         $nuevo_agente = "\n[{$agentId}](agent-defaults)\n";
@@ -513,6 +517,74 @@ class Agentes
         if ($currentAgentId !== NULL) {
             $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
         }
+    }
+
+    /**
+     * Ensure [agent-defaults] template exists in agents.conf
+     * This template defines common settings for all agents
+     */
+    private function _ensureAgentDefaultsTemplate()
+    {
+        $contenido = file($this->AGENT_FILE);
+        if (!is_array($contenido)) {
+            return FALSE;
+        }
+
+        // Check if template already exists
+        foreach ($contenido as $sLinea) {
+            if (preg_match('/^\[agent-defaults\]\(!\)/', trim($sLinea))) {
+                return TRUE; // Template already exists
+            }
+        }
+
+        // Template doesn't exist, create it after [general] section
+        $contenidoNuevo = array();
+        $bInsertado = FALSE;
+
+        foreach ($contenido as $sLinea) {
+            $contenidoNuevo[] = $sLinea;
+
+            // Insert template after [general] section content (before next section)
+            if (!$bInsertado && preg_match('/^\[general\]/', trim($sLinea))) {
+                // Find the end of [general] section comments
+                continue;
+            }
+
+            // If we haven't inserted yet and we hit a non-comment line after [general]
+            // or we hit another section, insert the template
+            if (!$bInsertado && preg_match('/^\[[^\]]+\]/', trim($sLinea)) && !preg_match('/^\[general\]/', trim($sLinea))) {
+                // Insert before this section
+                array_pop($contenidoNuevo); // Remove the section line we just added
+                $contenidoNuevo[] = "\n; Agent defaults template - inherited by all agents\n";
+                $contenidoNuevo[] = "[agent-defaults](!)\n";
+                $contenidoNuevo[] = "musiconhold=Silence\n";
+                $contenidoNuevo[] = "ackcall=no\n";
+                $contenidoNuevo[] = "autologoff=0\n";
+                $contenidoNuevo[] = "wrapuptime=0\n";
+                $contenidoNuevo[] = "\n";
+                $contenidoNuevo[] = $sLinea; // Add back the section line
+                $bInsertado = TRUE;
+            }
+        }
+
+        // If no other section found, append at end
+        if (!$bInsertado) {
+            $contenidoNuevo[] = "\n; Agent defaults template - inherited by all agents\n";
+            $contenidoNuevo[] = "[agent-defaults](!)\n";
+            $contenidoNuevo[] = "musiconhold=Silence\n";
+            $contenidoNuevo[] = "ackcall=no\n";
+            $contenidoNuevo[] = "autologoff=0\n";
+            $contenidoNuevo[] = "wrapuptime=0\n";
+        }
+
+        $hArchivo = fopen($this->AGENT_FILE, 'w');
+        if (!$hArchivo) {
+            return FALSE;
+        }
+        foreach ($contenidoNuevo as $sLinea) fwrite($hArchivo, $sLinea);
+        fclose($hArchivo);
+
+        return TRUE;
     }
 
     private function _get_AGI_AsteriskManager()

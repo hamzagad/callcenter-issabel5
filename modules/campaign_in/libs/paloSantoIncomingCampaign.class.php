@@ -29,7 +29,7 @@ class paloSantoIncomingCampaign
     var $_DB; // instancia de la clase paloDB
     var $errMsg;
 
-    function paloSantoIncomingCampaign(&$pDB)
+    function __construct(&$pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
         if (is_object($pDB)) {
