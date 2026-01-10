@@ -235,32 +235,63 @@ class Agentes
             }
         }
 
-        // Leer el archivo y buscar la línea del agente a modificar
+        // Update agent in agents.conf (app_agent_pool format)
         $bExito = TRUE;
         $contenido = file($this->AGENT_FILE);
         if (!is_array($contenido)) {
             $bExito = FALSE;
             $this->errMsg = '(internal) Unable to read agent file';
         } else {
-            $sLineaAgente = "agent => {$agent[0]},{$agent[1]},{$agent[2]}\n";
+            $agentId = $agent[0];
+            $agentName = $agent[2];
             $bModificado = FALSE;
-            for ($i = 0; $i < count($contenido); $i++) {
-                $regs = NULL;
-                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),/', $contenido[$i], $regs) &&
-                    $regs[1] == $agent[0]) {
-                    // Se ha encontrado la línea del agente modificado
-                    $contenido[$i] = $sLineaAgente;
+            $bEnSeccionAgente = FALSE;
+            $contenidoNuevo = array();
+
+            foreach ($contenido as $sLinea) {
+                // Check if this is the start of the agent's section (with or without template)
+                if (preg_match('/^\[' . preg_quote($agentId, '/') . '\](\(agent-defaults\))?/', trim($sLinea))) {
+                    $bEnSeccionAgente = TRUE;
                     $bModificado = TRUE;
+                    // Write updated section using template
+                    $contenidoNuevo[] = "[{$agentId}](agent-defaults)\n";
+                    $contenidoNuevo[] = "fullname={$agentName}\n";
+                    continue;
                 }
+
+                // If we're in the agent section, skip until we hit a new section
+                if ($bEnSeccionAgente) {
+                    if (preg_match('/^\[[^\]]+\]/', trim($sLinea))) {
+                        $bEnSeccionAgente = FALSE;
+                        $contenidoNuevo[] = $sLinea;
+                    }
+                    continue;
+                }
+
+                // Also handle old chan_agent format
+                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($agentId, '/') . ',/', $sLinea)) {
+                    // Replace old format with new app_agent_pool format using template
+                    $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
+                    $contenidoNuevo[] = "fullname={$agentName}\n";
+                    $bModificado = TRUE;
+                    continue;
+                }
+
+                $contenidoNuevo[] = $sLinea;
             }
-            if (!$bModificado) $contenido[] = $sLineaAgente;
+
+            // If agent wasn't found, add new section using template
+            if (!$bModificado) {
+                $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
+                $contenidoNuevo[] = "fullname={$agentName}\n";
+            }
 
             $hArchivo = fopen($this->AGENT_FILE, 'w');
             if (!$hArchivo) {
                 $bExito = FALSE;
                 $this->errMsg = '(internal) Unable to write agent file';
             } else {
-                foreach ($contenido as $sLinea) fwrite($hArchivo, $sLinea);
+                foreach ($contenidoNuevo as $sLinea) fwrite($hArchivo, $sLinea);
                 fclose($hArchivo);
             }
         }
@@ -311,13 +342,20 @@ class Agentes
     /**
      * Procedimiento para agregar un agente estático al archivo agents.conf y
      * reiniciar Asterisk para que lea los cambios de agentes.
-     * 
+     *
+     * Uses app_agent_pool format (Asterisk 12+):
+     * [agent-id]
+     * fullname=Agent Name
+     * ackcall=yes
+     * autologoff=60
+     * wrapuptime=2000
+     *
      * @param   array   $agent  Información del agente. Se recogen los valores:
      *                  0   =>  Número del agente
-     *                  1   =>  Contraseña telefónica del agente
+     *                  1   =>  Contraseña telefónica del agente (ignored in app_agent_pool)
      *                  2   =>  Nombre descriptivo del agente
      *                  Otras claves o posiciones se ignoran.
-     * 
+     *
      * @return  VERDADERO si se puede escribir el archivo y reiniciar Asterisk,
      *          FALSO si ocurre algún error.
      */
@@ -328,31 +366,43 @@ class Agentes
             return FALSE;
         }
 
-        // GRABAR EN EL ARCHIVO
-        $archivo=$this->AGENT_FILE;
-        $tamanio_linea = 4096;
-        $open = fopen ($archivo,"a+");
+        $archivo = $this->AGENT_FILE;
+        $agentId = $agent[0];
+        $agentName = $agent[2];
 
-        $nuevo_agente="agent => {$agent[0]},{$agent[1]},{$agent[2]}\n";
-        // vas leyendo linea a linea , hasta llegar al final del archivo en
-        //donde  fgets() retorna false
-
-        while ($sLinea = fgets($open,$tamanio_linea))  // [0]
-        {
-            $regs = NULL;
-            if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),/', $sLinea, $regs) &&
-                $regs[1] == $agent[0]) {
-                $this->errMsg = "Agent number already exists.";
-                fclose($open);
-                return false;
+        // Check if agent already exists in app_agent_pool format
+        $contenido = file($archivo);
+        if (is_array($contenido)) {
+            foreach ($contenido as $sLinea) {
+                // Check for [agent-id] section or old format
+                if (preg_match('/^\[' . preg_quote($agentId, '/') . '\]/', trim($sLinea)) ||
+                    preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($agentId, '/') . ',/', $sLinea)) {
+                    $this->errMsg = "Agent number already exists.";
+                    return FALSE;
+                }
             }
         }
 
-        $escribir = fwrite ( $open, $nuevo_agente);
+        // Build app_agent_pool section using template inheritance
+        $nuevo_agente = "\n[{$agentId}](agent-defaults)\n";
+        $nuevo_agente .= "fullname={$agentName}\n";
+
+        // Append to file
+        $open = fopen($archivo, "a");
+        if (!$open) {
+            $this->errMsg = '(internal) Unable to open agent file for writing';
+            return FALSE;
+        }
+        fwrite($open, $nuevo_agente);
         fclose($open);
+
         return $this->_reloadAsterisk();
     }
 
+    /**
+     * Delete agent from agents.conf (app_agent_pool format)
+     * Removes the entire [agent-id] section and all its settings
+     */
     function deleteAgentFile($id_agent)
     {
         if (!preg_match('/^[[:digit:]]+$/', $id_agent)) {
@@ -360,7 +410,6 @@ class Agentes
             return FALSE;
         }
 
-        // Leer el archivo y buscar la línea del agente a eliminar
         $bExito = TRUE;
         $contenido = file($this->AGENT_FILE);
         if (!is_array($contenido)) {
@@ -369,15 +418,29 @@ class Agentes
         } else {
             $bModificado = FALSE;
             $contenidoNuevo = array();
+            $bEnSeccionAgente = FALSE;
 
-            // Filtrar las líneas, y setear bandera si se eliminó alguna
             foreach ($contenido as $sLinea) {
-                $regs = NULL;
-                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),/', $sLinea, $regs) &&
-                    $regs[1] == $id_agent) {
-                    // Se ha encontrado la línea del agente eliminado
+                // Check if this is the start of the agent's section [agent-id]
+                if (preg_match('/^\[' . preg_quote($id_agent, '/') . '\]/', trim($sLinea))) {
+                    $bEnSeccionAgente = TRUE;
                     $bModificado = TRUE;
-                } else {
+                    continue; // Skip this line
+                }
+
+                // Check if we've reached a new section (end of agent's section)
+                if ($bEnSeccionAgente && preg_match('/^\[[^\]]+\]/', trim($sLinea))) {
+                    $bEnSeccionAgente = FALSE;
+                }
+
+                // Also handle old chan_agent format: agent => number,password,name
+                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($id_agent, '/') . ',/', $sLinea)) {
+                    $bModificado = TRUE;
+                    continue; // Skip this line
+                }
+
+                // Keep lines that are not part of the deleted agent's section
+                if (!$bEnSeccionAgente) {
                     $contenidoNuevo[] = $sLinea;
                 }
             }
@@ -397,19 +460,58 @@ class Agentes
         return $this->_reloadAsterisk();
     }
 
+    /**
+     * Read agents from agents.conf - supports both app_agent_pool format and legacy chan_agent format
+     */
     private function _read_agents()
     {
         $contenido = file($this->AGENT_FILE);
         if (!is_array($contenido)) {
-            $bExito = FALSE;
             $this->errMsg = '(internal) Unable to read agent file';
-        } else {
-            $this->arrAgents = array();
-            foreach ($contenido as $sLinea) {
-                if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*([[:digit:]]+),([[:digit:]]+),(.*)/', trim($sLinea), $regs)) {
-                    $this->arrAgents[$regs[1]] = array($regs[1], $regs[2], $regs[3]);
+            return;
+        }
+
+        $this->arrAgents = array();
+        $currentAgentId = NULL;
+        $currentAgentName = '';
+
+        foreach ($contenido as $sLinea) {
+            $sLinea = trim($sLinea);
+
+            // app_agent_pool format: [agent-id] or [agent-id](template) section
+            if (preg_match('/^\[([0-9]+)\](\(agent-defaults\))?$/', $sLinea, $regs)) {
+                // Save previous agent if exists
+                if ($currentAgentId !== NULL) {
+                    $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
                 }
+                $currentAgentId = $regs[1];
+                $currentAgentName = '';
+                continue;
             }
+
+            // Parse fullname within section
+            if ($currentAgentId !== NULL && preg_match('/^fullname\s*=\s*(.*)$/', $sLinea, $regs)) {
+                $currentAgentName = $regs[1];
+                continue;
+            }
+
+            // Check for new section (non-agent) - save current agent and reset
+            if ($currentAgentId !== NULL && preg_match('/^\[[^\]]+\]$/', $sLinea)) {
+                $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
+                $currentAgentId = NULL;
+                $currentAgentName = '';
+                continue;
+            }
+
+            // Legacy chan_agent format: agent => number,password,name
+            if (preg_match('/^agent\s*=>\s*([0-9]+),([^,]*),(.*)$/', $sLinea, $regs)) {
+                $this->arrAgents[$regs[1]] = array($regs[1], $regs[2], $regs[3]);
+            }
+        }
+
+        // Don't forget the last agent if file doesn't end with another section
+        if ($currentAgentId !== NULL) {
+            $this->arrAgents[$currentAgentId] = array($currentAgentId, '', $currentAgentName);
         }
     }
 
@@ -427,14 +529,17 @@ class Agentes
         }
     }
 
+    /**
+     * Reload Asterisk app_agent_pool module after agents.conf changes
+     */
     private function _reloadAsterisk()
     {
         $astman = $this->_get_AGI_AsteriskManager();
         if (is_null($astman)) {
             return FALSE;
         } else {
-            // TODO: verify whether reload actually succeeded
-            $strReload = $astman->Command("module reload chan_agent.so");
+            // Reload app_agent_pool module (Asterisk 12+ replacement for chan_agent)
+            $strReload = $astman->Command("module reload app_agent_pool.so");
             $astman->disconnect();
             return TRUE;
         }

@@ -96,7 +96,7 @@ class AMIEventProcess extends TuberiaProcess
 
         // Registro de manejadores de eventos desde ECCPWorkerProcess
         foreach (array('quitarBreakAgente',
-            'llamadaSilenciada', 'llamadaSinSilencio') as $k)
+            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
         foreach (array('agregarIntentoLoginAgente', 'infoSeguimientoAgente',
             'reportarInfoLlamadaAtendida', 'reportarInfoLlamadasCampania',
@@ -326,14 +326,21 @@ class AMIEventProcess extends TuberiaProcess
 
     private function _infoSeguimientoAgentesCola($queue, $agentsexclude = array())
     {
-        $is = array();
+        $is_online = array();
+        $is_offline = array();
         foreach ($this->_listaAgentes as $a) {
             if (!in_array($a->channel, $agentsexclude) &&
                 (in_array($queue, $a->colas_actuales) || in_array($queue, $a->colas_dinamicas)) ) {
-                $is[$a->channel] = $a->resumenSeguimiento();
+                // Separate logged-out agents to display them at the bottom
+                if ($a->estado_consola == 'logged-out') {
+                    $is_offline[$a->channel] = $a->resumenSeguimiento();
+                } else {
+                    $is_online[$a->channel] = $a->resumenSeguimiento();
+                }
             }
         }
-        return $is;
+        // Return online agents first, then offline agents at the bottom
+        return array_merge($is_online, $is_offline);
     }
 
     // Listar todas las colas de trabajo (las estáticas y dinámicas) para los agentes indicados
@@ -1026,6 +1033,30 @@ class AMIEventProcess extends TuberiaProcess
         $a->llamada->borrarCanalesSilenciados();
     }
 
+    /**
+     * Finalize a call after a blind transfer. This releases the agent
+     * since the caller has been redirected to another destination.
+     */
+    private function _finalizarTransferencia($sAgente)
+    {
+        $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
+        if (is_null($a)) {
+            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente ".$sAgente);
+            return;
+        }
+        if (is_null($a->llamada)) {
+            $this->_log->output("WARN: ".__METHOD__." agente ".$sAgente." no tiene llamada activa");
+            return;
+        }
+
+        $this->_log->output("INFO: ".__METHOD__." finalizando seguimiento de llamada transferida para agente ".$sAgente);
+
+        // Finalize call tracking - this releases the agent
+        $a->llamada->llamadaFinalizaSeguimiento(
+            microtime(TRUE),
+            $this->_config['dialer']['llamada_corta']);
+    }
+
     private function _quitarSilencio($llamada)
     {
         if (count($llamada->mutedchannels) > 0) {
@@ -1541,6 +1572,15 @@ class AMIEventProcess extends TuberiaProcess
         call_user_func_array(array($this, '_llamadaSinSilencio'), $datos);
     }
 
+    public function msg_finalizarTransferencia($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+        }
+        call_user_func_array(array($this, '_finalizarTransferencia'), $datos);
+    }
+
     public function msg_abortarNuevasLlamadasMarcar($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
@@ -1558,7 +1598,10 @@ class AMIEventProcess extends TuberiaProcess
         	if ($a->estado_consola != 'logged-out') {
                 if (!is_null($this->_ami)) {
                 	if ($a->type == 'Agent') {
-                        $this->_ami->Agentlogoff($a->number);
+                        // app_agent_pool: Hangup the AgentLogin channel to logout
+                        if (!is_null($a->login_channel)) {
+                            $this->_ami->Hangup($a->login_channel);
+                        }
                 	} else {
                 	    foreach ($a->colas_actuales as $q) $this->_ami->QueueRemove($q, $a->channel);
                     }
@@ -1847,6 +1890,11 @@ Uniqueid: 1429642067.241008
 
         $sAgente = $params['Location'];
 
+        // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
+        if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
+            $sAgente = "Agent/".$regs[1];
+        }
+
         /* tomado de msg_agentLogin */
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
 
@@ -1902,11 +1950,18 @@ Uniqueid: 1429642067.241008
 
         $this->_queueshadow->msg_QueueMemberRemoved($params);
 
-        $a = $this->_listaAgentes->buscar('agentchannel', $params['Location']);
+        $sAgente = $params['Location'];
+
+        // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
+        if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
+            $sAgente = "Agent/".$regs[1];
+        }
+
+        $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
 
         if (is_null($a)) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin({$params['Location']}) no iniciado por programa, no se hace nada.");
+                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin({$sAgente}) no iniciado por programa, no se hace nada.");
                 $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogoff");
             }
             return FALSE;
@@ -2024,13 +2079,23 @@ Uniqueid: 1429642067.241008
 
         $bunique = $params['BridgeUniqueid'];
 
-        if(preg_match("|Local/(.*)@agents-.*|",$params['Channel'],$matches)) { 
+        // Handle Local/XXXX@agents;N channels from app_agent_pool
+        // Convert to Agent/XXXX format for agent lookup, but keep track of actual channel
+        $isLocalAgentChannel = false;
+        $localAgentNumber = null;
+        if(preg_match("|Local/(\d+)@agents[;-].*|",$params['Channel'],$matches)) {
+            $localAgentNumber = $matches[1];
+            $isLocalAgentChannel = true;
             $params['Channel']='Agent/'.$matches[1];
         }
 
         if($params['BridgeNumChannels']==1) {
             $saved_bridge_unique[$bunique]  = $params['Uniqueid'];
             $saved_bridge_channel[$bunique] = $params['Channel'];
+            // Save flag indicating this was a Local agent channel
+            if ($isLocalAgentChannel) {
+                $saved_bridge_channel[$bunique.'_local'] = true;
+            }
             $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter $bunique number channels 1 saving data");
         } else if ($params['BridgeNumChannels']==2) {
             $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter $bunique number channels 2, constructing link channel ".$params['Channel']);
@@ -2229,10 +2294,23 @@ Uniqueid: 1429642067.241008
         // Se asume que el posible canal de agente es de la forma TECH/dddd
         // En particular, el regexp a continuación NO MATCHEA Local/xxx@from-internal
         $regexp_channel = '|^([[:alnum:]]+/(\d+))(\-\w+)?$|';
+        // For app_agent_pool: match Local/XXXX@agents pattern
+        $regexp_local_agent = '|^Local/(\d+)@agents(;\d)?$|';
+
         $r1 = NULL;
-        if (preg_match($regexp_channel, $params['Channel1'], $regs)) $r1 = $regs;
+        if (preg_match($regexp_channel, $params['Channel1'], $regs)) {
+            $r1 = $regs;
+        } elseif (preg_match($regexp_local_agent, $params['Channel1'], $regs)) {
+            // Convert Local/1001@agents to Agent/1001 format for lookup
+            $r1 = array($params['Channel1'], 'Agent/'.$regs[1], $regs[1]);
+        }
         $r2 = NULL;
-        if (preg_match($regexp_channel, $params['Channel2'], $regs)) $r2 = $regs;
+        if (preg_match($regexp_channel, $params['Channel2'], $regs)) {
+            $r2 = $regs;
+        } elseif (preg_match($regexp_local_agent, $params['Channel2'], $regs)) {
+            // Convert Local/1001@agents to Agent/1001 format for lookup
+            $r2 = array($params['Channel2'], 'Agent/'.$regs[1], $regs[1]);
+        }
 
         // Casos fáciles de decidir
         if (is_null($r1) && is_null($r2)) return array(NULL, NULL, NULL, NULL);
@@ -2374,7 +2452,23 @@ Uniqueid: 1429642067.241008
             }
             return FALSE;
         }
-        $a->completarLoginAgente($this->_ami);
+        // Capture the login channel from the Agentlogin event (app_agent_pool)
+        // This is the actual channel running AgentLogin (e.g., SIP/101-00000xxx)
+        $sLoginChannel = isset($params['Channel']) ? $params['Channel'] : NULL;
+        $a->completarLoginAgente($this->_ami, $sLoginChannel);
+
+        // For Agent type: emit queue membership event immediately after login
+        // This ensures the agent appears in campaign monitoring right away
+        // Agent may already be in queues (sessions persist across dialer restarts)
+        if ($a->type == 'Agent') {
+            $colas_act = $a->colas_actuales;
+            $this->_log->output('INFO: agente '.$sAgente.' login - colas_actuales=['.implode(' ', $colas_act).']');
+
+            // Emit queue membership event to notify campaign monitoring that agent is online
+            if (count($colas_act) > 0) {
+                $a->nuevaMembresiaCola();
+            }
+        }
     }
 
     public function msg_Agentlogoff($sEvent, $params, $sServer, $iPort)
@@ -2538,11 +2632,9 @@ Uniqueid: 1429642067.241008
         $this->_tmp_actionid_queuestatus = NULL;
         foreach ($this->_tmp_estadoAgenteCola as $sAgente => $estadoCola) {
 
-            if(preg_match("|^Local/[^@]*@agents/n|",$sAgente)) {
-                $partes = preg_split("|/|",$sAgente);
-                $partes = preg_split("|@|",$partes[1]);
-
-                $sAgente = "Agent/".$partes[0];
+            // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
+            if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
+                $sAgente = "Agent/".$regs[1];
             }
 
             $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
@@ -2558,7 +2650,12 @@ Uniqueid: 1429642067.241008
         /* Verificación de agentes que estén logoneados y deban tener colas,
          * pero no aparecen en la enumeración de miembros de colas. */
         foreach ($this->_listaAgentes as $a) {
-            if (!isset($this->_tmp_estadoAgenteCola[$a->channel])) {
+            // For Agent type, interface is Local/XXXX@agents, for others use channel directly
+            $sInterface = $a->channel;
+            if ($a->type == 'Agent' && preg_match('|^Agent/(\d+)$|', $a->channel, $regs)) {
+                $sInterface = 'Local/'.$regs[1].'@agents';
+            }
+            if (!isset($this->_tmp_estadoAgenteCola[$sInterface])) {
                 $this->_evaluarPertenenciaColas($a, array());
             }
         }
@@ -2607,10 +2704,22 @@ Uniqueid: 1429642067.241008
                     $this->_log->output('INFO: agente '.$sAgente.' debe ser '.
                         'agregado a las colas ['.implode(' ', array_keys($diffcolas[0])).']');
                     foreach ($diffcolas[0] as $q => $p) {
-                        $this->_ami->asyncQueueAdd(
-                            array($this, '_cb_QueueAdd'),
-                            NULL,
-                            $q, $sAgente, $p, $a->name, $bAgentePausado);
+                        // For app_agent_pool (Asterisk 12+): Agent type uses Local channel
+                        // with StateInterface for device state tracking
+                        if ($a->type == 'Agent') {
+                            $interface = 'Local/'.$a->number.'@agents';
+                            $stateInterface = 'Agent:'.$a->number;
+                            $this->_ami->asyncQueueAdd(
+                                array($this, '_cb_QueueAdd'),
+                                NULL,
+                                $q, $interface, $p, $a->name, $bAgentePausado, $stateInterface);
+                        } else {
+                            // SIP/IAX2/PJSIP: direct channel interface
+                            $this->_ami->asyncQueueAdd(
+                                array($this, '_cb_QueueAdd'),
+                                NULL,
+                                $q, $sAgente, $p, $a->name, $bAgentePausado);
+                        }
                     }
                 }
 
@@ -2619,10 +2728,19 @@ Uniqueid: 1429642067.241008
                     $this->_log->output('INFO: agente '.$sAgente.' debe ser '.
                         'quitado de las colas ['.implode(' ', $diffcolas[1]).']');
                     foreach ($diffcolas[1] as $q) {
-                        $this->_ami->asyncQueueRemove(
-                            array($this, '_cb_QueueRemove'),
-                            NULL,
-                            $q, $sAgente);
+                        // For app_agent_pool: Agent type uses Local channel interface
+                        if ($a->type == 'Agent') {
+                            $interface = 'Local/'.$a->number.'@agents';
+                            $this->_ami->asyncQueueRemove(
+                                array($this, '_cb_QueueRemove'),
+                                NULL,
+                                $q, $interface);
+                        } else {
+                            $this->_ami->asyncQueueRemove(
+                                array($this, '_cb_QueueRemove'),
+                                NULL,
+                                $q, $sAgente);
+                        }
                     }
                 }
             }
@@ -2673,13 +2791,20 @@ Uniqueid: 1429642067.241008
 
         $this->_queueshadow->msg_QueueMemberStatus($params);
 
-        $a = $this->_listaAgentes->buscar('agentchannel', $params['Location']);
+        $sAgente = $params['Location'];
+
+        // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
+        if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
+            $sAgente = "Agent/".$regs[1];
+        }
+
+        $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (!is_null($a)) {
             // TODO: existe $params['Paused'] que indica si está en pausa
             $a->actualizarEstadoEnCola($params['Queue'], $params['Status']);
         } else {
             if ($this->DEBUG) {
-                $this->_log->output('WARN: agente '.$params['Location'].' no es un agente registrado en el callcenter, se ignora');
+                $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora');
             }
         }
     }
@@ -2757,7 +2882,7 @@ Uniqueid: 1429642067.241008
 
         $this->_tmp_estadoLoginAgente[$params['Agent']] = array(
             'Status'        =>  $params['Status'],
-            'TalkingToChan' =>  $params['TalkingToChan'],
+            'TalkingToChan' =>  $params['TalkingToChan'] ?? '',
         );
     }
 

@@ -288,6 +288,35 @@ class PaloSantoConsola
     }
 
     /**
+     * Authenticate agent by number and password (for Agent type login)
+     *
+     * @param   string  $sAgentNumber   Agent number (e.g., "1001")
+     * @param   string  $sPassword      Agent password
+     *
+     * @return  bool    TRUE if authentication succeeds, FALSE otherwise
+     */
+    function autenticarAgente($sAgentNumber, $sPassword)
+    {
+        $oDB = $this->_obtenerConexion('call_center');
+
+        $sPeticion = "SELECT count(*) as cont
+                  FROM agent
+                  WHERE number = ?
+                  AND password = ?
+                  AND type = 'Agent'
+                  AND estatus = 'A'";
+        $recordset = $oDB->fetchTable($sPeticion, TRUE, array($sAgentNumber, $sPassword));
+        if (!is_array($recordset)) die('(internal) Cannot execute query - '.$oDB->errMsg);
+
+        if($recordset[0]['cont'] == 1){
+            return true;
+        } else {
+            $this->errMsg = "Wrong password.";
+            return false;
+        }
+    }
+
+    /**
      * Método para iniciar el login del agente con la extensión y el número de
      * agente que se indican.
      *
@@ -1186,7 +1215,7 @@ class PaloSantoConsola
                         $reporte['agents'][$sAgente] = $this->_traducirEstadoAgente($xml_agent);
                         if (isset($reporte['agents'][$sAgente]['callnumber'])) $iNumLlamadasAtendidas++;
                     }
-                    ksort($reporte['agents']);
+                    // Don't sort - preserve order from dialer (online first, offline last)
                     break;
                 case 'activecalls':
                     foreach ($xml_node->activecall as $xml_activecall) {

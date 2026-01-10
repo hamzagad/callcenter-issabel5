@@ -85,10 +85,9 @@ function _moduleContent(&$smarty, $module_name)
         }
     }
 
+    // Agent login is now supported on Asterisk 12+ via app_agent_pool
+    // No longer need to force callback-only mode
     $onlyCallback=0;
-    if($asteriskVersion[0]>11) {
-        $onlyCallback=1;
-    }
     $smarty->assign('ONLY_CALLBACK', $onlyCallback);
 
     _debug("module entry: ".
@@ -320,10 +319,12 @@ function manejarLogin_doLogin()
         $sPasswordCallback = getParameter('pass_callback');
         $regs = NULL;
         $sExtension = (preg_match('|^(\w+)/(\d+)$|', $sAgente, $regs)) ? $regs[2]: NULL;
+        $sAgentPassword = NULL;
     } else {
         $sAgente = getParameter('agent');
         $sExtension = getParameter('ext');
         $sPasswordCallback = NULL;
+        $sAgentPassword = getParameter('pass_agent');
     }
 
     $respuesta = array(
@@ -347,14 +348,31 @@ function manejarLogin_doLogin()
         }
     }
 
+    // Verify agent password for non-callback login
+    if ($bContinuar && !$bCallback) {
+        // Extract agent number from "Agent/XXXX" format
+        $sAgentNumber = preg_match('|^Agent/(\d+)$|', $sAgente, $regs) ? $regs[1] : $sAgente;
+        if (!$oPaloConsola->autenticarAgente($sAgentNumber, $sAgentPassword)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Invalid agent password');
+        }
+    }
+
     // Verificar si el número de agente no está ya ocupado por otra extensión
     if ($bContinuar) {
         $oPaloConsola->desconectarTodo();
         $oPaloConsola = new PaloSantoConsola($sAgente);
 
-        $estado = (!$bCallback || $oPaloConsola->autenticar($sAgente, $sPasswordCallback))
-            ? $oPaloConsola->estadoAgenteLogoneado($sExtension)
-            : array('estadofinal' => 'error');
+        // For Agent login, skip the callback authentication (already verified above)
+        if ($bCallback) {
+            $estado = $oPaloConsola->autenticar($sAgente, $sPasswordCallback)
+                ? $oPaloConsola->estadoAgenteLogoneado($sExtension)
+                : array('estadofinal' => 'error');
+        } else {
+            // Agent login - password already verified, proceed directly
+            $estado = $oPaloConsola->estadoAgenteLogoneado($sExtension);
+        }
         switch ($estado['estadofinal']) {
         case 'error':
         case 'mismatch':
@@ -1090,14 +1108,6 @@ function manejarSesionActiva_unbreak($module_name, $smarty, $sDirLocalPlantillas
         $respuesta['action'] = 'error';
         $respuesta['message'] = _tr('Error while stopping break').' - '.$oPaloConsola->errMsg;
     }
-
-    $agent = $_SESSION['callcenter']['agente'];
-    $number = $_SESSION['callcenter']['extension'];
-
-    // Construye el comando
-    $command = "php modules/$module_name/libs/reactivateAgent.php $agent $number";
-
-    exec($command);
 
     $json = new Services_JSON();
     Header('Content-Type: application/json');

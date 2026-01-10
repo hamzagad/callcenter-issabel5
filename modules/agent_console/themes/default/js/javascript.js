@@ -48,6 +48,8 @@ $(document).ready(function() {
         $('#input_extension_callback').hide();
         $('#label_password_callback').hide();
         $('#input_password_callback').hide();
+        // Show agent password field for Agent login mode
+        $('#row_agent_password').show();
     } else {
         $('#input_callback').prop('checked', true);
 
@@ -56,7 +58,26 @@ $(document).ready(function() {
 	$('#label_extension').hide();
 	$('#label_agent_user').hide();
 	$('#callbackcheck').hide();
+	// Hide agent password field for callback mode
+	$('#row_agent_password').hide();
     }
+
+    // Allow Enter key to submit login from password fields
+    $('#input_agent_password, #input_password_callback').keypress(function(e) {
+        if (e.which == 13) {
+            e.preventDefault();
+            do_login();
+        }
+    });
+
+    // Prevent form submission on Enter in transfer field, trigger transfer instead
+    $('#transfer_extension').keypress(function(e) {
+        if (e.which == 13) {
+            e.preventDefault();
+            do_transfer();
+            $('#issabel-callcenter-seleccion-transfer').dialog('close');
+        }
+    });
 
     $('#btn_hangup').button();
     $('#btn_togglebreak').button();
@@ -178,6 +199,7 @@ $(document).ready(function() {
 		    $('#input_agent_user').hide();
 		    $('#label_extension').hide();
 		    $('#label_agent_user').hide();
+		    $('#row_agent_password').hide();
 
 		    $('#label_extension_callback').show();
 		    $('#input_extension_callback').show();
@@ -189,6 +211,7 @@ $(document).ready(function() {
 		    $('#input_agent_user').show();
 		    $('#label_extension').show();
 		    $('#label_agent_user').show();
+		    $('#row_agent_password').show();
 
 		    $('#label_extension_callback').hide();
 		    $('#input_extension_callback').hide();
@@ -370,6 +393,7 @@ function do_login()
         ext:		$('#input_extension').val(),
         ext_callback: 	$('#input_extension_callback').val(),
         pass_callback: 	$('#input_password_callback').val(),
+        pass_agent:	$('#input_agent_password').val(),
         callback:	$('#input_callback').is(':checked')
 	},
 	function(respuesta) {

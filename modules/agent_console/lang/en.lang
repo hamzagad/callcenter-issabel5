@@ -61,6 +61,7 @@ $arrLangModule = array(
 'Hangup' => 'Hangup',
 'Hold' => 'Hold',
 'Invalid agent number' => 'Invalid agent number',
+'Invalid agent password' => 'Invalid agent password',
 'Invalid extension number' => 'Invalid extension number',
 'Invalid or incomplete form data' => 'Invalid or incomplete form data',
 'Invalid or incomplete schedule' => 'Invalid or incomplete schedule',

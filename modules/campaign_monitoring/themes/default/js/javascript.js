@@ -408,6 +408,10 @@ $(document).ready(function() {
 				  }));
 				  agentColor(agente.status, agente.agent);
 				}
+			// Re-sort agents after adding: offline agents at bottom
+			if (respuesta.agents.add.length > 0) {
+				this.sortAgentsByStatus();
+			}
 
 			// Lista de agentes cuando actualizan sus estados
 			if (respuesta.agents != null && respuesta.agents.update != null) {
@@ -450,11 +454,13 @@ $(document).ready(function() {
 			                            'troncal':   "-",
 			                            'desde':   agente.desde,
 			                        });
-			                    } 
+			                    }
 			                });
 			            }
 			        }
 			    }
+			    // Re-sort agents: offline agents at bottom
+			    this.sortAgentsByStatus();
 			}
 			
 			// Llamadas Entrantes
@@ -564,6 +570,24 @@ $(document).ready(function() {
 			}
 			
 			return true;
+		},
+		// Sort agents: offline (logged out) agents at the bottom
+		sortAgentsByStatus: function() {
+			var offlineStatuses = ['Logged out', 'No Logoneado', 'Déconnecté', 'Не в системе', 'Oturumu Kapalı'];
+			var self = this;
+			var sortedAgents = this.agentes.toArray().sort(function(a, b) {
+				var aOffline = offlineStatuses.indexOf(a.get('estado')) !== -1;
+				var bOffline = offlineStatuses.indexOf(b.get('estado')) !== -1;
+				if (aOffline && !bOffline) return 1;
+				if (!aOffline && bOffline) return -1;
+				return 0;
+			});
+			this.agentes.clear();
+			sortedAgents.forEach(function(agent) {
+				self.agentes.pushObject(agent);
+				// Re-apply color styling after re-adding
+				agentColor(agent.get('estado'), agent.get('canal'));
+			});
 		},
 		actions: {
 			cargarprevios: function() {

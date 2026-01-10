@@ -65,8 +65,10 @@ class AMIClientConn extends MultiplexConn
                 'AckCall' => array('required' => FALSE, 'default' => 'true')),
         'AgentLogin' =>
             array('Agent'=> TRUE, 'Channel' => TRUE),
-        'Agentlogoff' =>
-            array('Agent' => TRUE),
+        // Deprecated: Agentlogoff not available in app_agent_pool (Asterisk 12+)
+        // Use Hangup on the AgentLogin channel instead
+        // 'Agentlogoff' =>
+        //     array('Agent' => TRUE),
         'Agents' =>
             array('ActionID' => FALSE),
         'Atxfer' =>
@@ -142,6 +144,7 @@ class AMIClientConn extends MultiplexConn
             array('Queue' => TRUE, 'Interface' => TRUE,
                 'Penalty' => array('required' => FALSE, 'default' => 0, 'cast' => 'int'),
                 'MemberName' => FALSE,
+                'StateInterface' => FALSE,  // For app_agent_pool: Agent:XXXX device state
                 'Paused' => array('required' => FALSE, 'default' => FALSE, 'cast' => 'bool')),
         'QueueRemove' =>
             array('Queue' => TRUE, 'Interface' => TRUE),

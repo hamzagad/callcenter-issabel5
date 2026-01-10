@@ -837,7 +837,7 @@ BEGIN
         AND COLUMN_NAME = 'type';
     IF l_existe_columna = 0 THEN
         ALTER TABLE agent
-        ADD COLUMN type enum('Agent','SIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id;
+        ADD COLUMN type enum('Agent','SIP','PJSIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id;
     END IF;
 END;
 ++

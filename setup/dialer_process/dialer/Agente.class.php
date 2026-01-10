@@ -380,10 +380,15 @@ class Agente
 
     public function asyncQueuePause($ami, $nstate, $queue = NULL, $reason = '')
     {
+        // For Agent type, queue member interface is Local/XXXX@agents, not Agent/XXXX
+        $sInterface = $this->channel;
+        if ($this->type == 'Agent' && preg_match('|^Agent/(\d+)$|', $this->channel, $regs)) {
+            $sInterface = 'Local/'.$regs[1].'@agents';
+        }
         $ami->asyncQueuePause(
             array($this, '_cb_QueuePause'),
             array($this->channel, $nstate, $reason, $ami),
-            $queue, $this->channel, $nstate, $reason);
+            $queue, $sInterface, $nstate, $reason);
     }
 
     public function iniciarLoginAgente($sExtension)
@@ -429,11 +434,16 @@ class Agente
     }
 
     // Se llama en Agentlogin al confirmar que agente está logoneado
-    public function completarLoginAgente($ami)
+    // $sLoginChannel: For app_agent_pool, the actual channel running AgentLogin (e.g., SIP/101-00000xxx)
+    public function completarLoginAgente($ami, $sLoginChannel = NULL)
     {
         $this->_estado_consola = 'logged-in';
         $this->resetTimeout();
         $this->_logging_inicio = NULL;
+        // Store the login channel for app_agent_pool logout (hangup this channel to logout)
+        if (!is_null($sLoginChannel)) {
+            $this->_login_channel = $sLoginChannel;
+        }
         $this->_tuberia->msg_SQLWorkerProcess_AgentLogin(
             $this->channel,
             microtime(TRUE),
@@ -599,15 +609,32 @@ class Agente
             $colasAtencion);
     }
 
-    // Iniciar el proceso de logoff desde el punto de vista de Asterisk
+    /**
+     * Initiate agent logoff from Asterisk's perspective
+     * For app_agent_pool (Asterisk 12+): Hangup the login channel
+     * For dynamic agents (SIP/IAX2/PJSIP): QueueRemove from all queues
+     */
     public function forzarLogoffAgente($ami, $log)
     {
         if ($this->type == 'Agent') {
-            $ami->asyncAgentlogoff(
-                array($this, '_cb_Agentlogoff'),
-                array($log),
-                $this->number);
+            // app_agent_pool: Hangup the AgentLogin channel to logout
+            // No Agentlogoff AMI command exists in app_agent_pool
+            if (!is_null($this->_login_channel)) {
+                $ami->asyncHangup(
+                    array($this, '_cb_HangupLogoff'),
+                    array($log),
+                    $this->_login_channel);
+            } elseif (!is_null($this->_extension)) {
+                // Fallback to extension if login_channel not tracked
+                $ami->asyncHangup(
+                    array($this, '_cb_HangupLogoff'),
+                    array($log),
+                    $this->_extension);
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.': no channel to hangup for agent '.$this->number);
+            }
         } else {
+            // Dynamic agents: remove from all queues
             foreach ($this->colas_actuales as $q) {
                 $ami->asyncQueueRemove(
                     array($this, '_cb_QueueRemove'),
@@ -617,10 +644,10 @@ class Agente
         }
     }
 
-    public function _cb_Agentlogoff($r, $log)
+    public function _cb_HangupLogoff($r, $log)
     {
         if ($r['Response'] != 'Success') {
-            $this->_log->output('ERR: No se puede completar Agentlogoff('.$this->number.'): '.$r['Message']);
+            $this->_log->output('ERR: Cannot hangup agent login channel ('.$this->number.'): '.$r['Message']);
         }
     }
 

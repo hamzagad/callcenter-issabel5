@@ -77,7 +77,9 @@ if (file_exists($path_script_db))
         "ADD COLUMN trunk varchar(20) NOT NULL");
     crearColumnaSiNoExiste($pDB, 'call_center', 'agent',
         'type',
-        "ADD COLUMN type enum('Agent','SIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id");
+        "ADD COLUMN type enum('Agent','SIP','PJSIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id");
+    // Ensure PJSIP is in the enum for existing installations
+    $pDB->genQuery("ALTER TABLE agent MODIFY type enum('Agent','SIP','PJSIP','IAX2') DEFAULT 'Agent' NOT NULL");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'scheduled',
         "ALTER TABLE calls ADD COLUMN scheduled BOOLEAN NOT NULL DEFAULT 0");
@@ -114,6 +116,7 @@ if (file_exists($path_script_db))
 }
 
 instalarContextosEspeciales();
+instalarAgentDefaultsTemplate();
 
 exit($return);
 
@@ -226,10 +229,52 @@ exten => _X.,n,Set(CDR(userfield)=audio:${CALLFILENAME}.${MIXMON_FORMAT})
 exten => _X.,n(skiprecord),Dial(${AGENTCHANNEL},300,tw)
 exten => h,1,Macro(hangupcall,)
 
+; app_agent_pool contexts (Asterisk 12+)
+[agent-login]
+exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
+ same => n,AgentLogin(${EXTEN})
+ same => n,Macro(hangupcall,)
+
+[agents]
+exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
+ same => n,AgentRequest(${EXTEN})
+ same => n,Macro(hangupcall,)
+
 ';
         $contenido[] = $sFinalContenido;
         file_put_contents($sArchivo, $contenido);
         chown($sArchivo, 'asterisk'); chgrp($sArchivo, 'asterisk');
     }
+}
+
+/**
+ * Create the [agent-defaults] template in agents.conf for app_agent_pool (Asterisk 12+).
+ * This template is inherited by all agent definitions.
+ */
+function instalarAgentDefaultsTemplate()
+{
+    $sArchivo = '/etc/asterisk/agents.conf';
+    $sTemplate = "[agent-defaults](!)\n" .
+                 "musiconhold=Silence\n" .
+                 "ackcall=no\n" .
+                 "autologoff=0\n" .
+                 "wrapuptime=0\n\n";
+
+    // Check if file exists and if template already exists
+    if (file_exists($sArchivo)) {
+        $contenido = file_get_contents($sArchivo);
+        if (strpos($contenido, '[agent-defaults](!)') !== false) {
+            fputs(STDERR, "INFO: [agent-defaults] template already exists in agents.conf\n");
+            return;
+        }
+        // Append template at the end
+        file_put_contents($sArchivo, $contenido . $sTemplate);
+    } else {
+        // Create new file with template
+        file_put_contents($sArchivo, $sTemplate);
+    }
+    chown($sArchivo, 'asterisk');
+    chgrp($sArchivo, 'asterisk');
+    fputs(STDERR, "INFO: Created [agent-defaults] template in agents.conf\n");
 }
 ?>

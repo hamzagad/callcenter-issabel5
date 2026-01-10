@@ -28,7 +28,7 @@ DROP TABLE IF EXISTS `agent`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `agent` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `type` enum('Agent','SIP','IAX2') NOT NULL DEFAULT 'Agent',
+  `type` enum('Agent','SIP','PJSIP','IAX2') NOT NULL DEFAULT 'Agent',
   `number` varchar(40) NOT NULL,
   `name` varchar(250) NOT NULL,
   `password` varchar(250) NOT NULL,

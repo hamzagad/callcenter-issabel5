@@ -1503,16 +1503,20 @@ class ECCPConn
         $r = NULL;
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
+            // app_agent_pool (Asterisk 12+): Originate call to agent-login context
+            // The agent-login context runs AgentLogin() application
             $this->_tuberia->AMIEventProcess_agregarIntentoLoginAgente($sAgente, $sExtension, $iTimeout);
             $r = $this->_ami->Originate(
-                $sExtension,        // channel
-                NULL, NULL, NULL,   // extension, context, priority
-                'AgentLogin',       // application
-                $agentFields['number'],        // data
-                NULL,
-                $sAgente.' Login', // CallerID
+                $sExtension,                    // channel (SIP/1064)
+                $agentFields['number'],         // exten (agent number)
+                'agent-login',                  // context (runs AgentLogin app)
+                1,                              // priority
+                NULL,                           // application (use context instead)
+                NULL,                           // data
+                30000,                          // timeout in ms
+                $sAgente.' Login',              // CallerID
                 NULL, NULL,
-                TRUE,               // async
+                TRUE,                           // async
                 'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente     // action-id
                 );
             if ($r['Response'] != 'Success') {
@@ -1619,29 +1623,29 @@ class ECCPConn
         // Canal que hizo el logoneo hacia la cola
         $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
 
-        /* Ejecutar Agentlogoff. Esto asume que el agente está de la forma
-         * Agent/9000. La actualización de las bases de datos de auditoría y
-         * breaks se delega a los manejadores de eventos */
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
-            $r = $this->_ami->Agentlogoff($agentFields['number']);
-
-            /* Si el agente todavía no ha introducido la clave, el Agentlogoff
-             * anterior no tiene efecto, así que se manda a colgar el canal
-             * directamente.
-             */
-            if (!is_null($infoAgente) && $infoAgente['estado_consola'] == 'logging') {
-                $sCanalExt = $infoAgente['login_channel'];
-                if (is_null($sCanalExt)) $sCanalExt = $infoAgente['extension'];
-                if (!is_null($sCanalExt)) $this->_ami->Hangup($sCanalExt);
+            // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
+            // There is no Agentlogoff AMI command in app_agent_pool
+            $sCanalLogin = NULL;
+            if (!is_null($infoAgente)) {
+                $sCanalLogin = $infoAgente['login_channel'];
+                if (is_null($sCanalLogin)) {
+                    $sCanalLogin = $infoAgente['extension'];
+                }
+            }
+            if (!is_null($sCanalLogin)) {
+                $this->_ami->Hangup($sCanalLogin);
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
             }
         } else {
-            // Si hay cliente conectado, le cierro el canal.
-            if (!is_null($infoAgente['clientchannel'])) {
+            // SIP/IAX2/PJSIP: Close client channel if connected
+            if (!is_null($infoAgente) && !is_null($infoAgente['clientchannel'])) {
                 $this->_ami->Hangup($infoAgente['clientchannel']);
             }
 
-            // AMIEventProcess sabe de qué colas hay que quitar al agente
+            // Remove from all queues
             $listaColas = $this->_tuberia->AMIEventProcess_listarTotalColasTrabajoAgente(array($sAgente));
             foreach ($listaColas[$sAgente][0] as $cola) {
                 $r = $this->_ami->QueueRemove($cola, $sAgente);
@@ -2088,7 +2092,14 @@ class ECCPConn
         }
 
         $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
-        if (!is_null($infoLlamada)) $hangchannel = $infoLlamada['agentchannel'];
+        if (!is_null($infoLlamada)) {
+            $hangchannel = $infoLlamada['agentchannel'];
+            // For app_agent_pool (Agent type), Agent/XXXX is not a real channel.
+            // Use actualchannel (caller's channel) instead to end the call.
+            if ($agentFields['type'] == 'Agent' && preg_match('|^Agent/\d+$|', $hangchannel)) {
+                $hangchannel = $infoLlamada['actualchannel'];
+            }
+        }
         if (is_null($hangchannel)) {
             // Verificar si la llamada manual está en proceso de marcado
             $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAgendada($sAgente);
@@ -2096,7 +2107,7 @@ class ECCPConn
                 /* Para agentes estáticos, el canal de agente se puede usar
                  * directamente para abortar. Los agentes dinámicos requieren
                  * el canal. */
-                $hangchannel = ($agentFields['type'] == 'Agent') ? $sAgente : $infoLlamada['channel'];
+                $hangchannel = ($agentFields['type'] == 'Agent') ? $infoLlamada['actualchannel'] : $infoLlamada['channel'];
             }
         }
 
@@ -2105,7 +2116,7 @@ class ECCPConn
             return $xml_response;
         }
 
-        // Mandar a colgar la llamada usando el canal Agent/9000
+        // Mandar a colgar la llamada
         $r = $this->_ami->Hangup($hangchannel);
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: No se puede colgar la llamada para '.$sAgente.
@@ -2901,6 +2912,8 @@ SQL_INSERTAR_AGENDAMIENTO;
             return $xml_response;
         } else {
             $this->_registrarTransferencia($infoLlamada, $sExtension);
+            // Notify AMIEventProcess to release the agent after blind transfer
+            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
         }
 
         $xml_transferResponse->addChild('success');
