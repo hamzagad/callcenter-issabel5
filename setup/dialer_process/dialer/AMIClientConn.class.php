@@ -276,7 +276,7 @@ class AMIClientConn extends MultiplexConn
                     } elseif ($sClave == 'Output') {
                         // Asterisk 16
 			#$paquete['data'].=$sValor."\n";
-                        $paquete['data'] = ($paquete['data'] ?? '') . $sValor . "\n";
+                        $paquete['data'] = (isset($paquete['data']) ? $paquete['data'] : '') . $sValor . "\n";
                     } elseif ($bEsperando_END_COMMAND && !in_array($sClave, array('Privilege', 'ActionID'))) {
                         $sClave = $sValor = NULL;
                         $bProcesando_END_COMMAND = TRUE;

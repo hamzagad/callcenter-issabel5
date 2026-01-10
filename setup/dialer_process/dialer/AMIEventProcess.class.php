@@ -2882,7 +2882,7 @@ Uniqueid: 1429642067.241008
 
         $this->_tmp_estadoLoginAgente[$params['Agent']] = array(
             'Status'        =>  $params['Status'],
-            'TalkingToChan' =>  $params['TalkingToChan'] ?? '',
+            'TalkingToChan' =>  isset($params['TalkingToChan']) ? $params['TalkingToChan'] : '',
         );
     }
 

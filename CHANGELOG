@@ -1,3 +1,32 @@
+4.0.0-6
+* CHANGED: Dialer: Migrated from chan_agent to app_agent_pool (Asterisk 12+).
+  Agent template format in agents.conf now uses [XXXX](agent-defaults).
+  Queue member interface changed to Local/XXXX@agents with StateInterface=Agent:XXXX.
+* ADDED: Dialer: New dialplan contexts for app_agent_pool: agents, agent-connect,
+  agent-logout.
+* ADDED: Installer: Added instalarAgentDefaultsTemplate() function to create
+  agent-defaults template in agents.conf during installation.
+* FIXED: Dialer: Fixed agent logout on service stop (SIGTERM handling).
+* FIXED: Dialer: Fixed QueuePause "Interface not found" error in Agente.class.php
+  by using correct Local/XXXX@agents interface for Agent type.
+* FIXED: Dialer: Fixed TalkingToChan undefined index notice in AMIEventProcess.class.php.
+* CHANGED: Agent Console: Password-based login only, removed extension/callback fields.
+* CHANGED: Campaign Monitoring: Agent sorting now shows online agents first
+  (alphabetical), then offline agents last.
+* FIXED: Campaign Monitoring: Fixed agent status colorizing in JavaScript.
+* FIXED: PHP 7.4: Replaced ereg() with preg_match() in paloSantoUploadFile.class.php.
+* FIXED: PHP 7.4: Replaced curly brace string access $str{0} with $str[0] in
+  JSON.php (~60 places) and paloSantoUploadFile.class.php.
+* FIXED: PHP 8: Replaced __autoload() with spl_autoload_register() in dialerd.
+* FIXED: PHP 8: Replaced string assertions with expression assertions in
+  AMIEventProcess.class.php.
+* FIXED: PHP 8: Replaced old-style constructors with __construct() in 22 module
+  library files.
+* ADDED: Database: Added PJSIP to agent type enum in schema files.
+* ADDED: Documentation: Added ECCP_Protocol.md (English compact translation of protocol spec).
+* REMOVED: Removed reactivateAgent.php workaround (no longer needed after QueuePause fix).
+* MAINTAINED Backward Compatibility with PHP v5.4
+
 2.2.0-17 (SVN Revision 7678)
 * CHANGED: Dialer: remove unused attribute "channel" from sqlinsertcalls message
   sent to SQLWorkerProcess. Ported from CallCenterPRO.
