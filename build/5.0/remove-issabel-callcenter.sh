@@ -23,4 +23,23 @@ rm -rf /usr/share/issabel/module_installer/callcenter/
 issabel-menuremove call_center
 
 #remove database
-#not recommended..., but you can remove it manually using "mysql -p -u'root' -e'DROP DATABASE call_center;'"
+echo ""
+read -p "Do you want to delete the call_center database? (y/n): " DELETE_DB
+if [ "$DELETE_DB" = "y" ] || [ "$DELETE_DB" = "Y" ]; then
+    MYSQL_ROOT_PWD=$(grep '^mysqlrootpwd=' /etc/issabel.conf | cut -d'=' -f2)
+    if [ -n "$MYSQL_ROOT_PWD" ]; then
+        mysql -u root -p"$MYSQL_ROOT_PWD" -e "DROP DATABASE IF EXISTS call_center;" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "Database call_center deleted successfully."
+        else
+            echo "Error deleting database. You can delete it manually."
+        fi
+    else
+        echo "Could not read MySQL root password"
+        echo "You can delete the database manually by dropping call_center database"
+    fi
+else
+    echo "Database call_center was not deleted."
+fi
+
+echo "Call Center Module removed successfully"
