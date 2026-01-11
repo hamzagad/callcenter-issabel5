@@ -413,7 +413,8 @@ class Agente
             $this->_listaAgentes->agregarIndice('uniqueidlogin', $uniqueid, $this);
             $this->_login_channel = $channel;
         } else {
-            if ($this->_estado_consola != 'logged-out') {
+            // Send failure event if login attempt was started (indicated by _logging_inicio being set)
+            if (!is_null($this->_logging_inicio)) {
                 $this->_tuberia->msg_SQLWorkerProcess_AgentLogin(
                     $this->channel,
                     microtime(TRUE),

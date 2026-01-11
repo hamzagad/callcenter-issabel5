@@ -49,8 +49,9 @@ Gracias a la colaboracion de Nicolás Gudiño, Julio pacheco, y comunidad de Iss
 
 
 
+
 ## Installation Commands
-==========
+----
 
 ```bash
 # Full installation (run as root)

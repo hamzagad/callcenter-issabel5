@@ -2378,6 +2378,11 @@ Uniqueid: 1429642067.241008
                 $llamada = $a->llamada;
             }
         }
+        // For local extension calls, the actualchannel (e.g. SIP/103) may have a different
+        // uniqueid than the call's tracked uniqueid. Search by actualchannel as fallback.
+        if (is_null($llamada)) {
+            $llamada = $this->_listaLlamadas->buscar('actualchannel', $params['Channel']);
+        }
 
         if (!is_null($llamada)) {
             $this->_procesarLlamadaColgada($llamada, $params);
