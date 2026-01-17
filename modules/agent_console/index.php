@@ -891,6 +891,10 @@ function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantil
 {
     $atributos = array();
     foreach ($infoLlamada['call_attributes'] as $iOrden => $atributo) {
+        // Skip index 1 (2nd column) for outgoing calls - it's shown in the hardcoded "Name:" field
+        if ($infoLlamada['calltype'] == 'outgoing' && $iOrden == 1) {
+            continue;
+        }
         if (preg_match('|^http(s)?://|', $atributo['value'])) {
         	$atributo['value'] = '<a target="_blank" href="'.$atributo['value'].'">'.$atributo['value'].'</a>';
         } else {

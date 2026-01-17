@@ -73,24 +73,25 @@ class paloSantoCampaignCC
             return FALSE;
         }
         $sPeticionSQL = <<<SQL_SELECT_CAMPAIGNS
-SELECT id, name, trunk, context, queue, datetime_init, datetime_end, daytime_init,
-    daytime_end, script, retries, promedio, num_completadas, estatus, max_canales,
-    id_url, id_url2, id_url3
-FROM campaign
+SELECT c.id, c.name, c.trunk, c.context, c.queue, c.datetime_init, c.datetime_end, c.daytime_init,
+    c.daytime_end, c.script, c.retries, c.promedio,
+    (SELECT COUNT(*) FROM calls WHERE id_campaign = c.id AND status = 'Success') AS num_completadas,
+    c.estatus, c.max_canales, c.id_url, c.id_url2, c.id_url3
+FROM campaign c
 SQL_SELECT_CAMPAIGNS;
         $paramWhere = array();
         $paramSQL = array();
 
         if (in_array($estatus, array('A', 'I', 'T'))) {
-        	$paramWhere[] = 'estatus = ?';
+        	$paramWhere[] = 'c.estatus = ?';
             $paramSQL[] = $estatus;
         }
         if (!is_null($id_campaign)) {
-        	$paramWhere[] = 'id = ?';
+        	$paramWhere[] = 'c.id = ?';
             $paramSQL[] = $id_campaign;
         }
         if (count($paramWhere) > 0) $sPeticionSQL .= ' WHERE '.implode(' AND ', $paramWhere);
-        $sPeticionSQL .= ' ORDER BY datetime_init, daytime_init';
+        $sPeticionSQL .= ' ORDER BY c.datetime_init, c.daytime_init';
         if (!is_null($limit)) {
         	$sPeticionSQL .= ' LIMIT ? OFFSET ?';
             $paramSQL[] = $limit; $paramSQL[] = $offset;

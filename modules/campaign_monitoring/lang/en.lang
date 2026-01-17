@@ -90,6 +90,7 @@ $arrLangModule=array(
 'offline'   =>  'Logged out',
 'oncall'    =>  'Busy',
 'paused'    =>  'On break',
+'ringing'   =>  'Ringing',
 'LOG_FMT_PLACING'
     =>  'Placing phone call to {phone} (retry {retry})',
 'LOG_FMT_DIALING'

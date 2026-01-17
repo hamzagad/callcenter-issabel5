@@ -487,6 +487,12 @@ class Agente
 
     public function resumenSeguimiento()
     {
+        // Get highest queue status (6=RINGING is higher priority than 1=NOT_INUSE)
+        $max_queue_status = AST_DEVICE_UNKNOWN;
+        foreach ($this->_estado_agente_colas as $queue => $status) {
+            if ($status > $max_queue_status) $max_queue_status = $status;
+        }
+
         return array(
             'id_agent'          =>  $this->id_agent,
             'name'              =>  $this->name,
@@ -499,6 +505,7 @@ class Agente
             'extension'         =>  $this->extension,
             'login_channel'     =>  $this->login_channel,
             'oncall'            =>  !is_null($this->llamada),
+            'queue_status'      =>  $max_queue_status,
             'clientchannel'     =>  is_null($this->llamada) ? NULL : $this->llamada->actualchannel,
             'waitedcallinfo'    =>  ((!is_null($this->llamada_agendada))
                 ? array(
@@ -561,7 +568,7 @@ class Agente
     // para la cola en cuestión. Excepto que siempre se sabe si está o no en cola.
     public function estadoEnCola($queue)
     {
-        return isset($this->_estado_agente_colas[$queue]) ? AST_DEVICE_NOTINQUEUE : $this->_estado_agente_colas[$queue];
+        return isset($this->_estado_agente_colas[$queue]) ? $this->_estado_agente_colas[$queue] : AST_DEVICE_NOTINQUEUE;
     }
 
     public function asignarColasDinamicas($lista)

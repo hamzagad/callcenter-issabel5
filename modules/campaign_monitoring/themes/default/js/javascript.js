@@ -431,107 +431,22 @@ $(document).ready(function() {
 			                'reciente': true
 			            });
 
-			            // Verificar si el estado del agente es "Busy"
-			            if (agente.status === 'Busy' || agente.status === 'Ocupado' || agente.status === 'Occupé' || agente.status === 'Занят' || agente.status === 'Meşgul') {
-			                // Cambiar todos los agentes con estado "Ringing" a "Free"
-			                this.agentes.forEach(function(otroAgente) {
-			                	if (otroAgente.get('estado') === 'Ringing' && otroAgente.get('desde') !== '-') {
-			                        const otroAgentUpdate = agentUpdateColor('Free', otroAgente.get('canal'));
-			                        otroAgente.setProperties({
-			                            'estado': 'Free',
-			                            'image': Ember.String.htmlSafe(otroAgentUpdate.statusImage),
-			                            'numero':   "-",
-			                            'troncal':   "-",
-			                            //'desde':   agente.desde,
-			                        });
-			                    }
-			                    if (otroAgente.get('estado') === 'Ringing' && otroAgente.get('desde') === '-') {
-			                        const otroAgentUpdate = agentUpdateColor('Free', otroAgente.get('canal'));
-			                        otroAgente.setProperties({
-			                            'estado': 'Free',
-			                            'image': Ember.String.htmlSafe(otroAgentUpdate.statusImage),
-			                            'numero':   "-",
-			                            'troncal':   "-",
-			                            'desde':   agente.desde,
-			                        });
-			                    }
-			                });
-			            }
+			            // Removed incorrect logic that changed other agents to "Free" when one becomes "Busy"
+			            // Backend handles status updates properly via QueueMemberStatus events
 			        }
 			    }
 			    // Re-sort agents: offline agents at bottom
 			    this.sortAgentsByStatus();
 			}
 			
-			// Llamadas Entrantes
-			if (respuesta.agents.add.length === 0 && respuesta.agents.remove.length === 0 && respuesta.agents.update.length === 0 && respuesta.activecalls.remove.length === 0 && respuesta.activecalls.add.length !== 0)
-				for (var i = 0; i < this.agentes.length; i++) {
-					var agente = this.agentes[i]
-					//console.log(agente.estado);
-					if (agente.estado === "Free" || agente.estado === "Libre" || agente.estado === "Свободен" || agente.estado === "Boşta") {
-						const agentUpdate = agentUpdateColor("Ringing", agente.canal);
-						var agenteLista = this.agentes.findBy('canal', agente.canal);
-						//console.log(this);
-						//console.log(agenteLista);
-							if (agenteLista != null) agenteLista.setProperties({
-								'numero':	this.llamadasMarcando[0].numero,
-								'troncal':	this.llamadasMarcando[0].troncal,
-								'estado':	"Ringing",
-								'image': 	Ember.String.htmlSafe(agentUpdate.statusImage),
-								//'desde':	this.llamadasMarcando[0].desde,
-								'rtime':	new Date(),
-								'reciente':	true
-							});
-						
-					}
-					
-				}
+			// Removed incorrect logic that set all free agents to "ringing" when calls appeared
+			// Agent status should only show "ringing" when their phone is actually ringing
 			
-			// Terminando llamada
-			if (respuesta.agents.add.length === 0 && respuesta.agents.remove.length === 0 && respuesta.agents.update.length === 0 && respuesta.activecalls.remove.length !== 0)
-			for (var i = 0; i < this.agentes.length; i++) {
-					var agente = this.agentes[i]
-					if (agente.estado === "Ringing") {
-						//console.log(this);
-						//agente.estado = "Free";
-						const agentUpdate = agentUpdateColor("Free", agente.canal);
-						var agenteLista = this.agentes.findBy('canal', agente.canal);
-						//console.log(agenteLista);
-							if (agenteLista != null) agenteLista.setProperties({
-								'numero':	agente.callnumber,
-								'troncal':	agente.trunk,
-								'estado':	"Free",
-								'image': 	Ember.String.htmlSafe(agentUpdate.statusImage),
-								'desde':	agente.desde,
-								'rtime':	new Date(),
-								'reciente':	true
-							});
-						
-					}
-					
-				}
+			// Removed incorrect logic that changed "Ringing" agents to "Free" when calls ended
+			// Agent status updates should come from backend, not inferred from call events
 
-			//Si se esta hablando mientras recarga la pagina setea el ringing a los agentes que se vean como free si hay una llamada esperando ser contestada
-			if (respuesta.agents.add.length !== 0 && respuesta.agents.remove.length === 0 && respuesta.agents.update.length === 0 && respuesta.activecalls.add.length !== 0)
-				for (var i = 0; i < this.agentes.length; i++) {
-					var agente = this.agentes[i]
-					if (agente.estado === "Free" || agente.estado === "Libre" || agente.estado === "Свободен" || agente.estado === "Boşta") {
-					agente.estado = "Ringing";
-					//console.log(respuesta);
-					const agentUpdate = agentUpdateColor("Ringing", agente.canal);
-					var agenteLista = this.agentes.findBy('canal', agente.canal);
-						if (agenteLista != null) agenteLista.setProperties({
-							'numero':	this.llamadasMarcando[0].numero,
-							'troncal':	this.llamadasMarcando[0].troncal,
-							'estado':	"Ringing",
-							'image': 	Ember.String.htmlSafe(agentUpdate.statusImage),
-							'desde':	agente.desde,
-							'rtime':	new Date(),
-							'reciente':	true
-						});
-						agentColor(agente.estado, agente.canal);
-					}
-				}
+			// Removed incorrect logic that set all free agents to "ringing" on page reload
+			// Agent status should be determined by backend, not frontend assumptions
 			
 
 

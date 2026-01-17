@@ -2280,7 +2280,12 @@ class ECCPConn
         } elseif ($infoAgente['num_pausas'] > 0) {
             $sAgentStatus = 'paused';
         } elseif ($infoAgente['estado_consola'] == 'logged-in') {
-            $sAgentStatus = 'online';
+            // Check if agent is ringing (queue status = 6 = AST_DEVICE_RINGING)
+            if (isset($infoAgente['queue_status']) && $infoAgente['queue_status'] == 6) {
+                $sAgentStatus = 'ringing';
+            } else {
+                $sAgentStatus = 'online';
+            }
         } else {
             $sAgentStatus = 'offline';
         }

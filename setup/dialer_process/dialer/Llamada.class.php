@@ -626,7 +626,7 @@ class Llamada
              * a Failure el estado. No se debe sobreescribir este Failure
              * para que se pueda limpiar la llamada en caso de que no se
              * reciba nunca un Hangup. */
-            if (!is_null($this->status)) $this->status = 'Placing';
+            if (is_null($this->status)) $this->status = 'Placing';
         }
     }
 
