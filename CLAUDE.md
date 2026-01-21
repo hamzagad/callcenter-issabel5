@@ -97,6 +97,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Asterisk conf files: `/etc/asterisk/`
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
+- Don't assume, always use debuggers if required to check for a value
 
 ---
 
@@ -123,5 +124,6 @@ See [CHANGES.md](CHANGES.md) for detailed bug fixes and modifications.
 - Agent status updates in real-time without page reload with SSE
 
 ### Testing
+- Testing is done on the live environment
 - Outgoing campaign calls goes through the dialplan by default but can be explicitly set to use specific trunk
 - External calls uses SIP/120Issabel4 trunk

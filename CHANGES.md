@@ -292,7 +292,165 @@ AST_DEVICE_ONHOLD     = 8   // On hold
 
 ---
 
+### 8. Attended Transfer Fix for Agent Type (app_agent_pool)
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php` (Request_agentauth_hangup, Request_agentauth_transfer, _registrarTransferencia)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (msg_Agentlogin, msg_Agentlogoff, msg_prepararAtxferComplete, msg_BridgeEnter)
+- `setup/dialer_process/dialer/Llamada.class.php` (actualAgentChannel property)
+- `setup/dialer_process/dialer/AMIClientConn.class.php` (Bridge AMI action)
+- `/etc/asterisk/extensions_custom.conf` (atxfer-complete context)
+- `setup/installer.php` (atxfer-complete context for new installations)
+
+**Issue**: Attended transfer did not work for Agent type agents (app_agent_pool):
+1. Transfer initiation failed because AMI Atxfer was called on `Agent/XXXX` (a device state interface, not a real channel)
+2. Transfer completion failed because hanging up the agent's channel terminated the entire AgentLogin session
+
+**Root Cause Analysis**:
+
+For Agent type agents using app_agent_pool:
+- `Agent/XXXX` is a device state interface, NOT a real Asterisk channel
+- The actual phone channel is `login_channel` (e.g., `SIP/101-00000xxx`) running AgentLogin application
+- AMI commands like Atxfer must be called on the real `login_channel`, not `Agent/XXXX`
+- When completing the transfer, redirecting the agent's channel causes Asterisk to send `Agentlogoff` event, which closes the ECCP session
+
+**Fix - Part 1: Transfer Initiation** (`ECCPConn.class.php`)
+
+Modified `Request_agentauth_transfer()` to use `login_channel` for Agent type:
+```php
+// Get agent info to determine agent type and login_channel
+$infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+
+// For Agent type (app_agent_pool), use login_channel which is the actual SIP/PJSIP phone
+if (!is_null($infoAgente) && !empty($infoAgente['login_channel'])) {
+    $transferChannel = $infoAgente['login_channel'];
+} else {
+    $transferChannel = $infoLlamada['agentchannel'];
+}
+$r = $this->_ami->Atxfer($transferChannel, $sExtension.'#', 'from-internal', 1);
+```
+
+**Fix - Part 2: Transfer Completion - Agentlogoff Suppression** (`AMIEventProcess.class.php`)
+
+Added mechanism to suppress `Agentlogoff` event during transfer completion:
+
+1. Added property to track agents completing transfers:
+```php
+private $_agentesEnAtxferComplete = array();
+```
+
+2. Added message handler to set flag before redirect:
+```php
+public function msg_prepararAtxferComplete($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
+{
+    $sAgente = $datos[0];
+    $this->_agentesEnAtxferComplete[$sAgente] = time();
+}
+```
+
+3. Modified `msg_Agentlogoff()` to check flag and suppress logoff:
+```php
+// Check if this agent is completing an attended transfer
+if (isset($this->_agentesEnAtxferComplete[$sAgente])) {
+    $this->_log->output('DEBUG: SUPPRESSING Agentlogoff for '.$sAgente);
+    return FALSE;  // Skip logoff - agent will re-enter AgentLogin
+}
+```
+
+4. Modified `msg_Agentlogin()` to clear flag after re-login:
+```php
+$isAtxferRelogin = isset($this->_agentesEnAtxferComplete[$sAgente]);
+if ($isAtxferRelogin) {
+    unset($this->_agentesEnAtxferComplete[$sAgente]);
+}
+```
+
+**Fix - Part 3: Transfer Completion - Hangup Handler** (`ECCPConn.class.php`)
+
+Modified `Request_agentauth_hangup()` to handle attended transfer completion:
+```php
+if ($isAttendedTransfer) {
+    // Signal AMIEventProcess to suppress the upcoming Agentlogoff event
+    $this->_tuberia->msg_AMIEventProcess_prepararAtxferComplete($sAgente);
+
+    // Redirect agent's channel to atxfer-complete context
+    // This causes agent to leave consultation bridge (Atxfer completes),
+    // then the context runs AgentLogin to keep agent logged in
+    $r = $this->_ami->Redirect(
+        $loginChannel,        // Channel: agent's login_channel
+        '',                   // ExtraChannel: not used
+        $agentNumber,         // Exten: agent number (e.g., 1001)
+        'atxfer-complete',    // Context
+        1                     // Priority
+    );
+}
+```
+
+**Fix - Part 4: Dialplan Context** (`extensions_custom.conf`)
+
+Added `atxfer-complete` context that re-enters AgentLogin:
+```ini
+[atxfer-complete]
+exten => _X.,1,NoOp(Attended transfer completion - agent ${EXTEN} re-entering AgentLogin)
+exten => _X.,n,AgentLogin(${EXTEN})
+exten => _X.,n,Macro(hangupcall,)
+```
+
+**Fix - Part 5: Callback Agent Hangup Fix** (`ECCPConn.class.php`)
+
+For callback agents (SIP/IAX2/PJSIP type), the `agentchannel` may be stored as just the device name (e.g., `SIP/101`) without the unique call ID suffix. Added check to use `actualchannel` when `agentchannel` lacks unique ID:
+```php
+elseif ($agentFields['type'] != 'Agent' && strpos($hangchannel, '-') === false) {
+    $hangchannel = $infoLlamada['actualchannel'];
+}
+```
+
+**Event Flow for Attended Transfer Completion**:
+1. Agent in AgentLogin, on consultation call with target (102)
+2. Hangup clicked → ECCPConn signals AMIEventProcess: "Agent/1001 atxfer completing"
+3. ECCPConn redirects SIP/101 to atxfer-complete/1001
+4. Agent leaves consultation bridge → Asterisk completes Atxfer (caller connects to 102)
+5. Asterisk fires Agentlogoff for Agent/1001
+6. msg_Agentlogoff checks flag → **LOGOFF SUPPRESSED**
+7. SIP/101 enters atxfer-complete context → runs AgentLogin(1001)
+8. Asterisk fires Agentlogin for Agent/1001
+9. msg_Agentlogin handles it → agent is back to logged-in state, clears flag
+10. Agent session remains active, ready for next call
+
+**Impact**:
+- Agent type agents can now perform attended transfers
+- Agent session is preserved after transfer completion
+- Agent returns to idle state ready for next call
+- Callback agent hangup also works correctly
+
+---
+
+## Files Modified
+
+### Dialer Backend
+- `setup/dialer_process/dialer/Llamada.class.php` - Fixed call status initialization, added actualAgentChannel property
+- `setup/dialer_process/dialer/Agente.class.php` - Fixed agent queue status check, login cancellation, and added queue_status field
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` - Added actualchannel fallback in msg_Hangup, added Agentlogoff suppression for attended transfer
+- `setup/dialer_process/dialer/ECCPConn.class.php` - Added 'ringing' status, fixed attended transfer initiation and completion
+- `setup/dialer_process/dialer/AMIClientConn.class.php` - Added Bridge AMI action definition
+
+### Web Frontend
+- `modules/campaign_out/libs/paloSantoCampaignCC.class.php` - Fixed campaign statistics query
+- `modules/campaign_monitoring/themes/default/js/javascript.js` - Removed incorrect frontend status inference logic
+- `modules/campaign_monitoring/lang/en.lang` - Added 'ringing' status translation
+- `modules/campaign_monitoring/lang/es.lang` - Added 'ringing' status translation
+- `modules/agent_console/index.php` - Fixed duplicate name display by skipping 2nd column in dynamic loop for outgoing calls
+- `modules/agent_console/lang/en.lang` - Changed 'Names' to 'Name' (singular)
+
+### Asterisk Dialplan
+- `/etc/asterisk/extensions_custom.conf` - Added atxfer-complete context for transfer completion
+
+### Installer
+- `setup/installer.php` - Added atxfer-complete context to extensions_custom.conf during installation
+
+---
+
 ## Version History
 
+- **4.0.0.8** - Attended transfer fix for Agent type (app_agent_pool), callback agent hangup fix
 - **4.0.0.7** - Bug fixes for campaign monitoring display, agent console hangup, statistics sync, and login cancellation
 - **4.0.0.6** - app_agent_pool migration (PHP 8 compatibility, agent password login)

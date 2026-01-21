@@ -35,6 +35,7 @@ class AMIEventProcess extends TuberiaProcess
     private $_campaniasSalientes = array();     // Campañas salientes activas, por ID
     private $_colasEntrantes = array();         // Info de colas entrantes, que puede incluir una campaña entrante
     private $_listaLlamadas;
+    private $_agentesEnAtxferComplete = array(); // Agents completing attended transfer (suppress Agentlogoff)
 
     // Estimación de la versión de Asterisk que se usa
     private $_asteriskVersion = array(1, 4, 0, 0);
@@ -96,7 +97,8 @@ class AMIEventProcess extends TuberiaProcess
 
         // Registro de manejadores de eventos desde ECCPWorkerProcess
         foreach (array('quitarBreakAgente',
-            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia') as $k)
+            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia',
+            'prepararAtxferComplete') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
         foreach (array('agregarIntentoLoginAgente', 'infoSeguimientoAgente',
             'reportarInfoLlamadaAtendida', 'reportarInfoLlamadasCampania',
@@ -1581,6 +1583,20 @@ class AMIEventProcess extends TuberiaProcess
         call_user_func_array(array($this, '_finalizarTransferencia'), $datos);
     }
 
+    /**
+     * Set flag to suppress Agentlogoff during attended transfer completion.
+     * When agent's channel is redirected to re-enter AgentLogin, Asterisk sends
+     * Agentlogoff followed by Agentlogin. We need to ignore the Agentlogoff
+     * to prevent the ECCP session from being closed.
+     */
+    public function msg_prepararAtxferComplete($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        $sAgente = $datos[0];
+        $this->_log->output('DEBUG: '.__METHOD__.' - Setting atxfer completion flag for '.$sAgente);
+        $this->_agentesEnAtxferComplete[$sAgente] = time();
+    }
+
     public function msg_abortarNuevasLlamadasMarcar($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
@@ -2083,6 +2099,7 @@ Uniqueid: 1429642067.241008
         // Convert to Agent/XXXX format for agent lookup, but keep track of actual channel
         $isLocalAgentChannel = false;
         $localAgentNumber = null;
+        $originalChannel = $params['Channel'];  // Save original BEFORE conversion
         if(preg_match("|Local/(\d+)@agents[;-].*|",$params['Channel'],$matches)) {
             $localAgentNumber = $matches[1];
             $isLocalAgentChannel = true;
@@ -2095,6 +2112,7 @@ Uniqueid: 1429642067.241008
             // Save flag indicating this was a Local agent channel
             if ($isLocalAgentChannel) {
                 $saved_bridge_channel[$bunique.'_local'] = true;
+                $saved_bridge_channel[$bunique.'_actual'] = $originalChannel;  // Save actual channel for AMI operations
             }
             $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter $bunique number channels 1 saving data");
         } else if ($params['BridgeNumChannels']==2) {
@@ -2104,6 +2122,15 @@ Uniqueid: 1429642067.241008
                 $params['Channel1']=$params['Channel'];
                 $params['Uniqueid2']=$saved_bridge_unique[$bunique];
                 $params['Channel2']=$saved_bridge_channel[$bunique];
+
+                // Pass actual channels for AMI operations (attended transfer, park, etc.)
+                if (isset($saved_bridge_channel[$bunique.'_actual'])) {
+                    $params['ActualChannel2'] = $saved_bridge_channel[$bunique.'_actual'];
+                }
+                if ($isLocalAgentChannel) {
+                    $params['ActualChannel1'] = $originalChannel;
+                }
+
                 //unset($saved_bridge_unique[$bunique]);
                 //unset($saved_bridge_channel[$bunique]);
                 $params['Event']='Bridge';
@@ -2234,10 +2261,12 @@ Uniqueid: 1429642067.241008
                     "a partir de params=".print_r($params, 1).
                     "\nResumen de llamada asociada es: ".print_r($llamada->resumenLlamada(), 1));
             } else {
+                // For Agent type: $sChannel is Agent/1001 (for lookup/backward compat),
+                // $sAgentChannel is the actual channel (Local/... after substitution in _identificarCanalAgenteLink)
                 $llamada->llamadaEnlazadaAgente(
                     $params['local_timestamp_received'], $a, $sRemChannel,
                     ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
-                    $sAgentChannel);
+                    $sChannel, $sAgentChannel);
                 if (is_null($llamada->actualchannel)) {
                     if ($llamada->agente->type == 'Agent') {
                         $this->_iniciarAgents();
@@ -2310,6 +2339,14 @@ Uniqueid: 1429642067.241008
         } elseif (preg_match($regexp_local_agent, $params['Channel2'], $regs)) {
             // Convert Local/1001@agents to Agent/1001 format for lookup
             $r2 = array($params['Channel2'], 'Agent/'.$regs[1], $regs[1]);
+        }
+
+        // Substitute actual channel for Agent type if passed in params (for AMI operations)
+        if (!is_null($r1) && preg_match('|^Agent/\d+$|', $r1[0]) && isset($params['ActualChannel1'])) {
+            $r1[0] = $params['ActualChannel1'];
+        }
+        if (!is_null($r2) && preg_match('|^Agent/\d+$|', $r2[0]) && isset($params['ActualChannel2'])) {
+            $r2[0] = $params['ActualChannel2'];
         }
 
         // Casos fáciles de decidir
@@ -2450,6 +2487,16 @@ Uniqueid: 1429642067.241008
         // Verificar que este evento corresponde a un Agentlogin iniciado por este programa
         $sAgente = 'Agent/'.$params['Agent'];
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
+
+        // Check if this is a re-login after attended transfer completion
+        $isAtxferRelogin = isset($this->_agentesEnAtxferComplete[$sAgente]);
+        if ($isAtxferRelogin) {
+            $this->_log->output('DEBUG: '.__METHOD__.': Agent '.$sAgente.
+                ' re-entering AgentLogin after attended transfer completion');
+            // Clear the atxfer flag
+            unset($this->_agentesEnAtxferComplete[$sAgente]);
+        }
+
         if (is_null($a) || $a->estado_consola == 'logged-out') {
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada.");
@@ -2474,6 +2521,12 @@ Uniqueid: 1429642067.241008
                 $a->nuevaMembresiaCola();
             }
         }
+
+        // If this was a re-login after atxfer, log success
+        if ($isAtxferRelogin) {
+            $this->_log->output('INFO: '.__METHOD__.': Agent '.$sAgente.
+                ' successfully re-logged in after attended transfer completion. Session preserved.');
+        }
     }
 
     public function msg_Agentlogoff($sEvent, $params, $sServer, $iPort)
@@ -2493,6 +2546,15 @@ Uniqueid: 1429642067.241008
                 $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada.");
                 $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogoff");
             }
+            return FALSE;
+        }
+
+        // Check if this agent is completing an attended transfer
+        // If so, suppress the logoff - the agent will re-enter AgentLogin
+        if (isset($this->_agentesEnAtxferComplete[$sAgente])) {
+            $this->_log->output('DEBUG: '.__METHOD__.': SUPPRESSING Agentlogoff for '.$sAgente.
+                ' - agent is completing attended transfer and will re-enter AgentLogin');
+            // Keep the flag set - it will be cleared when Agentlogin fires
             return FALSE;
         }
 

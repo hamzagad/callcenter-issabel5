@@ -235,6 +235,11 @@ exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
  same => n,AgentLogin(${EXTEN})
  same => n,Macro(hangupcall,)
 
+[atxfer-complete]
+exten => _X.,1,NoOp(Issabel CallCenter: Attended transfer completion - agent ${EXTEN} re-entering AgentLogin)
+ same => n,AgentLogin(${EXTEN})
+ same => n,Macro(hangupcall,)
+
 [agents]
 exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
  same => n,AgentRequest(${EXTEN})

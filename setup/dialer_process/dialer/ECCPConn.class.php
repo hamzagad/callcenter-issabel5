@@ -2095,9 +2095,134 @@ class ECCPConn
         if (!is_null($infoLlamada)) {
             $hangchannel = $infoLlamada['agentchannel'];
             // For app_agent_pool (Agent type), Agent/XXXX is not a real channel.
-            // Use actualchannel (caller's channel) instead to end the call.
+            // Use actualchannel (caller's channel) to end the call.
+            // Agent stays in AgentLogin session.
             if ($agentFields['type'] == 'Agent' && preg_match('|^Agent/\d+$|', $hangchannel)) {
-                $hangchannel = $infoLlamada['actualchannel'];
+                // Check if attended transfer is in progress
+                $isAttendedTransfer = false;
+                if (!is_null($infoLlamada['callid'])) {
+                    $dbTable = ($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls';
+                    $sth = $this->_db->prepare("SELECT transfer FROM {$dbTable} WHERE id = ?");
+                    $sth->execute(array($infoLlamada['callid']));
+                    $transferDest = $sth->fetchColumn(0);
+                    $sth->closeCursor();
+                    $isAttendedTransfer = !empty($transferDest);
+                }
+
+                if ($isAttendedTransfer) {
+                    // ========================================================================
+                    // ATTENDED TRANSFER COMPLETION
+                    // Redirect agent's login_channel to atxfer-complete context.
+                    // This causes agent to leave consultation bridge (Atxfer completes),
+                    // then re-enter AgentLogin to stay logged in.
+                    // ========================================================================
+                    $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+
+                    // Get agent's login_channel
+                    $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+                    if (is_null($infoAgente) || empty($infoAgente['login_channel'])) {
+                        $this->_log->output('WARN: No login_channel found for agent, falling back to normal hangup');
+                        $hangchannel = $infoLlamada['actualchannel'];
+                        $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                    } else {
+                        $loginChannel = $infoAgente['login_channel'];
+                        // Extract agent number (e.g., "1001" from "Agent/1001")
+                        $agentNumber = substr($sAgente, strpos($sAgente, '/') + 1);
+
+                        $this->_log->output('DEBUG: Agent login_channel: '.$loginChannel);
+                        $this->_log->output('DEBUG: Agent number: '.$agentNumber);
+
+                        // Signal AMIEventProcess to suppress the upcoming Agentlogoff event
+                        // The agent will re-enter AgentLogin via the atxfer-complete context
+                        $this->_log->output('DEBUG: Signaling AMIEventProcess to suppress Agentlogoff for '.$sAgente);
+                        $this->_tuberia->msg_AMIEventProcess_prepararAtxferComplete($sAgente);
+
+                        // Redirect agent's channel to atxfer-complete context
+                        // This causes agent to leave consultation bridge (Atxfer completes),
+                        // then the context runs AgentLogin to keep agent logged in
+                        $this->_log->output('DEBUG: Redirecting '.$loginChannel.' to atxfer-complete/'.$agentNumber);
+                        $r = $this->_ami->Redirect(
+                            $loginChannel,        // Channel: agent's login_channel
+                            '',                   // ExtraChannel: not used
+                            $agentNumber,         // Exten: agent number (e.g., 1001)
+                            'atxfer-complete',    // Context: atxfer-complete context
+                            1                     // Priority
+                        );
+                        $this->_log->output('DEBUG: Redirect result: '.print_r($r, true));
+
+                        if ($r['Response'] == 'Success') {
+                            $this->_log->output('INFO: Attended transfer completion initiated - agent redirected to atxfer-complete');
+                            // Release agent from call tracking
+                            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+
+                            $xml_hangupResponse->addChild('success');
+                            return $xml_response;
+                        } else {
+                            $this->_log->output('WARN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
+                            $hangchannel = $infoLlamada['actualchannel'];
+                            $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                        }
+                    }
+                } else {
+                    // Normal call: Hang up caller's channel, agent stays in AgentLogin
+                    $hangchannel = $infoLlamada['actualchannel'];
+                }
+            }
+            // For callback agents (SIP/IAX2/PJSIP type), agentchannel may be just the device name
+            // (e.g., SIP/101) without unique call ID. Check if it has a hyphen, if not use actualchannel.
+            elseif ($agentFields['type'] != 'Agent') {
+                // Check if attended transfer is in progress for callback agents
+                $isAttendedTransfer = false;
+                if (!is_null($infoLlamada['callid'])) {
+                    $dbTable = ($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls';
+                    $sth = $this->_db->prepare("SELECT transfer FROM {$dbTable} WHERE id = ?");
+                    $sth->execute(array($infoLlamada['callid']));
+                    $transferDest = $sth->fetchColumn(0);
+                    $sth->closeCursor();
+                    $isAttendedTransfer = !empty($transferDest);
+                }
+
+                if ($isAttendedTransfer) {
+                    // ========================================================================
+                    // CALLBACK AGENT ATTENDED TRANSFER COMPLETION
+                    // For callback agents, during attended transfer hangup we need to
+                    // hang up the agent's channel (not the customer's) to complete
+                    // the transfer and connect customer to colleague.
+                    // ========================================================================
+                    $this->_log->output('DEBUG: ========== CALLBACK AGENT ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+
+                    // Use agentchannel for callback agents to complete the transfer
+                    // If agentchannel doesn't have unique ID (no hyphen), get the actual agent channel
+                    if (strpos($hangchannel, '-') === false) {
+                        // agentchannel is just "SIP/101" - need to find the actual channel with unique ID
+                        // Try using actualAgentChannel if available
+                        if (isset($infoLlamada['actualAgentChannel']) && !empty($infoLlamada['actualAgentChannel'])) {
+                            $hangchannel = $infoLlamada['actualAgentChannel'];
+                            $this->_log->output('DEBUG: Using actualAgentChannel: '.$hangchannel);
+                        } else {
+                            // Fallback: try to construct the channel from current agent info
+                            $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+                            if (!is_null($infoAgente) && !empty($infoAgente['channel']) && strpos($infoAgente['channel'], '-') !== false) {
+                                $hangchannel = $infoAgente['channel'];
+                                $this->_log->output('DEBUG: Using agent channel from infoSeguimiento: '.$hangchannel);
+                            } else {
+                                // Last resort: use the agentchannel as-is and hope Asterisk can match it
+                                $this->_log->output('DEBUG: Using agentchannel without unique ID: '.$hangchannel);
+                            }
+                        }
+                    }
+                    $this->_log->output('DEBUG: Callback agent attended transfer - hanging up channel: '.$hangchannel);
+
+                    // Release agent from call tracking
+                    $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+
+                    $this->_log->output('INFO: Callback agent attended transfer completion - will hangup agent channel');
+                } elseif (strpos($hangchannel, '-') === false) {
+                    // No attended transfer - normal hangup, use actualchannel
+                    $hangchannel = $infoLlamada['actualchannel'];
+                }
             }
         }
         if (is_null($hangchannel)) {
@@ -2953,15 +3078,31 @@ SQL_INSERTAR_AGENDAMIENTO;
             return $xml_response;
         }
 
-        // Mandar a transferir la llamada usando el canal Agent/9000
+        // Get agent info to determine agent type and login_channel
+        $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+
+        // DEBUG: log agent info
+        $this->_log->output('DEBUG: '.__METHOD__.': infoAgente = '.print_r($infoAgente, true));
+
+        // For Agent type (app_agent_pool), use login_channel which is the actual SIP/PJSIP phone
+        // login_channel exists for Agent type agents who are logged in via AgentLogin
+        if (!is_null($infoAgente) && !empty($infoAgente['login_channel'])) {
+            $transferChannel = $infoAgente['login_channel'];
+            $this->_log->output('DEBUG: '.__METHOD__.': Using login_channel: '.$transferChannel);
+        } else {
+            $transferChannel = isset($infoLlamada['actualAgentChannel'])
+                ? $infoLlamada['actualAgentChannel']
+                : $infoLlamada['agentchannel'];
+            $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel: '.$transferChannel);
+        }
         $r = $this->_ami->Atxfer(
-            $infoLlamada['agentchannel'],
+            $transferChannel,
             $sExtension.'#',    // exten
             'from-internal',    // context
             1);                 // priority
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.': al transferir llamada: no se puede transferir '.
-                $infoLlamada['agentchannel'].' a '.$sExtension.' - '.$r['Message']);
+                $transferChannel.' a '.$sExtension.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call');
             return $xml_response;
         } else {

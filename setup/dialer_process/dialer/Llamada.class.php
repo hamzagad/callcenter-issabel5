@@ -126,6 +126,11 @@ class Llamada
      * para realizar la transferencia asistida. */
     private $_agentchannel = NULL;
 
+    /* Real Asterisk channel for the agent. For callback agents (SIP/IAX2/PJSIP),
+     * this equals _agentchannel. For Agent type with app_agent_pool, this is
+     * Local/XXXX@agents-nnnn;N which is the real channel for AMI commands. */
+    private $_actualAgentChannel = NULL;
+
     var $phone;     // Número marcado para llamada saliente o Caller-ID para llamada entrante
     private $_id_current_call;   // ID del registro correspondiente en current_call[_entry]
     private $_waiting_id_current_call = FALSE;  // Se pone a VERDADERO cuando se espera el id_current_call
@@ -243,6 +248,7 @@ class Llamada
         case 'channel':         return $this->_channel;
         case 'actualchannel':   return $this->_actualchannel;
         case 'agentchannel':    return $this->_agentchannel;
+        case 'actualAgentChannel': return isset($this->_actualAgentChannel) ? $this->_actualAgentChannel : $this->_agentchannel;
         case 'trunk':           return $this->_trunk;
         case 'status':          return $this->_status;
         case 'actionid':        return $this->_actionid;
@@ -472,6 +478,7 @@ class Llamada
             'currentcallid'         =>  $this->id_current_call,
             'queuenumber'           =>  $this->_queuenumber,
             'agentchannel'          =>  $this->_agentchannel,
+            'actualAgentChannel'    =>  isset($this->_actualAgentChannel) ? $this->_actualAgentChannel : $this->_agentchannel,
             'status'                =>  $this->_status,
             'channel'               =>  $this->channel,
             'actualchannel'         =>  $this->actualchannel,
@@ -813,7 +820,7 @@ class Llamada
     }
 
     public function llamadaEnlazadaAgente($timestamp, $agent, $sRemChannel,
-        $uniqueid_agente, $sAgentChannel)
+        $uniqueid_agente, $sAgentChannel, $sActualAgentChannel = NULL)
     {
         $this->agente = $agent;
         $this->agente->asignarLlamadaAtendida($this, $uniqueid_agente);
@@ -821,6 +828,7 @@ class Llamada
         $this->agente->llamada_agendada = NULL;
 
         $this->_agentchannel = $sAgentChannel;
+        $this->_actualAgentChannel = isset($sActualAgentChannel) ? $sActualAgentChannel : $sAgentChannel;
         $this->status = 'Success';
         $this->timestamp_link = $timestamp;
         if (!is_null($this->campania) && $this->campania->tipo_campania == 'outgoing')
@@ -993,6 +1001,7 @@ class Llamada
 
     	$this->timestamp_hangup = $timestamp;
         $this->_agentchannel = NULL;
+        $this->_actualAgentChannel = NULL;
         if ($this->tipo_llamada == 'outgoing' && is_null($this->timestamp_originatestart))
             $this->_stillborn = TRUE;
 
