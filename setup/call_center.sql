@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS `calls` (
   `datetime_originate` datetime default NULL,
 
   /* 2012-12-07: Store trunk used to route outgoing call */
-  `trunk`               varchar(20),
+  `trunk`               varchar(50),
 
   /* 2015-12-12: Tell apart calls loaded from CSV and scheduled calls */
   `scheduled` BOOLEAN NOT NULL DEFAULT 0,
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS `current_call_entry` (
   `callerid` varchar(15) NOT NULL,
   `datetime_init` datetime NOT NULL,
   `uniqueid` varchar(32) default NULL,
-  `ChannelClient` varchar(32) default NULL,
+  `ChannelClient` varchar(50) default NULL,
   `hold` enum('N','S') default 'N',
   PRIMARY KEY  (`id`),
   KEY `id_agent` (`id_agent`),
@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS `current_calls` (
   `agentnum` varchar(16) NOT NULL,
   `event` varchar(32) NOT NULL,
   `Channel` varchar(32) NOT NULL default '',
-  `ChannelClient` varchar(32) default NULL,
+  `ChannelClient` varchar(50) default NULL,
   `hold` enum('N','S') default 'N',
   PRIMARY KEY  (`id`),
   KEY `id_call` (`id_call`),
@@ -395,7 +395,7 @@ CREATE TABLE IF NOT EXISTS `call_entry` (
   `duration_wait` int(11) default NULL,
   `uniqueid` varchar(32) default NULL,
   `id_campaign` int(10) unsigned,
-  `trunk` varchar(20) NOT NULL,
+  `trunk` varchar(50) NOT NULL,
   PRIMARY KEY  (`id`),
   KEY `id_agent` (`id_agent`),
   KEY `id_queue_call_entry` (`id_queue_call_entry`),
@@ -417,7 +417,7 @@ CREATE TABLE IF NOT EXISTS `current_call_entry` (
   `callerid` varchar(15) NOT NULL,
   `datetime_init` datetime NOT NULL,
   `uniqueid` varchar(32) default NULL,
-  `ChannelClient` varchar(32) default NULL,
+  `ChannelClient` varchar(50) default NULL,
   `hold` enum('N','S') default 'N',
   PRIMARY KEY  (`id`),
   KEY `id_agent` (`id_agent`),
@@ -466,7 +466,7 @@ CREATE TABLE IF NOT EXISTS `call_progress_log` (
     `new_status`        varchar(32) NOT NULL,
     `retry`             int(10) unsigned,
     `uniqueid`          varchar(32),
-    `trunk`             varchar(20),
+    `trunk`             varchar(50),
     `id_agent`          int(10) unsigned,
     `duration`          int(10) unsigned,
 
@@ -1024,6 +1024,84 @@ DELIMITER ; ++
 
 CALL temp_indice_agent_2016_01_29();
 DROP PROCEDURE IF EXISTS temp_indice_agent_2016_01_29;
+
+
+/* Procedimiento para actualizar longitud del campo trunk a 50 caracteres */
+DELIMITER ++ ;
+
+DROP PROCEDURE IF EXISTS temp_trunk_length_2025_01_21 ++
+CREATE PROCEDURE temp_trunk_length_2025_01_21 ()
+    READS SQL DATA
+    MODIFIES SQL DATA
+BEGIN
+    DECLARE l_existe_columna tinyint(1);
+    DECLARE l_column_length int;
+
+    /* Actualizar call_entry.trunk a varchar(50) */
+    SELECT CHARACTER_MAXIMUM_LENGTH INTO l_column_length
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'call_center'
+        AND TABLE_NAME = 'call_entry'
+        AND COLUMN_NAME = 'trunk';
+    IF l_column_length IS NOT NULL AND l_column_length < 50 THEN
+        ALTER TABLE call_entry MODIFY COLUMN trunk VARCHAR(50);
+    END IF;
+
+    /* Actualizar call_progress_log.trunk a varchar(50) */
+    SELECT CHARACTER_MAXIMUM_LENGTH INTO l_column_length
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'call_center'
+        AND TABLE_NAME = 'call_progress_log'
+        AND COLUMN_NAME = 'trunk';
+    IF l_column_length IS NOT NULL AND l_column_length < 50 THEN
+        ALTER TABLE call_progress_log MODIFY COLUMN trunk VARCHAR(50);
+    END IF;
+
+    /* Actualizar calls.trunk a varchar(50) */
+    SELECT CHARACTER_MAXIMUM_LENGTH INTO l_column_length
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'call_center'
+        AND TABLE_NAME = 'calls'
+        AND COLUMN_NAME = 'trunk';
+    IF l_column_length IS NOT NULL AND l_column_length < 50 THEN
+        ALTER TABLE calls MODIFY COLUMN trunk VARCHAR(50);
+    END IF;
+
+    /* Actualizar campaign.trunk a varchar(50) si es menor */
+    SELECT CHARACTER_MAXIMUM_LENGTH INTO l_column_length
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'call_center'
+        AND TABLE_NAME = 'campaign'
+        AND COLUMN_NAME = 'trunk';
+    IF l_column_length IS NOT NULL AND l_column_length < 50 THEN
+        ALTER TABLE campaign MODIFY COLUMN trunk VARCHAR(50);
+    END IF;
+
+    /* Actualizar current_call_entry.ChannelClient a varchar(50) */
+    SELECT CHARACTER_MAXIMUM_LENGTH INTO l_column_length
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'call_center'
+        AND TABLE_NAME = 'current_call_entry'
+        AND COLUMN_NAME = 'ChannelClient';
+    IF l_column_length IS NOT NULL AND l_column_length < 50 THEN
+        ALTER TABLE current_call_entry MODIFY COLUMN ChannelClient VARCHAR(50);
+    END IF;
+
+    /* Actualizar current_calls.ChannelClient a varchar(50) */
+    SELECT CHARACTER_MAXIMUM_LENGTH INTO l_column_length
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'call_center'
+        AND TABLE_NAME = 'current_calls'
+        AND COLUMN_NAME = 'ChannelClient';
+    IF l_column_length IS NOT NULL AND l_column_length < 50 THEN
+        ALTER TABLE current_calls MODIFY COLUMN ChannelClient VARCHAR(50);
+    END IF;
+END;
+++
+DELIMITER ; ++
+
+CALL temp_trunk_length_2025_01_21();
+DROP PROCEDURE IF EXISTS temp_trunk_length_2025_01_21;
 
 
 /*!40000 ALTER TABLE `queue_call_entry` ENABLE KEYS */;

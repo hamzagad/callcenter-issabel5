@@ -56,7 +56,7 @@ if (file_exists($path_script_db))
         "ADD COLUMN agent varchar(32)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'call_entry',
         'trunk',
-        "ADD COLUMN trunk varchar(20) NOT NULL");
+        "ADD COLUMN trunk varchar(50) NOT NULL");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'failure_cause',
         "ADD COLUMN failure_cause int(10) unsigned default null, ADD COLUMN failure_cause_txt varchar(32) default null");
@@ -74,7 +74,7 @@ if (file_exists($path_script_db))
         "ADD COLUMN id_url int unsigned, ADD FOREIGN KEY (id_url) REFERENCES campaign_external_url (id)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'trunk',
-        "ADD COLUMN trunk varchar(20) NOT NULL");
+        "ADD COLUMN trunk varchar(50)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'agent',
         'type',
         "ADD COLUMN type enum('Agent','SIP','PJSIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id");
@@ -108,6 +108,14 @@ if (file_exists($path_script_db))
     crearIndiceSiNoExiste($pDB, 'call_center', 'calls',
         'campaign_date_schedule',
         "ADD KEY `campaign_date_schedule` (`id_campaign`, `date_init`, `date_end`, `time_init`, `time_end`)");
+
+    // Actualizar longitud de campos trunk y ChannelClient a 50 caracteres
+    actualizarLongitudCampo($pDB, 'call_center', 'call_entry', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'call_progress_log', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'calls', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'campaign', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'current_call_entry', 'ChannelClient', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'current_calls', 'ChannelClient', 50);
 
     // Asegurarse de que todo agente tiene una contraseña de ECCP
     $pDB->genQuery('UPDATE agent SET eccp_password = SHA1(CONCAT(NOW(), RAND(), number)) WHERE eccp_password IS NULL');
@@ -189,6 +197,41 @@ EXISTE_INDICE;
     }
 }
 
+function actualizarLongitudCampo($pDB, $sDatabase, $sTabla, $sColumna, $iNuevaLongitud)
+{
+    // Verificar longitud actual de la columna
+    $sPeticionSQL = <<<VERIFICAR_LONGITUD
+SELECT CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
+VERIFICAR_LONGITUD;
+    $r = $pDB->getFirstRowQuery($sPeticionSQL, FALSE, array($sDatabase, $sTabla, $sColumna));
+    if (!is_array($r)) {
+        fputs(STDERR, "ERR: al verificar longitud de $sTabla.$sColumna - ".$pDB->errMsg."\n");
+        return;
+    }
+    if (isset($r[0]) && $r[0] < $iNuevaLongitud) {
+        $tipo = $pDB->getFirstRowQuery(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+            FALSE,
+            array($sDatabase, $sTabla, $sColumna)
+        );
+        $nulo = $pDB->getFirstRowQuery(
+            "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+            FALSE,
+            array($sDatabase, $sTabla, $sColumna)
+        );
+        $nullClause = (is_array($nulo) && strtoupper($nulo[0]) == 'YES') ? 'NULL' : 'NOT NULL';
+        $sql = "ALTER TABLE $sTabla MODIFY COLUMN $sColumna " . $tipo[0] . "($iNuevaLongitud) $nullClause";
+        fputs(STDERR, "INFO: Actualizando longitud de $sTabla.$sColumna a $iNuevaLongitud caracteres\n");
+        fputs(STDERR, "\t$sql\n");
+        $r = $pDB->genQuery($sql);
+        if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
+    } else {
+        fputs(STDERR, "INFO: La longitud de $sTabla.$sColumna ya es adecuada o no existe.\n");
+    }
+}
+
 /**
  * Procedimiento que instala algunos contextos especiales requeridos para algunas
  * funcionalidades del CallCenter.
@@ -237,7 +280,7 @@ exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
 
 [atxfer-complete]
 exten => _X.,1,NoOp(Issabel CallCenter: Attended transfer completion - agent ${EXTEN} re-entering AgentLogin)
- same => n,AgentLogin(${EXTEN})
+ same => n,AgentLogin(${EXTEN},s)
  same => n,Macro(hangupcall,)
 
 [agents]

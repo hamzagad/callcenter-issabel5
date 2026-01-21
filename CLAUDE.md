@@ -85,6 +85,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 
 ## Development Notes
 
+- Testing and development is done on the live system, don't modify the repo before I ask you
 - Dialer runs as `asterisk` user (refuses to run as root)
 - Dialer logs: `/opt/issabel/dialer/dialerd.log`
 - WebServer logs: `/var/log/httpd/`
@@ -124,6 +125,5 @@ See [CHANGES.md](CHANGES.md) for detailed bug fixes and modifications.
 - Agent status updates in real-time without page reload with SSE
 
 ### Testing
-- Testing is done on the live environment
 - Outgoing campaign calls goes through the dialplan by default but can be explicitly set to use specific trunk
 - External calls uses SIP/120Issabel4 trunk
