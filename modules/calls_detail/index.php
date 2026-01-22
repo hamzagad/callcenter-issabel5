@@ -318,7 +318,11 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
         $oGrid->pagingShow(true);
         $oGrid->setNameFile_Export(_tr("Calls Detail"));
 
-        return $oGrid->fetchGrid();
+        $gridContent = $oGrid->fetchGrid();
+        // Insert extra header row with counter
+        $counterHtml = '<tr><th colspan="'.count($arrColumnas).'" style="text-align:center; border-bottom:2px solid #ccc; padding:8px 0; border-radius:6px 6px 0 0;"><span style="font-size:13px; color:white;"><span style="font-weight:bold;">'._tr('Total: ').'</span>'.$total.' '._tr('Calls').'</span></th></tr>';
+        $gridContent = preg_replace('/(<thead>)/', '<thead>$1'.$counterHtml, $gridContent);
+        return $gridContent;
      } else {
         global $arrLang;
 
@@ -346,6 +350,9 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
         if ($bExportando)
             return $oGrid->fetchGridCSV($arrGrid, $arrData);
         $sContenido = $oGrid->fetchGrid($arrGrid, $arrData, $arrLang);
+        // Insert extra header row with counter
+        $counterHtml = '<tr><th colspan="'.count($arrColumnas).'" style="text-align:center; border-bottom:2px solid #ccc; padding:8px 0; border-radius:6px 6px 0 0;"><span style="font-size:13px; color:white;"><span style="font-weight:bold;">'._tr('Total: ').'</span>'.$total.' '._tr('Calls').'</span></th></tr>';
+        $sContenido = preg_replace('/(<thead>)/', '<thead>$1'.$counterHtml, $sContenido);
         if (strpos($sContenido, '<form') === FALSE)
             $sContenido = "<form  method=\"POST\" style=\"margin-bottom:0;\" action=\"$url\">$sContenido</form>";
         return $sContenido;
