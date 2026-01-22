@@ -160,6 +160,9 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         case 'online':
             $sEstadoTag = '<img src="modules/'.$module_name.'/images/ready.png" border="0" alt="'._tr('READY').'"/>';
             break;
+        case 'ringing':
+            $sEstadoTag = '<img src="modules/'.$module_name.'/images/agent-ringing.gif" border="0" alt="'._tr('RINGING').'"/>';
+            break;
         case 'oncall':
             $sEstadoTag = '<img src="modules/'.$module_name.'/images/call.png" border="0" alt="'._tr('CALL').'"/>';
             break;
@@ -297,6 +300,7 @@ function construirDatosJSON(&$estadoMonitor)
                     $iTimestampEstado = strtotime($infoAgente['lastsessionend']);
                 break;
             case 'online':
+            case 'ringing':
                 if (!is_null($infoAgente['lastsessionstart']))
                     $iTimestampEstado = strtotime($infoAgente['lastsessionstart']);
                 break;
@@ -331,6 +335,17 @@ function construirDatosJSON(&$estadoMonitor)
         }
     }
     return $jsonData;
+}
+
+// Debug function to log agent monitoring data
+function debug_agent_monitoring($msg, $data = null) {
+    $logfile = '/tmp/agent_monitoring_debug.log';
+    $timestamp = date('Y-m-d H:i:s');
+    $logmsg = "[$timestamp] $msg";
+    if ($data !== null) {
+        $logmsg .= ": " . print_r($data, true);
+    }
+    file_put_contents($logfile, $logmsg . "\n", FILE_APPEND);
 }
 
 function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola)
@@ -391,6 +406,37 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     do {
         $oPaloConsola->desconectarEspera();
 
+        // Re-poll full state to catch changes not reflected in events (e.g., ringing status)
+        $estadoMonitorActual = $oPaloConsola->listarEstadoMonitoreoAgentes();
+        debug_agent_monitoring("Poll iteration - estadoMonitorActual raw", $estadoMonitorActual);
+        if (is_array($estadoMonitorActual)) {
+            ksort($estadoMonitorActual);
+            $jsonDataActual = construirDatosJSON($estadoMonitorActual);
+            debug_agent_monitoring("Poll iteration - jsonDataActual (status values)", array_map(function($row) {
+                return ['status' => $row['status'], 'oncallupdate' => $row['oncallupdate']];
+            }, $jsonDataActual));
+            foreach ($jsonDataActual as $jsonKey => $jsonRow) {
+                if (isset($estadoCliente[$jsonKey])) {
+                    if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
+                        $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
+                        debug_agent_monitoring("Status change detected for $jsonKey", [
+                            'old_status' => $estadoCliente[$jsonKey]['status'],
+                            'new_status' => $jsonRow['status'],
+                            'old_oncallupdate' => $estadoCliente[$jsonKey]['oncallupdate'],
+                            'new_oncallupdate' => $jsonRow['oncallupdate']
+                        ]);
+                        $respuesta[$jsonKey] = $jsonRow;
+                        $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
+                        $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
+                        unset($respuesta[$jsonKey]['agentname']);
+                    }
+                }
+            }
+            // Update local state for event handling
+            $estadoMonitor = $estadoMonitorActual;
+            $jsonData = $jsonDataActual;
+        }
+
         // Se inicia espera larga con el navegador...
         session_commit();
         $iTimestampInicio = time();
@@ -404,6 +450,31 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                 jsonflush($bSSE, $respuesta);
                 $oPaloConsola->desconectarTodo();
                 return;
+            }
+
+            // Re-poll state after each event wait to catch ringing/device status changes
+            // that don't generate events (QueueMemberStatus -> queue_status changes)
+            $estadoMonitorActual = $oPaloConsola->listarEstadoMonitoreoAgentes();
+            if (is_array($estadoMonitorActual)) {
+                ksort($estadoMonitorActual);
+                $jsonDataActual = construirDatosJSON($estadoMonitorActual);
+                foreach ($jsonDataActual as $jsonKey => $jsonRow) {
+                    if (isset($estadoCliente[$jsonKey])) {
+                        if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
+                            $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
+                            debug_agent_monitoring("Inner loop status change for $jsonKey", [
+                                'old' => $estadoCliente[$jsonKey]['status'],
+                                'new' => $jsonRow['status']
+                            ]);
+                            $respuesta[$jsonKey] = $jsonRow;
+                            $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
+                            $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
+                            unset($respuesta[$jsonKey]['agentname']);
+                        }
+                    }
+                }
+                $estadoMonitor = $estadoMonitorActual;
+                $jsonData = $jsonDataActual;
             }
 
             $iTimestampActual = time();
@@ -683,6 +754,34 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
                                 unset($respuesta[$jsonKey]['agentname']);
                             }
+                        }
+                    }
+                    break;
+                case 'agentstatechange':
+                    // Real-time agent state change (e.g., ringing status)
+                    $sQueue = $evento['queue'];
+                    $sNewStatus = $evento['status'];
+                    if (isset($estadoMonitor[$sQueue][$sCanalAgente])) {
+                        $jsonKey = 'queue-'.$sQueue.'-member-'.$sNumeroAgente;
+                        if (isset($jsonData[$jsonKey]) && $jsonData[$jsonKey]['status'] != $sNewStatus) {
+                            debug_agent_monitoring("agentstatechange event for $jsonKey", [
+                                'old' => $jsonData[$jsonKey]['status'],
+                                'new' => $sNewStatus
+                            ]);
+
+                            // Update monitor state
+                            $estadoMonitor[$sQueue][$sCanalAgente]['agentstatus'] = $sNewStatus;
+
+                            // Update JSON data
+                            $jsonData[$jsonKey]['status'] = $sNewStatus;
+                            $jsonData[$jsonKey]['sec_laststatus'] = 0;
+
+                            // Update client state
+                            $estadoCliente[$jsonKey]['status'] = $sNewStatus;
+
+                            // Emit to client
+                            $respuesta[$jsonKey] = $jsonData[$jsonKey];
+                            unset($respuesta[$jsonKey]['agentname']);
                         }
                     }
                     break;

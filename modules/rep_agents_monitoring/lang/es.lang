@@ -32,5 +32,10 @@ $arrLangModule = array(
     "No registered" => "No registrada",
     "Agents" => "Agentes",
     "Number" => "Número",
+    "LOGOUT" => "DESCONECTADO",
+    "READY" => "LISTO",
+    "RINGING" => "TIMBRANDO",
+    "CALL" => "EN LLAMADA",
+    "BREAK" => "EN PAUSA",
 );
 ?>

@@ -340,6 +340,22 @@ class ECCPProxyConn extends MultiplexConn
         $this->multiplexSrv->encolarDatosEscribir($this->sKey, $s);
     }
 
+    function notificarEvento_AgentStateChange($sAgente, $sNewStatus, $sQueue)
+    {
+        if (is_null($this->_sUsuarioECCP)) return;
+        if (!is_null($this->_sAgenteFiltrado) && $this->_sAgenteFiltrado != $sAgente) return;
+
+        $xml_response = new SimpleXMLElement('<event />');
+        $xml_stateChange = $xml_response->addChild('agentstatechange');
+
+        $xml_stateChange->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+        $xml_stateChange->addChild('status', $sNewStatus);
+        $xml_stateChange->addChild('queue', str_replace('&', '&amp;', $sQueue));
+
+        $s = $xml_response->asXML();
+        $this->multiplexSrv->encolarDatosEscribir($this->sKey, $s);
+    }
+
     function notificarEvento_RecordingMute($sAgente, $sTipoLlamada, $idCampaign, $idLlamada)
     {
         if (is_null($this->_sUsuarioECCP)) return;

@@ -199,6 +199,9 @@ function manejarRespuestaStatus(respuesta)
 				case 'online':
 					statuslabel.append('<img src="modules/'+module_name+'/images/ready.png" border="0" alt="'+'READY'+'"/>');
 					break;
+				case 'ringing':
+					statuslabel.append('<img src="modules/'+module_name+'/images/agent-ringing.gif" border="0" alt="'+'RINGING'+'"/>');
+					break;
 				case 'oncall':
 					statuslabel.append('<img src="modules/'+module_name+'/images/call.png" border="0" alt="'+'CALL'+'"/>');
 					break;

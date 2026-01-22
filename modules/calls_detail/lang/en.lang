@@ -37,6 +37,10 @@ $arrLangModule = array(
     'Any Type'      => 'Any Type',
     'All Agents'    => 'All Agents',
     'All Queues'    => 'All Queues',
+    'All Status'    => 'All Status',
+    'All Transfers' => 'All Transfers',
+    'Transferred'   => 'Transferred',
+    'Not Transferred'=> 'Not Transferred',
     'Inbound'       => 'Incoming',
     'Outbound'      => 'Outgoing',
 );

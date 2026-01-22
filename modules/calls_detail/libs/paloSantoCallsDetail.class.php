@@ -82,6 +82,35 @@ class paloSantoCallsDetail
             $paramSQL[] = (int)$param['id_campaign_in'];
         }
 
+        // Filtrar por estado de la llamada (mapear valores ingles a espaniol para llamadas entrantes)
+        if (isset($param['status']) && $param['status'] != '') {
+            $statusMap = array(
+                'Success'       => array('activa', 'terminada'),
+                'Abandoned'     => array('abandonada'),
+                'Failure'       => array('Failure'),
+                'NoAnswer'      => array('NoAnswer'),
+                'OnQueue'       => array('en-cola'),
+                'Placing'       => array('Placing'),
+                'Ringing'       => array('Ringing'),
+                'ShortCall'     => array('ShortCall'),
+                'fin-monitoreo' => array('fin-monitoreo'),
+            );
+            if (isset($statusMap[$param['status']])) {
+                $placeholders = implode(',', array_fill(0, count($statusMap[$param['status']]), '?'));
+                $condSQL[] = 'call_entry.status IN ('.$placeholders.')';
+                $paramSQL = array_merge($paramSQL, $statusMap[$param['status']]);
+            }
+        }
+
+        // Filtrar por transferencia
+        if (isset($param['transfer']) && $param['transfer'] != '') {
+            if ($param['transfer'] == 'yes') {
+                $condSQL[] = '(call_entry.transfer IS NOT NULL AND call_entry.transfer != "")';
+            } elseif ($param['transfer'] == 'no') {
+                $condSQL[] = '(call_entry.transfer IS NULL OR call_entry.transfer = "")';
+            }
+        }
+
         // Fecha y hora de inicio y final del rango
         $sRegFecha = '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/';
         if (isset($param['date_start']) && preg_match($sRegFecha, $param['date_start'])) {
@@ -119,6 +148,38 @@ class paloSantoCallsDetail
         if (isset($param['id_campaign_out']) && preg_match('/^\d+$/', $param['id_campaign_out'])) {
             $condSQL[] = 'campaign.id = ?';
             $paramSQL[] = (int)$param['id_campaign_out'];
+        }
+
+        // Filtrar por estado de la llamada (las llamadas salientes ya usan valores en ingles)
+        if (isset($param['status']) && $param['status'] != '') {
+            $statusMap = array(
+                'Success'       => array('Success'),
+                'Abandoned'     => array('Abandoned'),
+                'Failure'       => array('Failure'),
+                'NoAnswer'      => array('NoAnswer'),
+                'OnQueue'       => array('OnQueue'),
+                'Placing'       => array('Placing'),
+                'Ringing'       => array('Ringing'),
+                'ShortCall'     => array('ShortCall'),
+                'fin-monitoreo' => array(), // fin-monitoreo solo existe en llamadas entrantes
+            );
+            if (isset($statusMap[$param['status']]) && count($statusMap[$param['status']]) > 0) {
+                $placeholders = implode(',', array_fill(0, count($statusMap[$param['status']]), '?'));
+                $condSQL[] = 'calls.status IN ('.$placeholders.')';
+                $paramSQL = array_merge($paramSQL, $statusMap[$param['status']]);
+            } elseif (isset($statusMap[$param['status']]) && count($statusMap[$param['status']]) == 0) {
+                // Para estados que no existen en llamadas salientes, excluir todas
+                $condSQL[] = '1 = 0';
+            }
+        }
+
+        // Filtrar por transferencia
+        if (isset($param['transfer']) && $param['transfer'] != '') {
+            if ($param['transfer'] == 'yes') {
+                $condSQL[] = '(calls.transfer IS NOT NULL AND calls.transfer != "")';
+            } elseif ($param['transfer'] == 'no') {
+                $condSQL[] = '(calls.transfer IS NULL OR calls.transfer = "")';
+            }
         }
 
         // Fecha y hora de inicio y final del rango

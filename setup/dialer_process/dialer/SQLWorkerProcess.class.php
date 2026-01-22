@@ -83,7 +83,7 @@ class SQLWorkerProcess extends TuberiaProcess
             'verificarFinLlamadasAgendables', 'agregarArchivoGrabacion',
             'AgentLogin', 'AgentLogoff', 'AgentLinked', 'AgentUnlinked',
             'marcarFinalHold', 'nuevaMembresiaCola', 'notificarProgresoLlamada',
-            'requerir_credencialesAsterisk',) as $k)
+            'requerir_credencialesAsterisk', 'AgentStateChange',) as $k)
             $this->_tuberia->registrarManejador('AMIEventProcess', $k, array($this, "msg_$k"));
 
         // Registro de manejadores de eventos desde ECCPWorkerProcess
@@ -469,6 +469,14 @@ class SQLWorkerProcess extends TuberiaProcess
             $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_nuevaMembresiaCola', $datos);
+    }
+
+    public function msg_AgentStateChange($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
+    {
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+        }
+        $this->_encolarAccionPendiente('_agentStateChange', $datos);
     }
 
     public function msg_notificarProgresoLlamada($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
@@ -1025,6 +1033,18 @@ SQL_EXISTE_AUDIT;
         $recordset_breakinfo = NULL;
         cargarInfoPausa($this->_db, $infoSeguimiento, $recordset_breakinfo);
         $eventos_forward[] = array('QueueMembership', array($sAgente, $infoSeguimiento, $listaColas));
+
+        $eventos[] = array('ECCPProcess', 'emitirEventos', array($eventos_forward));
+        return $eventos;
+    }
+
+    private function _agentStateChange($sAgente, $sNewStatus, $sQueue)
+    {
+        $eventos = array();
+        $eventos_forward = array();
+
+        // Emit the AgentStateChange event for real-time UI updates (e.g., ringing status)
+        $eventos_forward[] = array('AgentStateChange', array($sAgente, $sNewStatus, $sQueue));
 
         $eventos[] = array('ECCPProcess', 'emitirEventos', array($eventos_forward));
         return $eventos;

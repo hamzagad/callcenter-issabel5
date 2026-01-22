@@ -958,6 +958,10 @@ class PaloSantoConsola
                         $evento['queues'][] = (string)$xml_q;
                     }
                     break;
+                case 'agentstatechange':
+                    $evento['status'] = (string)$evt->status;
+                    $evento['queue'] = (string)$evt->queue;
+                    break;
                 case 'schedulecallstart':
                 case 'schedulecallfailed':
                     foreach (array('agent_number', 'calltype') as $k)

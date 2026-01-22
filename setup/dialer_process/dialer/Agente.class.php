@@ -556,7 +556,25 @@ class Agente
 
     public function actualizarEstadoEnCola($queue, $status)
     {
+        $oldStatus = isset($this->_estado_agente_colas[$queue]) ? $this->_estado_agente_colas[$queue] : AST_DEVICE_UNKNOWN;
         $this->_estado_agente_colas[$queue] = $status;
+
+        // Emit event when status changes to/from ringing (for real-time UI updates)
+        // Only emit if agent is logged in and status actually changed
+        if ($this->estado_consola == 'logged-in' && $oldStatus != $status) {
+            $isNowRinging = ($status == AST_DEVICE_RINGING || $status == AST_DEVICE_RINGINUSE);
+            $wasRinging = ($oldStatus == AST_DEVICE_RINGING || $oldStatus == AST_DEVICE_RINGINUSE);
+
+            if ($isNowRinging || $wasRinging) {
+                // Determine the new agent status string
+                $sNewStatus = $isNowRinging ? 'ringing' : 'online';
+                $this->_tuberia->msg_SQLWorkerProcess_AgentStateChange(
+                    $this->channel,
+                    $sNewStatus,
+                    $queue
+                );
+            }
+        }
     }
 
     public function quitarEstadoEnCola($queue)

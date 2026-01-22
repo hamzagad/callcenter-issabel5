@@ -112,15 +112,36 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
     $campaignIn = $oCallsDetail->getCampaigns('incoming');
     $campaignOut = $oCallsDetail->getCampaigns('outgoing');
 
+    // Status combo options
+    $callStatus = array(
+        ''          =>  '('._tr('All Status').')',
+        'Success'   =>  _tr('Success'),
+        'Abandoned' =>  _tr('Abandoned'),
+        'Failure'   =>  _tr('Failure'),
+        'NoAnswer'  =>  _tr('NoAnswer'),
+        'OnQueue'   =>  _tr('OnQueue'),
+        'Placing'   =>  _tr('Placing'),
+        'Ringing'   =>  _tr('Ringing'),
+        'ShortCall' =>  _tr('ShortCall'),
+        'fin-monitoreo' => _tr('End Monitor'),
+    );
+
+    // Transfer combo options
+    $transferFilter = array(
+        ''  =>  '('._tr('All Transfers').')',
+        'yes'=>  _tr('Transferred'),
+        'no' =>  _tr('Not Transferred'),
+    );
+
     $urlVars = array('menu' => $module_name);
-    $arrFormElements = createFieldFilter($comboAgentes, $comboColas, $callType, $campaignIn, $campaignOut);
+    $arrFormElements = createFieldFilter($comboAgentes, $comboColas, $callType, $campaignIn, $campaignOut, $callStatus, $transferFilter);
     $oFilterForm = new paloForm($smarty, $arrFormElements);
 
     // Validar y aplicar las variables de filtro
     $paramLista = NULL;
     $paramFiltro = array();
     foreach (array('date_start', 'date_end', 'calltype', 'agent', 'queue',
-        'phone', 'id_campaign_out', 'id_campaign_in') as $k)
+        'phone', 'id_campaign_out', 'id_campaign_in', 'status', 'transfer') as $k)
         $paramFiltro[$k] = getParameter($k);
     if (!isset($paramFiltro['date_start'])) $paramFiltro['date_start'] = date("d M Y");
     if (!isset($paramFiltro['date_end'])) $paramFiltro['date_end'] = date("d M Y");
@@ -282,6 +303,14 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
         $_POST['agent'] = $paramLista['agent'];
         $oGrid->addFilterControl(_tr("Filter applied ")._tr("Agent")." = ".$comboAgentes[$paramLista['agent']], $_POST, array("agent" => ''),true);
 
+        $paramLista['status'] = isset($callStatus[$paramLista['status']]) ? $paramLista['status'] : '';
+        $_POST['status'] = $paramLista['status'];
+        $oGrid->addFilterControl(_tr("Filter applied ")._tr("Status")." = ".$callStatus[$paramLista['status']], $_POST, array("status" => ''),true);
+
+        $paramLista['transfer'] = isset($transferFilter[$paramLista['transfer']]) ? $paramLista['transfer'] : '';
+        $_POST['transfer'] = $paramLista['transfer'];
+        $oGrid->addFilterControl(_tr("Filter applied ")._tr("Transfer")." = ".$transferFilter[$paramLista['transfer']], $_POST, array("transfer" => ''),true);
+
         $oGrid->setURL(construirURL($urlVars, array("nav", "start")));
         $oGrid->setData($arrData);
         $oGrid->setColumns($arrColumnas);
@@ -387,7 +416,7 @@ function downloadRecording($smarty, $module_name, $pDB)
     fclose($fp);
 }
 
-function createFieldFilter($comboAgentes, $comboColas, $arrCallType, $campaignIn, $campaignOut)
+function createFieldFilter($comboAgentes, $comboColas, $arrCallType, $campaignIn, $campaignOut, $callStatus, $transferFilter)
 {
     // Combo de campañas entrantes
     $comboCampaignIn = array('' => '('._tr('All Incoming Campaigns').')');
@@ -471,6 +500,24 @@ function createFieldFilter($comboAgentes, $comboColas, $arrCallType, $campaignIn
             'INPUT_EXTRA_PARAM'         =>  $comboCampaignOut,
             'VALIDATION_TYPE'           =>  'ereg',
             'VALIDATION_EXTRA_PARAM'    =>  '^[[:digit:]]+$',
+            'ONCHANGE'                  =>  'submit();',
+        ),
+        'status'     =>  array(
+            'LABEL'                     =>  _tr('Status'),
+            'REQUIRED'                  =>  'no',
+            'INPUT_TYPE'                =>  'SELECT',
+            'INPUT_EXTRA_PARAM'         =>  $callStatus,
+            'VALIDATION_TYPE'           =>  'ereg',
+            'VALIDATION_EXTRA_PARAM'    =>  '^(|Success|Abandoned|Failure|NoAnswer|OnQueue|Placing|Ringing|ShortCall|fin-monitoreo)$',
+            'ONCHANGE'                  =>  'submit();',
+        ),
+        'transfer'     =>  array(
+            'LABEL'                     =>  _tr('Transfer'),
+            'REQUIRED'                  =>  'no',
+            'INPUT_TYPE'                =>  'SELECT',
+            'INPUT_EXTRA_PARAM'         =>  $transferFilter,
+            'VALIDATION_TYPE'           =>  'ereg',
+            'VALIDATION_EXTRA_PARAM'    =>  '^(|yes|no)$',
             'ONCHANGE'                  =>  'submit();',
         ),
     );

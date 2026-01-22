@@ -449,8 +449,151 @@ elseif ($agentFields['type'] != 'Agent' && strpos($hangchannel, '-') === false) 
 
 ---
 
+### 8. Real-Time Agent Ringing Status in Agents Monitoring
+**Files**:
+- `setup/dialer_process/dialer/ECCPProxyConn.class.php` (added notificarEvento_AgentStateChange)
+- `setup/dialer_process/dialer/Agente.class.php` (modified actualizarEstadoEnCola)
+- `setup/dialer_process/dialer/SQLWorkerProcess.class.php` (added agentstatechange handler)
+- `modules/agent_console/libs/paloSantoConsola.class.php` (agentstatechange event parsing)
+- `modules/rep_agents_monitoring/index.php` (agentstatechange event handling)
+- `modules/rep_agents_monitoring/themes/default/js/javascript.js` (ringing status display)
+- `modules/rep_agents_monitoring/images/agent-ringing.gif` (ringing animation)
+- `modules/rep_agents_monitoring/lang/*.lang` (i18n for READY, RINGING, CALL, BREAK)
+
+**Issue**: Agents Monitoring module only showed "Ready" (green) when agent's phone was ringing, with no real-time update when status changed to/from ringing. The module only detected ringing on page reload, not during live monitoring.
+
+**Root Cause**:
+1. No ECCP event was emitted when agent's device status changed to/from ringing
+2. QueueMemberStatus AMI events updated internal state but didn't notify connected clients
+3. The web module relied on periodic polling (every 30 seconds) which was too slow for ringing status
+4. Ringing typically lasts only a few seconds, so changes were missed between polls
+
+**Fix - Part 1: New ECCP Event** (`ECCPProxyConn.class.php`)
+
+Added `notificarEvento_AgentStateChange()` to emit a new event type when agent status changes:
+```php
+function notificarEvento_AgentStateChange($sAgente, $sNewStatus, $sQueue)
+{
+    $xml_response = new SimpleXMLElement('<event />');
+    $xml_stateChange = $xml_response->addChild('agentstatechange');
+
+    $xml_stateChange->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+    $xml_stateChange->addChild('status', $sNewStatus);  // 'ringing' or 'online'
+    $xml_stateChange->addChild('queue', str_replace('&', '&amp;', $sQueue));
+
+    $s = $xml_response->asXML();
+    $this->multiplexSrv->encolarDatosEscribir($this->sKey, $s);
+}
+```
+
+**Fix - Part 2: Emit Event on Device Status Change** (`Agente.class.php`)
+
+Modified `actualizarEstadoEnCola()` to detect and emit events when ringing status changes:
+```php
+public function actualizarEstadoEnCola($queue, $status)
+{
+    $oldStatus = isset($this->_estado_agente_colas[$queue]) ? $this->_estado_agente_colas[$queue] : AST_DEVICE_UNKNOWN;
+    $this->_estado_agente_colas[$queue] = $status;
+
+    // Emit event when status changes to/from ringing (for real-time UI updates)
+    if ($this->estado_consola == 'logged-in' && $oldStatus != $status) {
+        $isNowRinging = ($status == AST_DEVICE_RINGING || $status == AST_DEVICE_RINGINUSE);
+        $wasRinging = ($oldStatus == AST_DEVICE_RINGING || $oldStatus == AST_DEVICE_RINGINUSE);
+
+        if ($isNowRinging || $wasRinging) {
+            $sNewStatus = $isNowRinging ? 'ringing' : 'online';
+            $this->_tuberia->msg_SQLWorkerProcess_AgentStateChange(
+                $this->channel, $sNewStatus, $queue
+            );
+        }
+    }
+}
+```
+
+**Fix - Part 3: Route Event Through Dialer** (`SQLWorkerProcess.class.php`)
+
+Registered handler and added event routing:
+```php
+// Register handler
+foreach (array(..., 'AgentStateChange',) as $k)
+    $this->_tuberia->registrarManejador('AMIEventProcess', $k, array($this, "msg_$k"));
+
+// Handler method
+public function msg_AgentStateChange($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
+{
+    $this->_encolarAccionPendiente('_agentStateChange', $datos);
+}
+
+// Event builder
+private function _agentStateChange($sAgente, $sNewStatus, $sQueue)
+{
+    $eventos_forward[] = array('AgentStateChange', array($sAgente, $sNewStatus, $sQueue));
+    $eventos[] = array('ECCPProcess', 'emitirEventos', array($eventos_forward));
+    return $eventos;
+}
+```
+
+**Fix - Part 4: Parse Event in ECCP Client** (`paloSantoConsola.class.php`)
+
+Added event parsing:
+```php
+case 'agentstatechange':
+    $evento['status'] = (string)$evt->status;
+    $evento['queue'] = (string)$evt->queue;
+    break;
+```
+
+**Fix - Part 5: Handle Event in Web Module** (`rep_agents_monitoring/index.php`)
+
+Added event handler to update UI in real-time:
+```php
+case 'agentstatechange':
+    $sQueue = $evento['queue'];
+    $sNewStatus = $evento['status'];
+    if (isset($estadoMonitor[$sQueue][$sCanalAgente])) {
+        $jsonKey = 'queue-'.$sQueue.'-member-'.$sNumeroAgente;
+        if (isset($jsonData[$jsonKey]) && $jsonData[$jsonKey]['status'] != $sNewStatus) {
+            // Update monitor state, JSON data, and emit to client
+            $estadoMonitor[$sQueue][$sCanalAgente]['agentstatus'] = $sNewStatus;
+            $jsonData[$jsonKey]['status'] = $sNewStatus;
+            $jsonData[$jsonKey]['sec_laststatus'] = 0;
+            $respuesta[$jsonKey] = $jsonData[$jsonKey];
+        }
+    }
+    break;
+```
+
+**Fix - Part 6: Frontend Display** (`javascript.js` + images + i18n)
+
+Added ringing case in status update handler, copied ringing GIF image, and added translations:
+- English: READY, RINGING, CALL, BREAK
+- Spanish: LISTO, TIMBRANDO, EN LLAMADA, EN PAUSA
+- French: PRÊT, SONNERIE, EN APPEL, EN PAUSE
+- Russian: ГОТОВ, ЗВОНИТ, НА ЗВОНКЕ, НА ПЕРЕРЫВЕ
+- Persian: آماده, زنگ می‌زند, در تماس, در استراحت
+
+**Event Flow**:
+1. Asterisk sends `QueueMemberStatus` AMI event with Status=6 (ringing)
+2. `AMIEventProcess::msg_QueueMemberStatus()` calls `$a->actualizarEstadoEnCola($queue, 6)`
+3. Agent detects status change to ringing → emits `AgentStateChange` event
+4. Event routes through SQLWorkerProcess → ECCPProcess → ECCPProxyConn
+5. Web client receives event via SSE in real-time
+6. Frontend updates agent status to show ringing animation
+7. When agent answers → Status changes to 1 (not in use) → event emits with 'online'
+8. Frontend updates back to "Ready" status
+
+**Impact**:
+- Agents Monitoring now shows real-time ringing status
+- No page reload needed to see status changes
+- Ringing detection is instant (within milliseconds of AMI event)
+- Module behavior matches Campaign Monitoring implementation
+- Dialer restart required to apply changes
+
+---
+
 ## Version History
 
+- **4.0.0.9** - Real-time agent ringing status in Agents Monitoring module
 - **4.0.0.8** - Attended transfer fix for Agent type (app_agent_pool), callback agent hangup fix
 - **4.0.0.7** - Bug fixes for campaign monitoring display, agent console hangup, statistics sync, and login cancellation
 - **4.0.0.6** - app_agent_pool migration (PHP 8 compatibility, agent password login)

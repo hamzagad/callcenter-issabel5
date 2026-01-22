@@ -31,5 +31,9 @@ $arrLangModule = array(
     "No registered" => "Non enregistré",
     "LOGOUT" => "Déconnexion",
     "Number" => "N°",
+    "READY" => "PRÊT",
+    "RINGING" => "SONNERIE",
+    "CALL" => "EN APPEL",
+    "BREAK" => "EN PAUSE",
 );
 ?>

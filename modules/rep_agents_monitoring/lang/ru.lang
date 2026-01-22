@@ -37,5 +37,9 @@ $arrLangModule = array(
     "Page" => "Страница",
     "records" => "записей",
     "TOTAL" => "ВСЕГО",
+    "READY" => "ГОТОВ",
+    "RINGING" => "ЗВОНИТ",
+    "CALL" => "НА ЗВОНКЕ",
+    "BREAK" => "НА ПЕРЕРЫВЕ",
 );
 ?>
