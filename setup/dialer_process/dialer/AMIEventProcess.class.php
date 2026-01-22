@@ -69,6 +69,8 @@ class AMIEventProcess extends TuberiaProcess
     private $_alarmas = array();
 
     private $_queueshadow = NULL;
+    private $_saved_bridge_unique = array();
+    private $_saved_bridge_channel = array();
 
     public function inicioPostDemonio($infoConfig, &$oMainLog)
     {
@@ -2075,20 +2077,31 @@ Uniqueid: 1429642067.241008
     }
     public function msg_BridgeDestroy($sEvent, $params, $sServer, $iPort)
     {
-        global $saved_bridge_unique, $saved_bridge_channel;
+/*         global $saved_bridge_unique, $saved_bridge_channel;
         $bunique = $params['BridgeUniqueid'];
         unset($saved_bridge_unique[$bunique]);
         unset($saved_bridge_channel[$bunique]);
+ */ 
+        // Replace global usage with class properties
+        $bunique = $params['BridgeUniqueid'];
+        if (isset($this->_saved_bridge_unique[$bunique])) {
+            unset($this->_saved_bridge_unique[$bunique]);
+        }
+        if (isset($this->_saved_bridge_channel[$bunique])) {
+            unset($this->_saved_bridge_channel[$bunique]);
+            unset($this->_saved_bridge_channel[$bunique.'_local']);
+            unset($this->_saved_bridge_channel[$bunique.'_actual']);
+        }
         $this->_log->output('DEBUG: '.__METHOD__. "Bridge Destroy $bunique");
 
     }
 
     public function msg_BridgeEnter($sEvent, $params, $sServer, $iPort)
     {
-        global $saved_bridge_unique, $saved_bridge_channel;
+// Replace global with class properties
+        // global $saved_bridge_unique, $saved_bridge_channel; <--- REMOVE THIS
 
-        // BridgeTechnology simple_bridge con BridgeNumChannels: 1, guardamos datos para esperar el BridgeNumChannels: 2 y disparar el Link simulado
-
+        // BridgeTechnology simple_bridge con BridgeNumChannels: 1...
         if($params['BridgeTechnology']<>'simple_bridge') {
             return false;
         }
@@ -2096,43 +2109,39 @@ Uniqueid: 1429642067.241008
         $bunique = $params['BridgeUniqueid'];
 
         // Handle Local/XXXX@agents;N channels from app_agent_pool
-        // Convert to Agent/XXXX format for agent lookup, but keep track of actual channel
         $isLocalAgentChannel = false;
-        $localAgentNumber = null;
         $originalChannel = $params['Channel'];  // Save original BEFORE conversion
         if(preg_match("|Local/(\d+)@agents[;-].*|",$params['Channel'],$matches)) {
-            $localAgentNumber = $matches[1];
             $isLocalAgentChannel = true;
             $params['Channel']='Agent/'.$matches[1];
         }
 
         if($params['BridgeNumChannels']==1) {
-            $saved_bridge_unique[$bunique]  = $params['Uniqueid'];
-            $saved_bridge_channel[$bunique] = $params['Channel'];
-            // Save flag indicating this was a Local agent channel
+            $this->_saved_bridge_unique[$bunique]  = $params['Uniqueid'];
+            $this->_saved_bridge_channel[$bunique] = $params['Channel'];
+            
             if ($isLocalAgentChannel) {
-                $saved_bridge_channel[$bunique.'_local'] = true;
-                $saved_bridge_channel[$bunique.'_actual'] = $originalChannel;  // Save actual channel for AMI operations
+                $this->_saved_bridge_channel[$bunique.'_local'] = true;
+                $this->_saved_bridge_channel[$bunique.'_actual'] = $originalChannel;
             }
-            $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter $bunique number channels 1 saving data");
+            $this->_log->output('DEBUG: '.__METHOD__. " Bridge Enter $bunique number channels 1 saving data");
         } else if ($params['BridgeNumChannels']==2) {
-            $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter $bunique number channels 2, constructing link channel ".$params['Channel']);
-            if(isset($saved_bridge_unique[$bunique])) {
+            $this->_log->output('DEBUG: '.__METHOD__. " Bridge Enter $bunique number channels 2, constructing link channel ".$params['Channel']);
+            
+            if(isset($this->_saved_bridge_unique[$bunique])) {
                 $params['Uniqueid1']=$params['Uniqueid'];
                 $params['Channel1']=$params['Channel'];
-                $params['Uniqueid2']=$saved_bridge_unique[$bunique];
-                $params['Channel2']=$saved_bridge_channel[$bunique];
+                $params['Uniqueid2']=$this->_saved_bridge_unique[$bunique];
+                $params['Channel2']=$this->_saved_bridge_channel[$bunique];
 
-                // Pass actual channels for AMI operations (attended transfer, park, etc.)
-                if (isset($saved_bridge_channel[$bunique.'_actual'])) {
-                    $params['ActualChannel2'] = $saved_bridge_channel[$bunique.'_actual'];
+                // Pass actual channels for AMI operations
+                if (isset($this->_saved_bridge_channel[$bunique.'_actual'])) {
+                    $params['ActualChannel2'] = $this->_saved_bridge_channel[$bunique.'_actual'];
                 }
                 if ($isLocalAgentChannel) {
                     $params['ActualChannel1'] = $originalChannel;
                 }
 
-                //unset($saved_bridge_unique[$bunique]);
-                //unset($saved_bridge_channel[$bunique]);
                 $params['Event']='Bridge';
                 $this->msg_Link("bridge", $params, $sServer, $iPort); 
             } else {
