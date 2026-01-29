@@ -1,9 +1,10 @@
 #!/bin/bash
 
 #stop service and remove from startup
-systemctl stop issabeldialer
-chkconfig --del issabeldialer
-chkconfig --level 2345 issabeldialer off
+systemctl stop issabeldialer 2>/dev/null || true
+chkconfig --del issabeldialer 2>/dev/null || true
+chkconfig --level 2345 issabeldialer off 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
 
 #remove folder and files
 rm -rf /var/www/html/modules/{agent_console,agents,break_administrator,callcenter_config,calls_detail,calls_per_agent,calls_per_hour}
