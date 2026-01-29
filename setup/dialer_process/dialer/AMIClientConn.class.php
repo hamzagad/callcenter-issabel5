@@ -137,7 +137,7 @@ class AMIClientConn extends MultiplexConn
         'Parkinglots' =>
             array(), /* ActionID no está soportado para Parkinglots en 11.21.0 */
         'Park' =>
-            array('Channel' => TRUE, 'Channel2' => TRUE,
+            array('Channel' => TRUE, 'AnnounceChannel' => FALSE,
                 'Timeout' => array('required' => FALSE, 'cast' => 'int'),
                 'Parkinglot' => FALSE),
         'Ping' =>

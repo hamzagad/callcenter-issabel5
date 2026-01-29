@@ -1211,10 +1211,10 @@ class Llamada
         $callable = array($this, '_cb_Park');
         $call_params = array($sFuente, $ami, $timestamp);
         //$this->_log->output('DEBUG: '.__METHOD__.": asyncPark({$this->actualchannel}, {$this->agentchannel})");
+        // Don't pass AnnounceChannel to suppress parking slot announcement to customer
         $ami->asyncPark(
             $callable, $call_params,
-            $this->actualchannel,
-            $this->agentchannel);
+            $this->actualchannel);
     }
 
     public function _cb_Park($r, $sFuente, $ami, $timestamp)

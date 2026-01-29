@@ -570,6 +570,48 @@ class PaloSantoConsola
     }
 
     /**
+     * Método para poner la llamada actual en hold (espera)
+     *
+     * @return TRUE en caso de éxito, FALSE en caso de error
+     */
+    function ponerEnHold()
+    {
+        try {
+            $oECCP = $this->_obtenerConexion('ECCP');
+            $respuesta = $oECCP->hold();
+            if (isset($respuesta->failure)) {
+                $this->errMsg = _tr('Unable to place call on hold').' - '.$this->_formatoErrorECCP($respuesta);
+                return FALSE;
+            }
+            return TRUE;
+        } catch (Exception $e) {
+            $this->errMsg = '(internal) hold: '.$e->getMessage();
+            return FALSE;
+        }
+    }
+
+    /**
+     * Método para reanudar la llamada desde hold (espera)
+     *
+     * @return TRUE en caso de éxito, FALSE en caso de error
+     */
+    function reanudarDeHold()
+    {
+        try {
+            $oECCP = $this->_obtenerConexion('ECCP');
+            $respuesta = $oECCP->unhold();
+            if (isset($respuesta->failure)) {
+                $this->errMsg = _tr('Unable to resume call from hold').' - '.$this->_formatoErrorECCP($respuesta);
+                return FALSE;
+            }
+            return TRUE;
+        } catch (Exception $e) {
+            $this->errMsg = '(internal) unhold: '.$e->getMessage();
+            return FALSE;
+        }
+    }
+
+    /**
      * Método para listar los breaks conocidos en el sistema.
      *
      * @return NULL en caso de éxito, o lista en la forma

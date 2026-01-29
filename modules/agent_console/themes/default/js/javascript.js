@@ -80,6 +80,7 @@ $(document).ready(function() {
     });
 
     $('#btn_hangup').button();
+    $('#btn_hold').button();
     $('#btn_togglebreak').button();
     $('#btn_transfer').button();
     $('#btn_vtigercrm').button();
@@ -140,6 +141,7 @@ $(document).ready(function() {
     $('#submit_agent_login').click(do_login);
     $('#btn_logout').click(do_logout);
     $('#btn_hangup').click(do_hangup);
+    $('#btn_hold').click(do_hold);
 
     // El siguiente código se ejecuta al hacer click en el botón de break
     $('#btn_togglebreak').click(function() {
@@ -304,6 +306,7 @@ function apply_ui_styles(uidata)
 {
     if (uidata.no_call) {
         $('#btn_hangup').button('disable');
+        $('#btn_hold').button('disable');
         $('#btn_transfer').button('disable');
 
         /* Esta llamada generalmente se realiza cuando el agente recién carga
@@ -434,6 +437,33 @@ function do_hangup()
 	}, 'json')
 	.fail(function() {
 		mostrar_mensaje_error('Failed to connect to server to run request!');
+	});
+}
+
+// El siguiente código se ejecuta al presionar el botón de hold
+function do_hold()
+{
+	$('#btn_hold').button('disable');
+	$.post('index.php?menu=' + module_name + '&rawmode=yes', {
+		menu:		module_name,
+		rawmode:	'yes',
+		action:		'hold'
+	},
+	function (respuesta) {
+		verificar_error_session(respuesta);
+        if (respuesta['action'] == 'error') {
+        	mostrar_mensaje_error(respuesta['message']);
+        }
+
+        // Re-enable button after response
+        $('#btn_hold').button('enable');
+
+        // El cambio de estado de la interfaz se delega a la revisión
+        // periódica del estado del agente.
+	}, 'json')
+	.fail(function() {
+		mostrar_mensaje_error('Failed to connect to server to run request!');
+		$('#btn_hold').button('enable');
 	});
 }
 
@@ -761,11 +791,13 @@ function manejarRespuestaStatus(respuesta)
 			break;
 		case 'holdenter':
 			estadoCliente.onhold = true;
-			// TODO
+			// Update button text to "End Hold"
+			$('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
 			break;
 		case 'holdexit':
 			estadoCliente.onhold = false;
-			// TODO
+			// Update button text to "Hold"
+			$('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
 			break;
 		case 'agentlinked':
 			// El agente ha recibido una llamada
@@ -773,6 +805,7 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.campaign_id = respuesta[i].campaign_id;
 			estadoCliente.callid = respuesta[i].callid;
 			$('#btn_hangup').button('enable');
+			$('#btn_hold').button('enable');
 			$('#btn_transfer').button('enable');
 			$('#issabel-callcenter-cronometro').text(respuesta[i].cronometro);
 			$('#issabel-callcenter-llamada-info')
@@ -829,6 +862,7 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.callid = null;
 
 			$('#btn_hangup').button('disable');
+			$('#btn_hold').button('disable');
 	        $('#btn_transfer').button('disable');
 	        if (l_calltype == 'incoming') {
 	            $('#btn_agendar_llamada').button('disable');

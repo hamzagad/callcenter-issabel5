@@ -3143,15 +3143,37 @@ Uniqueid: 1429642067.241008
                 );
         }
 
-        $llamada = $this->_listaLlamadas->buscar('actualchannel', $params['Channel']);
-        if (is_null($llamada)) return;
+        // Asterisk ParkedCall event uses 'ParkeeChannel', not 'Channel'
+        $sCanalLlamada = isset($params['ParkeeChannel']) ? $params['ParkeeChannel'] :
+                         (isset($params['Channel']) ? $params['Channel'] : NULL);
+
+        if (is_null($sCanalLlamada)) {
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: ".__METHOD__.": ParkeeChannel not found in params");
+            }
+            return;
+        }
+
+        $llamada = $this->_listaLlamadas->buscar('actualchannel', $sCanalLlamada);
+        if (is_null($llamada)) {
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: ".__METHOD__.": call not found for channel: $sCanalLlamada");
+            }
+            return;
+        }
+
+        // Asterisk ParkedCall event uses ParkingSpace (not Exten) and ParkeeUniqueid (not Uniqueid)
+        $parkingSpace = isset($params['ParkingSpace']) ? $params['ParkingSpace'] :
+                       (isset($params['Exten']) ? $params['Exten'] : NULL);
+        $parkeeUniqueid = isset($params['ParkeeUniqueid']) ? $params['ParkeeUniqueid'] :
+                         (isset($params['Uniqueid']) ? $params['Uniqueid'] : NULL);
 
         if ($this->DEBUG) {
             $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada ".
                 "enviada a HOLD {$llamada->actualchannel} en parkinglot ".
-                "{$params['Exten']}, cambiado Uniqueid a {$params['Uniqueid']} ");
+                "$parkingSpace, cambiado Uniqueid a $parkeeUniqueid ");
         }
-        $llamada->llamadaEnviadaHold($params['Exten'], $params['Uniqueid']);
+        $llamada->llamadaEnviadaHold($parkingSpace, $parkeeUniqueid);
 
         // TODO: Timeout podría usarse para mostrar un cronómetro
     }
@@ -3190,14 +3212,27 @@ Uniqueid: 1429642067.241008
                 );
         }
 
-        $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['UniqueID']);
+        // AMI 13+ uses ParkeeUniqueid, older versions use UniqueID
+        $uniqueid = isset($params['ParkeeUniqueid']) ? $params['ParkeeUniqueid'] : $params['UniqueID'];
+        $llamada = $this->_listaLlamadas->buscar('uniqueid', $uniqueid);
         if (is_null($llamada)) return;
 
         if ($llamada->status == 'OnHold') {
             if ($this->DEBUG) {
                 $this->_log->output('DEBUG: '.__METHOD__.': llamada colgada mientras estaba en HOLD.');
             }
+            // First clear the hold state and close the hold audit record
             $llamada->llamadaRegresaHold($this->_ami, $params['local_timestamp_received']);
+
+            // Then finalize the call since the customer has hung up
+            // This will:
+            // - Update the call status in the database
+            // - Delete the current_call record
+            // - Disassociate the agent from the call (quitarLlamadaAtendida)
+            // - Emit AgentUnlinked event so UI updates
+            $llamada->llamadaFinalizaSeguimiento(
+                $params['local_timestamp_received'],
+                $this->_config['dialer']['llamada_corta']);
         }
     }
 

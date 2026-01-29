@@ -591,8 +591,108 @@ Added ringing case in status update handler, copied ringing GIF image, and added
 
 ---
 
+### 9. Agent Hold Feature Bug Fixes
+**Files**:
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (msg_ParkedCallGiveUp)
+- `setup/dialer_process/dialer/AMIClientConn.class.php` (Park AMI action)
+- `setup/dialer_process/dialer/Llamada.class.php` (mandarLlamadaHold)
+- `setup/dialer_process/dialer/ECCPConn.class.php` (Request_agentauth_unhold)
+
+**Issue 1: Agent Stuck in Hold State When Customer Hangs Up**
+
+When an agent put a customer on hold and the customer hung up, the agent got stuck in the hold state and could not take new calls until manually logged out and back in.
+
+**Root Cause**: The `msg_ParkedCallGiveUp()` handler had two problems:
+1. Used wrong field name `UniqueID` instead of `ParkeeUniqueid` (Asterisk 13+ AMI format change)
+2. Called `llamadaRegresaHold()` to clear hold state but didn't call `llamadaFinalizaSeguimiento()` to properly end the call
+
+**Fix**: Updated `msg_ParkedCallGiveUp()` to:
+```php
+// AMI 13+ uses ParkeeUniqueid, older versions use UniqueID
+$uniqueid = isset($params['ParkeeUniqueid']) ? $params['ParkeeUniqueid'] : $params['UniqueID'];
+$llamada = $this->_listaLlamadas->buscar('uniqueid', $uniqueid);
+if (is_null($llamada)) return;
+
+if ($llamada->status == 'OnHold') {
+    // First clear the hold state and close the hold audit record
+    $llamada->llamadaRegresaHold($this->_ami, $params['local_timestamp_received']);
+
+    // Then finalize the call since the customer has hung up
+    $llamada->llamadaFinalizaSeguimiento(
+        $params['local_timestamp_received'],
+        $this->_config['dialer']['llamada_corta']);
+}
+```
+
+---
+
+**Issue 2: Customer Hears Parking Slot Number on Subsequent Holds**
+
+When putting a call on hold more than once during the same call, the customer heard "71" (the parking slot number) on subsequent holds.
+
+**Root Cause**: The Park AMI action was using the old `Channel2` parameter instead of `AnnounceChannel` (Asterisk 13+ format), and the announcement was being sent to the wrong channel.
+
+**Fix - Part 1**: Updated Park action definition in `AMIClientConn.class.php`:
+```php
+'Park' =>
+    array('Channel' => TRUE, 'AnnounceChannel' => FALSE,
+        'Timeout' => array('required' => FALSE, 'cast' => 'int'),
+        'Parkinglot' => FALSE),
+```
+
+**Fix - Part 2**: Updated `mandarLlamadaHold()` in `Llamada.class.php` to not pass announce channel:
+```php
+public function mandarLlamadaHold($ami, $sFuente, $timestamp)
+{
+    $callable = array($this, '_cb_Park');
+    $call_params = array($sFuente, $ami, $timestamp);
+    // Don't pass AnnounceChannel to suppress parking slot announcement to customer
+    $ami->asyncPark(
+        $callable, $call_params,
+        $this->actualchannel);
+}
+```
+
+---
+
+**Issue 3: Anonymous CallerID When Retrieving Call from Hold**
+
+When an agent ended hold to retrieve the parked call, their phone showed "anonymous@anonymous.invalid" instead of the original caller's number.
+
+**Root Cause**: The Originate call in `Request_agentauth_unhold()` didn't set a CallerID.
+
+**Fix**: Added CallerID using the `callnumber` field from call info:
+```php
+// Set CallerID to show original caller info when retrieving from hold
+$sCallerID = NULL;
+if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
+    $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
+}
+
+$r = $this->_ami->Originate(
+    $sCanalOrigen,               // channel
+    $infoLlamada['park_exten'],  // extension
+    'from-internal',             // context
+    '1',                         // priority
+    NULL, NULL, NULL,            // Application, Data, Timeout
+    $sCallerID,                  // CallerID
+    NULL, NULL,                  // Variable, Account
+    TRUE,                        // async
+    $sActionID
+);
+```
+
+**Impact**:
+- Agents no longer get stuck when customers hang up while on hold
+- Customers don't hear the parking slot number announcement
+- Agents see the caller's number when retrieving calls from hold
+- Hold feature now works reliably for multiple hold/unhold cycles
+
+---
+
 ## Version History
 
+- **4.0.0.10** - Agent Hold feature bug fixes (stuck state, parking announcement, anonymous CallerID)
 - **4.0.0.9** - Real-time agent ringing status in Agents Monitoring module
 - **4.0.0.8** - Attended transfer fix for Agent type (app_agent_pool), callback agent hangup fix
 - **4.0.0.7** - Bug fixes for campaign monitoring display, agent console hangup, statistics sync, and login cancellation

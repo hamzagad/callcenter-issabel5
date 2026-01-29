@@ -1078,6 +1078,35 @@ function manejarSesionActiva_hangup($module_name, $smarty, $sDirLocalPlantillas,
     return $json->encode($respuesta);
 }
 
+function manejarSesionActiva_hold($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola, $estado)
+{
+    $respuesta = array(
+        'action'    =>  'hold',
+        'message'   =>  '(no message)',
+    );
+
+    // Check if currently on hold and toggle action
+    if ($estado['onhold']) {
+        // Resume call from hold
+        $bExito = $oPaloConsola->reanudarDeHold();
+        if (!$bExito) {
+            $respuesta['action'] = 'error';
+            $respuesta['message'] = _tr('Error while resuming call from hold').' - '.$oPaloConsola->errMsg;
+        }
+    } else {
+        // Put call on hold
+        $bExito = $oPaloConsola->ponerEnHold();
+        if (!$bExito) {
+            $respuesta['action'] = 'error';
+            $respuesta['message'] = _tr('Error while placing call on hold').' - '.$oPaloConsola->errMsg;
+        }
+    }
+
+    $json = new Services_JSON();
+    Header('Content-Type: application/json');
+    return $json->encode($respuesta);
+}
+
 function manejarSesionActiva_break($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola, $estado)
 {
     $respuesta = array(

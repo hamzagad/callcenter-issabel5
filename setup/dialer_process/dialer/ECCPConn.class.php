@@ -3230,6 +3230,9 @@ SQL_INSERTAR_AGENDAMIENTO;
 
         // Obtener la información de la llamada atendida por el agente
         $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
+        if ($this->DEBUG) {
+            $this->_log->output("DEBUG: unhold - infoLlamada: ".print_r($infoLlamada, 1));
+        }
         if (is_null($infoLlamada) || is_null($infoLlamada['callid'])) {
             $this->_agregarRespuestaFallo($xml_unholdResponse, 417, 'Agent not in call');
             return $xml_response;
@@ -3237,27 +3240,50 @@ SQL_INSERTAR_AGENDAMIENTO;
 
         // Si el agente no estaba en hold, se devuelve éxito sin hacer nada más
         if (is_null($infoSeguimiento['id_audit_hold'])) {
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: unhold - agent not on hold, id_audit_hold is NULL");
+            }
             $xml_unholdResponse->addChild('success');
             return $xml_response;
         }
 
-        if (!is_null($infoLlamada['park_exten'])) {
+        // Check if call is on hold and park_exten is available
+        if ($this->DEBUG) {
+            $this->_log->output("DEBUG: unhold - checking park_exten, isset: ".isset($infoLlamada['park_exten']));
+        }
+        if (isset($infoLlamada['park_exten']) && !is_null($infoLlamada['park_exten'])) {
             $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
+
+            // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
+            // because Agent/XXXX is not a valid channel for Originate
+            $sCanalOrigen = $sAgente;
+            if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
+                $sCanalOrigen = 'Local/'.$regs[1].'@agents';
+            }
+
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: intentando recuperar llamada:\n".
-                    "\tChannel      =>  $sAgente\n".
+                    "\tChannel      =>  $sCanalOrigen\n".
                     "\tExten        =>  {$infoLlamada['park_exten']}\n".
                     "\tContext      =>  from-internal\n".
                     "\tActionID     =>  $sActionID");
             }
 
             // Sacar la llamada del parqueo y redirigirla al agente pausado
+            // Set CallerID to show original caller info when retrieving from hold
+            $sCallerID = NULL;
+            if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
+                $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
+            }
+
             $r = $this->_ami->Originate(
-                $sAgente,               // channel
+                $sCanalOrigen,               // channel
                 $infoLlamada['park_exten'],  // extension
                 'from-internal',        // context
                 '1',                    // priority
-                NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL,       // Application, Data, Timeout
+                $sCallerID,             // CallerID
+                NULL, NULL,             // Variable, Account
                 TRUE,                   // async
                 $sActionID
                 );
