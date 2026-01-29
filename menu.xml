@@ -35,6 +35,7 @@
     <menuitem menuid="login_logout"           desc="Login Logout"           parent="reports_ingoing_call" module="yes" link="" order="76"></menuitem>
     <menuitem menuid="ingoings_calls_success" desc="Ingoing Calls Success"  parent="reports_ingoing_call" module="yes" link="" order="77"></menuitem>
     <menuitem menuid="graphic_calls"          desc="Graphic Calls per hour" parent="reports_ingoing_call" module="yes" link="" order="78"></menuitem>
+    <menuitem menuid="agent_break"          desc="Agent Break Details" parent="reports_ingoing_call" module="yes" link="" order="79"></menuitem>
     <menuitem menuid="rep_agent_information"  desc="Agent Information"      parent="reports_ingoing_call" module="yes" link="" order="710"></menuitem>
     <menuitem menuid="rep_agents_monitoring"  desc="Agents Monitoring"      parent="reports_ingoing_call" module="yes" link="" order="711"></menuitem>
     <menuitem menuid="rep_trunks_used_per_hour" desc="Trunks used per hour" parent="reports_ingoing_call" module="yes" link="" order="712"></menuitem>
