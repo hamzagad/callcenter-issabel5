@@ -23,6 +23,17 @@ rm -rf /usr/share/issabel/module_installer/callcenter/
 #remove menu
 issabel-menuremove call_center
 
+#remove call center contexts from extensions_custom.conf
+EXTENSIONS_FILE="/etc/asterisk/extensions_custom.conf"
+if [ -f "$EXTENSIONS_FILE" ]; then
+    if grep -q "; BEGIN ISSABEL CALL-CENTER CONTEXTS DO NOT REMOVE THIS LINE" "$EXTENSIONS_FILE"; then
+        sed -i '/^; BEGIN ISSABEL CALL-CENTER CONTEXTS DO NOT REMOVE THIS LINE$/,/^; END ISSABEL CALL-CENTER CONTEXTS DO NOT REMOVE THIS LINE$/d' "$EXTENSIONS_FILE"
+        echo "Removed call center contexts from $EXTENSIONS_FILE"
+        # Reload Asterisk dialplan
+        asterisk -rx "dialplan reload" 2>/dev/null || true
+    fi
+fi
+
 #remove database
 echo ""
 read -p "Do you want to delete the call_center database? (y/n): " DELETE_DB
