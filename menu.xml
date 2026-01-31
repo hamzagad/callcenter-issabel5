@@ -43,6 +43,7 @@
     <menuitem menuid="campaign_monitoring" desc="Campaign monitoring" parent="reports_ingoing_call" module="yes" link="" order="715"></menuitem>
     <menuitem menuid="agent_journey" desc="Agent Journey" parent="reports_ingoing_call" module="yes" link="" order="716"></menuitem>
     <menuitem menuid="rep_incoming_campaigns_panel"  desc="Incoming Campaigns Panel"  parent="reports_ingoing_call" module="yes" link="" order="717"></menuitem>
+    <menuitem menuid="rep_outgoing_campaigns_panel"  desc="Outgoing Campaigns Panel"  parent="reports_ingoing_call" module="yes" link="" order="718"></menuitem>
 
     <menuitem menuid="callcenter_config"      desc="Configuration"          parent="call_center"          module="yes" link="" order="8"></menuitem>
   </menulist>

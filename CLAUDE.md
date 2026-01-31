@@ -99,7 +99,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
 - Always use English language for the added code, comments, variables, and functions
-- Don't assume, always use debuggers if required to check for a value
+- Always provide the test steps, and I will provide the logs after testing, don't use tail -f
 
 ---
 

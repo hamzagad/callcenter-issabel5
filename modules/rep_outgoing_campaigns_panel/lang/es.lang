@@ -124,6 +124,6 @@ $arrLangModule=array(
 'Maximum Call Duration'  =>  'Duración Máxima de Llamada',
 'Hold'=>'Hold',
 'On Call (Hold)'=>'En llamada (En espera)',
-'Incoming Campaigns Panel'=>'Panel de Campañas Entrantes',
+'Outgoing Campaigns Panel'=>'Panel de Campañas Salientes',
 );
 ?>

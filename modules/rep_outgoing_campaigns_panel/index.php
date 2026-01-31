@@ -88,8 +88,8 @@ function _moduleContent(&$smarty, $module_name)
 
     // Procesar los eventos AJAX.
     switch (getParameter('action')) {
-        case 'getIncomingPanelData':
-            $sContenido = manejarMonitoreo_getIncomingPanelData($module_name, $smarty, $local_templates_dir);
+        case 'getOutgoingPanelData':
+            $sContenido = manejarMonitoreo_getOutgoingPanelData($module_name, $smarty, $local_templates_dir);
             break;
         case 'checkStatus':
             $sContenido = manejarMonitoreo_checkStatusPanel($module_name, $smarty, $local_templates_dir);
@@ -110,7 +110,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas)
 
     $smarty->assign("MODULE_NAME", $module_name);
     $smarty->assign(array(
-        'title'                         =>  _tr('Incoming Campaigns Panel'),
+        'title'                         =>  _tr('Outgoing Campaigns Panel'),
         'icon'                          =>  '/images/list.png',
         'ETIQUETA_CAMPANIA'             =>  _tr('Campaign'),
         'ETIQUETA_TOTAL_LLAMADAS'       =>  _tr('Total calls'),
@@ -140,8 +140,8 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas)
     return $smarty->fetch("file:$sDirLocalPlantillas/informacion_campania.tpl");
 }
 
-// This module doesn't need getCampaigns - loads all active incoming campaigns automatically
-function manejarMonitoreo_getIncomingPanelData($module_name, $smarty, $sDirLocalPlantillas)
+// This module doesn't need getCampaigns - loads all active outgoing campaigns automatically
+function manejarMonitoreo_getOutgoingPanelData($module_name, $smarty, $sDirLocalPlantillas)
 {
     $respuesta = array(
         'status'    =>  'success',
@@ -167,7 +167,7 @@ function manejarMonitoreo_getIncomingPanelData($module_name, $smarty, $sDirLocal
     $oPaloConsola = new PaloSantoConsola();
 
     try {
-        $combinedStatus = $oPaloConsola->getCombinedIncomingCampaignsStatus($datetime_start, $datetime_end);
+        $combinedStatus = $oPaloConsola->getCombinedOutgoingCampaignsStatus($datetime_start, $datetime_end);
     } catch (Exception $e) {
         $respuesta['status'] = 'error';
         $respuesta['message'] = 'Exception: ' . $e->getMessage();
@@ -203,11 +203,11 @@ function manejarMonitoreo_getIncomingPanelData($module_name, $smarty, $sDirLocal
         $respuesta['campaigns'] = $combinedStatus['campaigns'];
 
         $estadoCliente = array(
-            'paneltype'     =>  'incoming_panel',
+            'paneltype'     =>  'outgoing_panel',
             'campaigns'     =>  $combinedStatus['campaigns'],
             'statuscount'   =>  $combinedStatus['statuscount'],
             'activecalls'   =>  $combinedStatus['activecalls'],
-            'agents'        =>  $combinedStatus['agents'],
+            'agents'        => $combinedStatus['agents'],
             'stats'         =>  $combinedStatus['stats'],
         );
 
@@ -265,8 +265,8 @@ function manejarMonitoreo_checkStatusPanel($module_name, $smarty, $sDirLocalPlan
 
     $oPaloConsola = new PaloSantoConsola();
 
-    // Get current server state
-    $combinedStatus = $oPaloConsola->getCombinedIncomingCampaignsStatus($datetime_start, $datetime_end);
+    // Get current server state for outgoing campaigns
+    $combinedStatus = $oPaloConsola->getCombinedOutgoingCampaignsStatus($datetime_start, $datetime_end);
 
     if (!is_array($combinedStatus)) {
         $respuesta['status'] = 'error';
@@ -307,7 +307,7 @@ function manejarMonitoreo_checkStatusPanel($module_name, $smarty, $sDirLocalPlan
 
             // Re-poll state after events
             if (count($listaEventos) > 0) {
-                $combinedStatus = $oPaloConsola->getCombinedIncomingCampaignsStatus($datetime_start, $datetime_end);
+                $combinedStatus = $oPaloConsola->getCombinedOutgoingCampaignsStatus($datetime_start, $datetime_end);
                 if (is_array($combinedStatus)) {
                     $estadoActualHash = computeStateHash($combinedStatus);
                 }
