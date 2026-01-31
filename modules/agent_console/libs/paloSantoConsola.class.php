@@ -1323,6 +1323,298 @@ class PaloSantoConsola
     }
 
 
+    /**
+     * Get call statistics for incoming campaigns filtered by datetime range.
+     * Queries database directly since ECCP only supports date-level filtering.
+     *
+     * @param array $campaignIds Array of campaign IDs to include
+     * @param string $datetime_start Start of datetime range (YYYY-MM-DD HH:MM:SS)
+     * @param string $datetime_end End of datetime range (YYYY-MM-DD HH:MM:SS)
+     * @return array Associative array with statuscount and stats
+     */
+    function getIncomingCallStatsByDatetimeRange($campaignIds, $datetime_start, $datetime_end)
+    {
+        $result = array(
+            'statuscount' => array(
+                'total' => 0,
+                'success' => 0,
+                'abandoned' => 0,
+                'finished' => 0,
+                'losttrack' => 0,
+                'onqueue' => 0,
+            ),
+            'stats' => array(
+                'total_sec' => 0,
+                'max_duration' => 0,
+            ),
+        );
+
+        if (empty($campaignIds)) {
+            return $result;
+        }
+
+        try {
+            $oDB = $this->_obtenerConexion('call_center');
+
+            // Build placeholders for campaign IDs
+            $placeholders = implode(',', array_fill(0, count($campaignIds), '?'));
+            $params = $campaignIds;
+            $params[] = $datetime_start;
+            $params[] = $datetime_end;
+
+            // Query for status counts - exclude 'activa' status (counted separately)
+            $sql = "SELECT
+                        status,
+                        COUNT(*) as cnt,
+                        SUM(IFNULL(duration, 0)) as total_duration,
+                        MAX(IFNULL(duration, 0)) as max_duration
+                    FROM call_entry
+                    WHERE id_campaign IN ($placeholders)
+                    AND datetime_entry_queue >= ?
+                    AND datetime_entry_queue <= ?
+                    AND status != 'activa'
+                    GROUP BY status";
+
+            $recordset = $oDB->fetchTable($sql, TRUE, $params);
+
+            if (!is_array($recordset)) {
+                return $result;
+            }
+
+            $total = 0;
+            $totalSec = 0;
+            $maxDuration = 0;
+
+            foreach ($recordset as $row) {
+                $status = $row['status'];
+                $count = (int)$row['cnt'];
+                $total += $count;
+                $totalSec += (int)$row['total_duration'];
+                if ((int)$row['max_duration'] > $maxDuration) {
+                    $maxDuration = (int)$row['max_duration'];
+                }
+
+                // Map database status to panel status
+                switch ($status) {
+                    case 'terminada':
+                        $result['statuscount']['success'] += $count;
+                        $result['statuscount']['finished'] += $count;
+                        break;
+                    case 'abandonada':
+                        $result['statuscount']['abandoned'] += $count;
+                        break;
+                    case 'fin-monitoreo':
+                        $result['statuscount']['losttrack'] += $count;
+                        break;
+                    case 'activa':
+                        // Active calls counted separately via current_call_entry query
+                        $total -= $count;
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            $result['statuscount']['total'] = $total;
+            $result['stats']['total_sec'] = $totalSec;
+            $result['stats']['max_duration'] = $maxDuration;
+
+            // Query for currently active/queued calls (excluded from main query)
+            $params2 = $campaignIds;
+            $params2[] = $datetime_start;
+            $params2[] = $datetime_end;
+
+            $sqlQueued = "SELECT COUNT(*) as cnt, SUM(CASE WHEN ce.status = 'activa' THEN 1 ELSE 0 END) as active_cnt
+                          FROM current_call_entry cce
+                          JOIN call_entry ce ON cce.id_call_entry = ce.id
+                          WHERE ce.id_campaign IN ($placeholders)
+                          AND ce.datetime_entry_queue >= ?
+                          AND ce.datetime_entry_queue <= ?";
+
+            $queuedRow = $oDB->getFirstRowQuery($sqlQueued, TRUE, $params2);
+            if (is_array($queuedRow) && isset($queuedRow['cnt'])) {
+                $activeCnt = isset($queuedRow['active_cnt']) ? (int)$queuedRow['active_cnt'] : 0;
+                $queuedCnt = (int)$queuedRow['cnt'];
+                $waitingCnt = $queuedCnt - $activeCnt;
+
+                $result['statuscount']['onqueue'] = $waitingCnt;
+                $result['statuscount']['total'] += $queuedCnt;
+            }
+
+        } catch (Exception $e) {
+            // Log exception if needed
+        }
+
+        return $result;
+    }
+
+    /**
+     * Get list of active incoming campaigns for today
+     * Used by Incoming Campaigns Panel module
+     *
+     * @return array|null Array of active campaigns or NULL on error
+     */
+    function getActiveIncomingCampaigns()
+    {
+        try {
+            $oDB = $this->_obtenerConexion('call_center');
+            $today = date('Y-m-d');
+            
+            error_log("[IncomingPanel] getActiveIncomingCampaigns() called, today=$today");
+            
+            $sql = "SELECT ce.id, ce.name, ce.datetime_init, ce.datetime_end, 
+                        ce.daytime_init, ce.daytime_end, qce.queue
+                    FROM campaign_entry ce
+                    INNER JOIN queue_call_entry qce ON ce.id_queue_call_entry = qce.id
+                    WHERE ce.estatus = 'A'
+                    AND ce.datetime_init <= ?
+                    AND ce.datetime_end >= ?";
+            
+            $result = $oDB->fetchTable($sql, TRUE, array($today, $today));
+            
+            if (!is_array($result)) {
+                $this->errMsg = 'Failed to query active incoming campaigns: ' . $oDB->errMsg;
+                error_log("[IncomingPanel] ERROR: " . $this->errMsg);
+                return NULL;
+            }
+            
+            error_log("[IncomingPanel] Found " . count($result) . " active incoming campaigns");
+            
+            return $result;
+            
+        } catch (Exception $e) {
+            $this->errMsg = '(internal) ' . __METHOD__ . ': ' . $e->getMessage();
+            error_log("[IncomingPanel] EXCEPTION: " . $this->errMsg);
+            return NULL;
+        }
+    }
+
+    /**
+     * Get combined status for all active incoming campaigns
+     *
+     * @param string $datetime_start Optional datetime filter for stats (full datetime with time)
+     * @param string $datetime_end Optional datetime end filter for stats
+     * @return array|null Combined status or NULL on error
+     */
+    function getCombinedIncomingCampaignsStatus($datetime_start = NULL, $datetime_end = NULL)
+    {
+        $campaigns = $this->getActiveIncomingCampaigns();
+        if (!is_array($campaigns)) {
+            return NULL;
+        }
+
+        // For ECCP calls, we need to pass the earliest date that could have data
+        if (!is_null($datetime_start)) {
+            $eccp_datetime_start = substr($datetime_start, 0, 10);
+        } else {
+            $eccp_datetime_start = date('Y-m-d');
+        }
+
+        if (count($campaigns) == 0) {
+            return array(
+                'campaigns' => array(),
+                'statuscount' => array(
+                    'total' => 0, 'success' => 0, 'abandoned' => 0,
+                    'finished' => 0, 'losttrack' => 0, 'onqueue' => 0
+                ),
+                'stats' => array('total_sec' => 0, 'max_duration' => 0),
+                'activecalls' => array(),
+                'agents' => array(),
+            );
+        }
+
+        // Collect campaign IDs for database query
+        $campaignIds = array();
+        foreach ($campaigns as $camp) {
+            $campaignIds[] = $camp['id'];
+        }
+
+        // Get stats from database with proper datetime filtering
+        $dbStats = $this->getIncomingCallStatsByDatetimeRange($campaignIds, $datetime_start, $datetime_end);
+
+        $combined = array(
+            'campaigns' => array(),
+            'statuscount' => $dbStats['statuscount'],
+            'stats' => $dbStats['stats'],
+            'activecalls' => array(),
+            'agents' => array(),
+        );
+
+        foreach ($campaigns as $camp) {
+            $campId = $camp['id'];
+            $campName = $camp['name'];
+            $queue = $camp['queue'];
+
+            $combined['campaigns'][$campId] = array(
+                'id' => $campId,
+                'name' => $campName,
+                'queue' => $queue,
+            );
+
+            // Use ECCP for real-time data (active calls and agents only)
+            $status = $this->leerEstadoCampania('incoming', $campId, $eccp_datetime_start);
+
+            if (!is_array($status)) {
+                continue;
+            }
+
+            // Note: statuscount/stats come from database, not ECCP
+
+            foreach ($status['activecalls'] as $callId => $call) {
+                // PHP-layer filtering by datetime range for active calls
+                if (!is_null($datetime_start) || !is_null($datetime_end)) {
+                    $callStartTime = NULL;
+                    if (isset($call['queuestart']) && !is_null($call['queuestart'])) {
+                        $callStartTime = $call['queuestart'];
+                    } elseif (isset($call['dialstart']) && !is_null($call['dialstart'])) {
+                        $callStartTime = $call['dialstart'];
+                    }
+
+                    if (!is_null($callStartTime)) {
+                        if (!is_null($datetime_start) && $callStartTime < $datetime_start) {
+                            continue;
+                        }
+                        if (!is_null($datetime_end) && $callStartTime > $datetime_end) {
+                            continue;
+                        }
+                    }
+                }
+
+                $call['campaign_id'] = $campId;
+                $call['campaign_name'] = $campName;
+                $call['queue'] = $queue;
+                $combined['activecalls'][$callId] = $call;
+            }
+
+            foreach ($status['agents'] as $agentChannel => $agent) {
+                if (!isset($combined['agents'][$agentChannel])) {
+                    if ($agent['status'] == 'oncall' &&
+                        isset($agent['callinfo']['queuenumber']) &&
+                        $agent['callinfo']['queuenumber'] == $queue) {
+                        $agent['campaign_id'] = $campId;
+                        $agent['campaign_name'] = $campName;
+                    } else {
+                        $agent['campaign_id'] = NULL;
+                        $agent['campaign_name'] = '-';
+                    }
+                    $agent['queue'] = $queue;
+                    $combined['agents'][$agentChannel] = $agent;
+                } else {
+                    if ($agent['status'] == 'oncall' &&
+                        isset($agent['callinfo']['queuenumber']) &&
+                        $agent['callinfo']['queuenumber'] == $queue) {
+                        $combined['agents'][$agentChannel]['campaign_id'] = $campId;
+                        $combined['agents'][$agentChannel]['campaign_name'] = $campName;
+                    }
+                }
+            }
+
+        }
+
+        return $combined;
+    }
+ 
+
     function pingAgente()
     {
         try {
