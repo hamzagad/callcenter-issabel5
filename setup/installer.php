@@ -40,6 +40,13 @@ if (file_exists($path_script_db))
     $return=0;
     $return=$oInstaller->createNewDatabaseMySQL($path_script_db,"call_center",$datos_conexion);
 
+    // STEP 1.1: Ensure asterisk user has permissions on call_center database
+    $pDBRoot = new paloDB('mysql://root:'.MYSQL_ROOT_PASSWORD.'@localhost/mysql');
+    $pDBRoot->genQuery("GRANT ALL ON call_center.* TO asterisk@localhost IDENTIFIED BY 'asterisk'");
+    $pDBRoot->genQuery("FLUSH PRIVILEGES");
+    $pDBRoot->disconnect();
+    fputs(STDERR, "INFO: Granted permissions to asterisk@localhost on call_center database\n");
+
     $pDB = new paloDB ('mysql://root:'.MYSQL_ROOT_PASSWORD.'@localhost/call_center');
     quitarColumnaSiExiste($pDB, 'call_center', 'agent', 'queue');
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
