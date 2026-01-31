@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -26,16 +27,19 @@ class AbstractProcess
     function inicioPostDemonio()
     {
         throw new Exception("AbstractProcess::inicioPostDemonio() llamado sin sobrecarga");
+                                // called without overload
     }
 
     function procedimientoDemonio()
     {
         throw new Exception("AbstractProcess::procedimientoDemonio() llamado sin sobrecarga");
+                                    // called without overload
     }
 
     function limpiezaDemonio()
     {
         throw new Exception("AbstractProcess::limpiezaDemonio() llamado sin sobrecarga");
+                                // called without overload
     }
 
     function demonioSoportaReconfig()
@@ -46,6 +50,7 @@ class AbstractProcess
     function reinicioDemonio($param)
     {
         throw new Exception("AbstractProcess::reinicioDemonio() llamado sin sobrecarga");
+                                // called without overload
     }
 }
 ?>

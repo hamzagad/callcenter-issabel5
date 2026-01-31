@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
  Codificación: UTF-8
+ Encoding: UTF-8
 +----------------------------------------------------------------------+
 | Issabel version 1.2-2                                                |
 | http://www.issabel.org                                               |
@@ -24,24 +25,38 @@ $Id: ECCPWorkerProcess.class.php,v 1.48 2009/03/26 13:46:58 alex Exp $ */
 /* Número máximo de peticiones que serán atendidas por proceso. Ya que se crean
  * procesos adicionales en condiciones de tráfico pesado, esto garantiza que los
  * procesos no permanecerán indefinidamente en ejecución. */
+/* Maximum number of requests that will be served per process. Since additional
+ * processes are created under heavy traffic conditions, this ensures that the
+ * processes will not remain indefinitely in execution. */
 define('MAX_PETICIONES_ATENDIDAS', 16384);
 
 class ECCPWorkerProcess extends TuberiaProcess
 {
     private $DEBUG = FALSE; // VERDADERO si se activa la depuración
+                              // TRUE if debugging is enabled
 
     private $_log;      // Log abierto por framework de demonio
+                        // Log opened by daemon framework
     private $_dsn;      // Cadena que representa el DSN, estilo PDO
+                        // String representing the DSN, PDO style
     private $_db;       // Conexión a la base de datos, PDO
+                        // Database connection, PDO
     private $_ami = NULL;       // Conexión AMI a Asterisk
+                                // AMI connection to Asterisk
     private $_configDB; // Objeto de configuración desde la base de datos
+                        // Configuration object from the database
 
     // Contadores para actividades ejecutadas regularmente
+    // Counters for regularly executed activities
     private $_iTimestampUltimaRevisionConfig = 0;       // Última revisión de configuración
+                                                        // Last configuration review
 
     /* Si se pone a VERDADERO, el programa intenta finalizar y no deben
      * aceptarse conexiones nuevas. Todas las conexiones existentes serán
     * desconectadas. */
+    /* If set to TRUE, the program attempts to terminate and no new
+     * connections should be accepted. All existing connections will be
+     * disconnected. */
     private $_finalizandoPrograma = FALSE;
 
     private $_eccpconn;
@@ -57,10 +72,12 @@ class ECCPWorkerProcess extends TuberiaProcess
         $this->_eccpconn = new ECCPConn($this->_log, $this->_tuberia);
 
         // Interpretar la configuración del demonio
+        // Interpret the daemon configuration
         $this->_dsn = $this->_interpretarConfiguracion($infoConfig);
         if (!$this->_iniciarConexionDB()) return FALSE;
 
         // Leer el resto de la configuración desde la base de datos
+        // Read the rest of the configuration from the database
         try {
             $this->_configDB = new ConfigDB($this->_db, $this->_log);
         } catch (PDOException $e) {
@@ -71,13 +88,16 @@ class ECCPWorkerProcess extends TuberiaProcess
         $this->_eccpconn->DEBUG = $this->DEBUG;
 
         // Iniciar la conexión Asterisk
+        // Start the Asterisk connection
         if (!$this->_iniciarConexionAMI()) return FALSE;
 
         // Registro de manejadores de eventos
+        // Registration of event handlers
         foreach (array('eccprequest') as $k)
             $this->_tuberia->registrarManejador('ECCPProcess', $k, array($this, "msg_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
+        // Registration of event handlers from HubProcess
         foreach (array('finalizando', 'finalizarWorker') as $k)
             $this->_tuberia->registrarManejador('HubProcess', $k, array($this, "msg_$k"));
 
@@ -92,8 +112,10 @@ class ECCPWorkerProcess extends TuberiaProcess
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbhost'])) {
             $dbHost = $infoConfig['database']['dbhost'];
             $this->_log->output('Usando host de base de datos: '.$dbHost);
+            // Using database host
         } else {
             $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost);
+            // Using default database host
         }
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbuser']))
             $dbUser = $infoConfig['database']['dbuser'];
@@ -121,25 +143,31 @@ class ECCPWorkerProcess extends TuberiaProcess
     public function procedimientoDemonio()
     {
         // Verificar posible desconexión de la base de datos
+        // Verify possible database disconnection
         if (is_null($this->_db)) {
             $this->_log->output('INFO: intentando volver a abrir conexión a DB...');
+            // Trying to reopen DB connection
             if (!$this->_iniciarConexionDB()) {
                 $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera...');
+                // Cannot restore DB connection, waiting
                 usleep(5000000);
             } else {
                 $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal.');
+                // DB connection restored, normal operation resumed
                 $this->_configDB->setDBConn($this->_db);
                 $this->_eccpconn->setDbConn($this->_db);
             }
         }
 
         // Verificar si la conexión AMI sigue siendo válida
+        // Verify if the AMI connection is still valid
         if (!is_null($this->_ami) && is_null($this->_ami->sKey)) {
             $this->_ami = NULL;
         }
         if (is_null($this->_ami) && !$this->_finalizandoPrograma) {
             if (!$this->_iniciarConexionAMI()) {
                 $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera...');
+                // Cannot restore Asterisk connection, waiting
                 if (!is_null($this->_db)) {
                     if ($this->_multiplex->procesarPaquetes())
                         $this->_multiplex->procesarActividad(0);
@@ -149,6 +177,7 @@ class ECCPWorkerProcess extends TuberiaProcess
                 }
             } else {
                 $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal.');
+                // Asterisk connection restored, normal operation resumed
             }
         }
 
@@ -157,12 +186,15 @@ class ECCPWorkerProcess extends TuberiaProcess
                 $this->_verificarCambioConfiguracion();
             } catch (PDOException $e) {
                 $this->_stdManejoExcepcionDB($e, 'no se puede verificar cambio en configuración');
+                // Cannot verify configuration change
             }
         }
 
         // Rutear los mensajes si hay DB
+        // Route messages if DB exists
         if (!is_null($this->_db)) {
             // Rutear todos los mensajes pendientes entre tareas y agentes
+            // Route all pending messages between tasks and agents
             if ($this->_multiplex->procesarPaquetes())
                 $this->_multiplex->procesarActividad(0);
             else $this->_multiplex->procesarActividad(1);
@@ -175,12 +207,15 @@ class ECCPWorkerProcess extends TuberiaProcess
     {
 
         // Mandar a cerrar todas las conexiones activas
+        // Send command to close all active connections
         $this->_multiplex->finalizarServidor();
 
         // Desconectarse de la base de datos
+        // Disconnect from the database
         $this->_configDB = NULL;
         if (!is_null($this->_db)) {
             $this->_log->output('INFO: desconectando de la base de datos...');
+            // Disconnecting from the database
             $this->_db = NULL;
         }
     }
@@ -247,6 +282,7 @@ class ECCPWorkerProcess extends TuberiaProcess
         $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
+            // Codes corresponding to database connection loss
             $this->_log->output('WARN: '.__METHOD__.
                 ': conexión a DB parece ser inválida, se cierra...');
             $this->_db = NULL;

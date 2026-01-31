@@ -2,6 +2,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                                |
   | http://www.issabel.org                                               |
@@ -23,13 +24,18 @@
   $Id: dialerd,v 1.2 2008/09/08 18:29:36 alex Exp $ */
 declare(ticks=8);
 ini_set('memory_limit', -1);        // Permitir al programa usar toda la memoria que necesite
+                                    // Allow program to use all needed memory
 ini_set('display_errors', 0);       // Impedir que los errores de STDERR se copien en STDOUT
+                                    // Prevent STDERR errors from being copied to STDOUT
 ini_set('error_reporting', E_ALL & ~E_STRICT);  // Mostrar advertencias además de errores
+                                                    // Show warnings in addition to errors
 
 // Agregar directorio de script a la lista de rutas a buscar para require()
+// Add script directory to list of paths to search for require()
 ini_set('include_path', dirname($argv[0]).":".ini_get('include_path'));
 
 // Auto-cargado de las clases en base al nombre de archivo
+// Auto-load classes based on filename
 spl_autoload_register(function ($sNombreClase) {
     $sNombreBase = $sNombreClase.'.class.php';
     foreach (explode(':', ini_get('include_path')) as $sDirInclude) {
@@ -41,13 +47,16 @@ spl_autoload_register(function ($sNombreClase) {
 });
 
 require_once('Console/Getopt.php');     // Parseo de opciones de línea de comando
+                                        // Parsing of command line options
 
 $gsNombreSignal = NULL; // Número de la señal atrapada
+                        // Number of caught signal
 $goAppLog = NULL;
 
 $opt = Console_Getopt::getopt($argv, 'd');
 if (PEAR::isError($opt)) {
     // Se ha especificado una operación no reconocida
+    // An unrecognized operation has been specified
     fwrite(STDERR, $opt->getMessage()."\n");
     $opt = NULL;
 /*
@@ -82,6 +91,7 @@ function load_default_timezone()
 }
 
 // Punto de entrada del programa demonio (plantilla)
+// Main entry point for daemon program (template)
 function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
 {
     global $argv;
@@ -89,11 +99,13 @@ function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
     global $goAppLog;
 
     // Para silenciar avisos de fecha/hora
+    // To silence date/time warnings
     if (function_exists('date_default_timezone_get')) {
         load_default_timezone();
     }
 
     // Esta es la tabla de procesos a monitorear
+    // This is the table of processes to monitor
     $tablaProcesos = array();
     $iNumParams = func_num_args();
     for ($i = 3; $i < $iNumParams; $i++) {
@@ -107,16 +119,19 @@ function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
     $sNombrePID = $sNombreDemonio.'.pid';
 
     // El script se rehusa a ejecutarse como root en Unix/Linux.
+    // The script refuses to run as root on Unix/Linux.
     if (posix_geteuid() == 0) die(
         "\nSECURITY WARNING: Sorry, I STRONGLY OBJECT to run as root.\n\n".
         "This program requires only network access and therefore does not require root privileges.\n\n");
 
     // Construir el nombre del archivo de configuración
+    // Build the name of the configuration file
     $sRutaTrabajo = dirname($argv[0]);
     $sArchivoConfig = "$sRutaTrabajo/$sNombreConfig";
     $sArchivoPID = "$sRutaTrabajo/$sNombrePID";
 
     // Intentar cargar el archivo de configuración
+    // Try to load the configuration file
     $infoConfig = parse_ini_file($sArchivoConfig, TRUE);
     if (count($infoConfig) == 0) {
         if (function_exists('error_get_last'))
@@ -127,9 +142,11 @@ function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
     if (!isset($infoConfig['basedir'])) $infoConfig['basedir'] = $sRutaTrabajo;
 
     // Esperar hasta que finalice la instancia previa
+    // Wait until the previous instance finishes
     finalizarInstanciaPrevia($sArchivoPID);
 
     // Si no se indica depuración del programa, se vuelve un demonio
+    // If program debugging is not indicated, become a daemon
     $bDepuracion = FALSE;
     if (is_array($paramConfig) && isset($paramConfig[0]) && is_array($paramConfig[0])) {
         foreach ($paramConfig[0] as $param) {
@@ -140,9 +157,11 @@ function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
     //$PROGRAM_NAME = $sNombreDemonio.' - MASTER MONITOR';
 
     // Escribir el PID del proceso actual
+    // Write the PID of the current process
     escribirPID($sArchivoPID);
 
     // Crear los logs de aplicación, de Harris, y de llamadas no escritas
+    // Create application, Harris, and unwritten calls logs
     $bExitoAbrirLogs = FALSE;
     openlog($sNombreDemonio, LOG_PID, LOG_USER);
     $oMainLog = new AppLogger();
@@ -160,6 +179,7 @@ function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
         $goAppLog = $oMainLog;
 
         // Conectar sistema de mensajes de error de PHP al log
+        // Connect PHP error message system to log
         $old_errorHandler = set_error_handler('daemonErrorHandler');
 
         $sBannerLog = str_pad($sDescDemonio, 40, ' ', STR_PAD_BOTH);
@@ -181,16 +201,20 @@ BANNEREND;
         $oMainLog->output("PID = ".posix_getpid().", monitor started normally");
 
         // Instalar manejadores de señal para demonio (SIGTERM, SIGQUIT, SIGINT, SIGHUP)
+        // Install signal handlers for daemon (SIGTERM, SIGQUIT, SIGINT, SIGHUP)
         pcntl_signal(SIGTERM, 'manejadorPrimarioSignal');
         pcntl_signal(SIGQUIT, 'manejadorPrimarioSignal');
         pcntl_signal(SIGINT, 'manejadorPrimarioSignal');
         pcntl_signal(SIGHUP, 'manejadorPrimarioSignal');
 
         // Iniciar procesos mientras se deba continuar
+        // Start processes while continuation is required
         while ($bContinuar) {
             // Si la tarea ha finalizado o no existe, se debe iniciar
+            // If task has finished or doesn't exist, it must be started
             foreach (array_keys($tablaProcesos) as $sTarea) {
                 // Si está definido el PID del proceso, se verifica si se ejecuta.
+                // If the process PID is defined, verify if it's running.
                 if (!is_null($tablaProcesos[$sTarea])) {
                     $iStatus = NULL;
                     $iPidDevuelto = pcntl_waitpid($tablaProcesos[$sTarea], $iStatus, WNOHANG);
@@ -205,16 +229,19 @@ BANNEREND;
                 }
 
                 // Si no está definido el PID del proceso, se intenta iniciar
+                // If the process PID is not defined, attempt to start it
                 if (is_null($tablaProcesos[$sTarea])) {
                     $tablaProcesos[$sTarea] = iniciarTarea($sNombreDemonio, $sTarea, $infoConfig, $oMainLog);
                 }
             }
 
             // Revisar si existe señal que indique finalización del programa
+            // Check if there's a signal indicating program termination
             if (!is_null($gsNombreSignal) &&
             	in_array($gsNombreSignal, array(SIGTERM, SIGINT, SIGQUIT, SIGHUP))) {
 
                 // Mandar la señal a todos los procesos controlados
+                // Send signal to all controlled processes
                 $oMainLog->output("PID = ".posix_getpid().", $sNombreDemonio received signal #$gsNombreSignal, ".
                 	(($gsNombreSignal == SIGHUP) ? 'switching logs' : 'terminating')."...");
                 foreach (array_keys($tablaProcesos) as $sTarea) {
@@ -228,6 +255,7 @@ BANNEREND;
 
                 if ($gsNombreSignal != SIGHUP) {
 	                // Esperar a que todos los procesos controlados terminen
+	                // Wait for all controlled processes to finish
 	                foreach (array_keys($tablaProcesos) as $sTarea) {
 	                    if (!is_null($tablaProcesos[$sTarea])) {
 	                        $iStatus = NULL;
@@ -243,15 +271,18 @@ BANNEREND;
                 }
             } else {
                 // Esperar medio segundo entre verificaciones de actividad
+                // Wait half a second between activity checks
                 usleep(500000);
             }
         }
 
         // Restaurar manejador anterior de errores
+        // Restore previous error handler
         // set_error_handler($old_errorHandler);
     }
 
     // Cerrar los logs una vez indicada la finalización del programa
+    // Close logs once program termination is indicated
     if (!is_null($oMainLog)) {
         $oMainLog->output("PID = ".posix_getpid().", process terminated normally.");
         $oMainLog->close();
@@ -259,16 +290,19 @@ BANNEREND;
     }
 
     // Borrar el PID del proceso actual
+    // Delete the PID of the current process
     borrarPID($sArchivoPID);
 
 }
 
 // Implementación de daemon() usando pcntl_fork()
+// Implementation of daemon() using pcntl_fork()
 function daemon($nochdir, $noclose)
 {
     $iPid = pcntl_fork();
     if ($iPid != -1) {
         if ($iPid != 0) exit(0);    // Terminar el proceso padre
+                                    // Terminate parent process
         if (!$noclose) {
             fclose(STDIN);
             fclose(STDOUT);
@@ -286,11 +320,14 @@ function daemon($nochdir, $noclose)
 
 /* Si existe el archivo de PID indicado, se manda una señal SIGINT y se espera
    a que el otro programa finalice
+ * If the indicated PID file exists, send SIGINT signal and wait
+   for the other program to finish
  */
 function finalizarInstanciaPrevia($sNombrePID)
 {
     if (file_exists($sNombrePID)) {
         // Abrir el archivo y leer el PID que tiene adentro
+        // Open file and read the PID inside
         $regs = NULL;
         $contenido = file($sNombrePID);
         if (!is_array($contenido)) die("Unable to open PID file '$sNombrePID'\n");
@@ -299,7 +336,10 @@ function finalizarInstanciaPrevia($sNombrePID)
             if (posix_kill($iPid, 0)) {
                 /* El siguiente método es específico de Linux y no funcionará
                    con otro OS. Se verifica si el proceso fue iniciado con PHP
-                   y si contiene como primer parámetro la cadena  */
+                   y si contiene como primer parámetro la cadena
+                 * The following method is Linux-specific and won't work
+                   with other OS. It verifies if the process was started with PHP
+                   and if it contains the string  as first parameter */
                 $bValidoPID = TRUE;
                 if (!is_readable("/proc/$iPid/cmdline")) $bValidoPID = FALSE;
                 if ($bValidoPID) {
@@ -327,6 +367,7 @@ function finalizarInstanciaPrevia($sNombrePID)
 }
 
 // Escribir el archivo de PID
+// Write the PID file
 function escribirPID($sNombrePID)
 {
     $hArchivoPID = fopen($sNombrePID, 'w');
@@ -336,12 +377,14 @@ function escribirPID($sNombrePID)
 }
 
 // Borrar el archivo de PID
+// Delete the PID file
 function borrarPID($sNombrePID)
 {
     while (file_exists($sNombrePID)) { unlink($sNombrePID); }
 }
 
 // Manejador de señales para el proceso demonio principal
+// Signal handler for main daemon process
 function manejadorPrimarioSignal($signo)
 {
     global $gsNombreSignal;
@@ -351,6 +394,8 @@ function manejadorPrimarioSignal($signo)
 
 /* Iniciar una tarea específica en un proceso separado. Para el proceso padre,
    devuelve el PID del proceso hijo.
+ * Start a specific task in a separate process. For the parent process,
+   returns the PID of the child process.
  */
 function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
 {
@@ -359,12 +404,14 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
     set_error_handler('daemonErrorHandler');
 
     // Verificar que el nombre de la clase que implementa el proceso es válido
+    // Verify that the name of the class implementing the process is valid
     if (!class_exists($sNombreTarea)) {
         $oMainLog->output("FATAL: (internal) Invalid process classname '$sNombreTarea'");
         die("(internal) Invalid process classname '$sNombreTarea'\n");
     }
 
     // Iniciar tarea en proceso separado
+    // Start task in separate process
     $iPidProceso = pcntl_fork();
     if ($iPidProceso != -1) {
         if ($iPidProceso == 0) {
@@ -373,12 +420,14 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             $oMainLog->output("starting up process...");
 
             // Instalar los manejadores de señal para el proceso hijo
+            // Install signal handlers for child process
             pcntl_signal(SIGTERM, 'manejadorPrimarioSignal');
             pcntl_signal(SIGQUIT, 'manejadorPrimarioSignal');
             pcntl_signal(SIGINT, 'manejadorPrimarioSignal');
             pcntl_signal(SIGHUP, 'manejadorPrimarioSignal');
 
             // Elegir la tarea que debe de ejecutarse
+            // Choose the task to execute
             $oProceso = NULL;
             try {
                 $oProceso = new $sNombreTarea();
@@ -389,6 +438,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             }
 
             // Realizar inicialización adicional de la tarea
+            // Perform additional initialization of the task
             try {
                 $bContinuar = $oProceso->inicioPostDemonio($infoConfig, $oMainLog);
                 if ($bContinuar) $oMainLog->output("PID = ".posix_getpid().", process started normally");
@@ -398,8 +448,10 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             }
 
             // Continuar la tarea hasta que se finalice
+            // Continue task until termination
             while ($bContinuar) {
                 // Ejecutar el procedimiento de trabajo del demonio
+                // Execute daemon work procedure
                 if (is_null($gsNombreSignal)) {
                     try {
                         $bContinuar = $oProceso->procedimientoDemonio();
@@ -410,6 +462,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
                 }
 
                 // Revisar si existe señal que indique finalización del programa
+                // Check if there's a signal indicating program termination
                 if (!is_null($gsNombreSignal)) {
                     if (in_array($gsNombreSignal, array(SIGTERM, SIGINT, SIGQUIT))) {
                     	$oMainLog->output("PID = ".posix_getpid().", process received signal $gsNombreSignal, terminating...");
@@ -428,6 +481,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             }
 
             // Indicar al módulo de trabajo por qué se está finalizando
+            // Indicate to work module why termination is happening
             try {
                 $oProceso->limpiezaDemonio($gsNombreSignal);
             } catch (Exception $ex) {
@@ -437,15 +491,18 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             $oMainLog->close();
 
             exit(0);   // Finalizar el proceso hijo
+                        // Terminate child process
         }
     } else {
         // Avisar que no se puede iniciar la tarea requerida
+        // Warn that required task cannot be started
         $oMainLog->output("Unable to fork $sNombreTarea - $!");
     }
     return $iPidProceso;
 }
 
 // Procedimiento que usa el log abierto para reportar el error que haya ocurrido
+// Procedure that uses open log to report any error that occurred
 function daemonErrorHandler($errno, $errmsg, $filename, $linenum, $vars)
 {
     global $goAppLog;
@@ -463,6 +520,7 @@ function daemonErrorHandler($errno, $errmsg, $filename, $linenum, $vars)
         E_USER_NOTICE        => 'User Notice',
         E_STRICT             => 'Runtime Notice',
 //        E_RECOVERABLE_ERROR  => 'Catchable Fatal Error'
+//                              'Catchable Fatal Error'
         );
     if (!is_null($goAppLog) && $errno != E_STRICT) {
         $goAppLog->output("$errortype[$errno]: $filename line $linenum - $errmsg");

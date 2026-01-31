@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
  Codificación: UTF-8
+ Encoding: UTF-8
  +----------------------------------------------------------------------+
  | Issabel version 1.2-2                                                |
  | http://www.issabel.org                                               |
@@ -25,17 +26,25 @@ require_once 'ECCPHelper.lib.php';
 class SQLWorkerProcess extends TuberiaProcess
 {
     private $DEBUG = FALSE; // VERDADERO si se activa la depuración
+                            // TRUE if debugging is enabled
 
     private $_log;      // Log abierto por framework de demonio
+                        // Log opened by daemon framework
     private $_dsn;      // Cadena que representa el DSN, estilo PDO
+                        // String representing the DSN, PDO style
     private $_db;       // Conexión a la base de datos, PDO
+                        // Database connection, PDO
     private $_configDB; // Objeto de configuración desde la base de datos
+                        // Configuration object from database
 
     private $_iTimestampInicioProceso;
 
     // Contadores para actividades ejecutadas regularmente
+    // Counters for regularly executed activities
     private $_iTimestampActualizacion = 0;          // Última actualización remota
+                                                    // Last remote update
     private $_iTimestampUltimaRevisionConfig = 0;   // Última revisión de configuración
+                                                    // Last configuration review
 
     /* Lista de acciones pendientes encargadas por otros procesos. Cada elemento
      * de este arreglo es una tupla cuyo primer elemento es callable y el segundo
@@ -48,6 +57,17 @@ class SQLWorkerProcess extends TuberiaProcess
      * en un momento posterior. Todos los callables deben de devolver un arreglo
      * que contiene los eventos a ser lanzados como resultado de haber completado
      * las operaciones correspondientes.
+     *
+     * List of pending actions requested by other processes. Each element of this
+     * array is a tuple where the first element is callable and the second element
+     * is the list of parameters with which the callable must be invoked. Since all
+     * callables use the database, execution may throw PDOException exceptions.
+     * All callables are invoked within a database transaction, which will be
+     * committed if no exceptions are thrown. Otherwise, and if the connection
+     * remains valid, a rollback will be performed and the operation will be
+     * retried at a later time. All callables must return an array containing the
+     * events to be launched as a result of having completed the corresponding
+     * operations.
      */
     private $_accionesPendientes = array();
 
@@ -63,10 +83,12 @@ class SQLWorkerProcess extends TuberiaProcess
         $this->_iTimestampInicioProceso = time();
 
         // Interpretar la configuración del demonio
+        // Interpret daemon configuration
         $this->_dsn = $this->_interpretarConfiguracion($infoConfig);
         if (!$this->_iniciarConexionDB()) return FALSE;
 
         // Leer el resto de la configuración desde la base de datos
+        // Read the rest of the configuration from the database
         try {
             $this->_configDB = new ConfigDB($this->_db, $this->_log);
         } catch (PDOException $e) {
@@ -77,6 +99,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $this->_repararAuditoriasIncompletas();
 
         // Registro de manejadores de eventos desde AMIEventProcess
+        // Registration of event handlers from AMIEventProcess
         foreach (array('sqlinsertcalls', 'sqlupdatecalls',
             'sqlinsertcurrentcalls', 'sqldeletecurrentcalls',
             'sqlupdatecurrentcalls', 'sqlupdatestatcampaign', 'finalsql',
@@ -87,15 +110,18 @@ class SQLWorkerProcess extends TuberiaProcess
             $this->_tuberia->registrarManejador('AMIEventProcess', $k, array($this, "msg_$k"));
 
         // Registro de manejadores de eventos desde ECCPWorkerProcess
+        // Registration of event handlers from ECCPWorkerProcess
         foreach (array('requerir_nuevaListaAgentes') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
+        // Registration of event handlers from HubProcess
         $this->_tuberia->registrarManejador('HubProcess', 'finalizando', array($this, "msg_finalizando"));
 
         $this->DEBUG = $this->_configDB->dialer_debug;
 
         // Informar a AMIEventProcess la configuración de Asterisk
+        // Inform AMIEventProcess of Asterisk configuration
         $this->_informarCredencialesAsterisk(FALSE);
 
         return TRUE;
@@ -127,8 +153,10 @@ class SQLWorkerProcess extends TuberiaProcess
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbhost'])) {
             $dbHost = $infoConfig['database']['dbhost'];
             $this->_log->output('Usando host de base de datos: '.$dbHost);
+            // Using database host:
         } else {
             $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost);
+            // Using (default) database host:
         }
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbuser']))
             $dbUser = $infoConfig['database']['dbuser'];
@@ -155,21 +183,26 @@ class SQLWorkerProcess extends TuberiaProcess
     public function procedimientoDemonio()
     {
         // Lo siguiente NO debe de iniciar operaciones DB, sólo acumular acciones
+        // The following must NOT initiate DB operations, only accumulate actions
         $bPaqProcesados = $this->_multiplex->procesarPaquetes();
         $this->_multiplex->procesarActividad(($bPaqProcesados || (count($this->_accionesPendientes) > 0)) ? 0 : 1);
 
         // Verificar posible desconexión de la base de datos
+        // Verify possible database disconnection
         if (is_null($this->_db)) {
             if (count($this->_accionesPendientes) > 0) {
                 $this->_log->output('INFO: falta conexión DB y hay '.count($this->_accionesPendientes).' acciones pendientes.');
+                // INFO: DB connection missing and there are X pending actions.
                 if ($this->DEBUG) {
                     foreach ($this->_accionesPendientes as $accion)
                         $this->_volcarAccion($accion);
                 }
             }
             $this->_log->output('INFO: intentando volver a abrir conexión a DB...');
+            // INFO: trying to reopen DB connection...
             if (!$this->_iniciarConexionDB()) {
                 $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera...');
+                // ERR: cannot restore DB connection, waiting...
 
                 $t1 = time();
                 do {
@@ -178,6 +211,7 @@ class SQLWorkerProcess extends TuberiaProcess
                 } while (time() - $t1 < 5);
             } else {
                 $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal.');
+                // INFO: DB connection restored, normal operation restarts.
                 $this->_configDB->setDBConn($this->_db);
             }
         } else {
@@ -192,14 +226,19 @@ class SQLWorkerProcess extends TuberiaProcess
         try {
             if (!$this->_finalizandoPrograma) {
                 // Verificar si se ha cambiado la configuración
+                // Check if configuration has changed
                 $this->_verificarCambioConfiguracion();
 
                 // Verificar si hay que refrescar agentes disponibles
+                // Check if available agents need to be refreshed
                 $this->_verificarActualizacionAgentes();
             }
 
             /* Por ahora se intenta ejecutar todas las operaciones, incluso
-             * si se intenta finalizar el programa. */
+             * si se intenta finalizar el programa.
+             *
+             * For now, all operations are attempted to be executed, even if
+             * the program is being finalized. */
             if (count($this->_accionesPendientes) > 0) {
                 if ($this->DEBUG) {
                     $this->_volcarAccion($this->_accionesPendientes[0]);
@@ -214,7 +253,10 @@ class SQLWorkerProcess extends TuberiaProcess
 
                 /* El commit también puede arrojar excepción. Se debe pasar más
                  * allá del commit antes de quitar la acción pendiente y lanzar
-                 * los eventos. */
+                 * los eventos.
+                 *
+                 * The commit can also throw exceptions. Must go past the commit
+                 * before removing the pending action and launching the events. */
                 $this->_db->commit();
                 $t_2 = microtime(TRUE);
                 if ($this->DEBUG) {
@@ -235,11 +277,14 @@ class SQLWorkerProcess extends TuberiaProcess
                     ': no se puede realizar operación de base de datos: '.
                     implode(' - ', $e->errorInfo));
                 $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
+                // ERR: stack trace:
             }
             if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
                 // Códigos correspondientes a pérdida de conexión de base de datos
+                // Codes corresponding to database connection loss
                 $this->_log->output('WARN: '.__METHOD__.
                     ': conexión a DB parece ser inválida, se cierra...');
+                    // : DB connection seems invalid, closing...
                 $this->_db = NULL;
             } else {
                 $this->_db->rollBack();
@@ -265,26 +310,33 @@ class SQLWorkerProcess extends TuberiaProcess
     public function limpiezaDemonio($signum)
     {
         // Mandar a cerrar todas las conexiones activas
+        // Order to close all active connections
         $this->_multiplex->finalizarServidor();
 
         // Se intentan evacuar acciones pendientes
+        // Attempt to evacuate pending actions
         if (count($this->_accionesPendientes) > 0)
             $this->_log->output('WARN: todavía hay '.count($this->_accionesPendientes).' acciones pendientes.');
+            // WARN: there are still X pending actions.
         $t1 = time();
         while (time() - $t1 < 10 && !is_null($this->_db) &&
             count($this->_accionesPendientes) > 0) {
             $this->_procesarUnaAccion();
 
             // No se hace I/O y por lo tanto no se lanzan eventos
+            // No I/O is done and therefore no events are launched
         }
         if (count($this->_accionesPendientes) > 0)
             $this->_log->output('ERR: no se pueden evacuar las siguientes acciones: '.
                 print_r($this->_accionesPendientes, TRUE));
+                // ERR: cannot evacuate the following actions:
 
         // Desconectarse de la base de datos
+        // Disconnect from database
         $this->_configDB = NULL;
         if (!is_null($this->_db)) {
             $this->_log->output('INFO: desconectando de la base de datos...');
+            // INFO: disconnecting from database...
             $this->_db = NULL;
         }
     }
@@ -326,7 +378,10 @@ class SQLWorkerProcess extends TuberiaProcess
     }
 
     /* Mandar a los otros procedimientos la información que no pueden leer
-     * directamente porque no tienen conexión de base de datos. */
+     * directamente porque no tienen conexión de base de datos.
+     *
+     * Send to other processes the information they cannot read directly
+     * because they don't have database connection. */
     private function _verificarActualizacionAgentes()
     {
         $iTimestamp = time();
@@ -357,13 +412,16 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_requerir_nuevaListaAgentes($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         $this->_log->output("INFO: $sFuente requiere refresco de lista de agentes");
+        // INFO: X requires refresh of agent list
         $this->_encolarAccionPendiente('_requerir_nuevaListaAgentes', $datos);
     }
 
     public function msg_requerir_credencialesAsterisk($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         $this->_log->output("INFO: $sFuente requiere envío de credenciales Asterisk");
+        // INFO: X requires sending of Asterisk credentials
         $this->_informarCredencialesAsterisk(TRUE); // <-- no requiere acceso inmediato a base de datos
+                                                     // <-- does not require immediate database access
     }
 
     public function msg_sqlinsertcalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
@@ -490,6 +548,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         $this->_log->output('INFO: recibido mensaje de finalización...');
+        // INFO: received finalization message...
         $this->_finalizandoPrograma = TRUE;
     }
 
@@ -505,9 +564,11 @@ class SQLWorkerProcess extends TuberiaProcess
     /**************************************************************************/
 
     // Mandar a AMIEventProcess una lista actualizada de los agentes activos
+    // Send to AMIEventProcess an updated list of active agents
     private function _requerir_nuevaListaAgentes()
     {
         // El ORDER BY del query garantiza que estatus A aparece antes que I
+        // The query's ORDER BY guarantees that status A appears before I
         $recordset = $this->_db->query(
             'SELECT id, number, name, estatus, type FROM agent ORDER BY number, estatus');
         $lista = array(); $listaNum = array();
@@ -529,7 +590,13 @@ class SQLWorkerProcess extends TuberiaProcess
          * depende de la existencia de queues_additional.conf de una instalación
          * FreePBX, y además asume Asterisk 11 o inferior. Se debe modificar
          * esto cuando se migre a una versión superior de Asterisk que siempre
-         * emite los eventos. */
+         * emite los eventos.
+         *
+         * Read the status of queue event activation flags from the configuration
+         * file. The code below depends on the existence of queues_additional.conf
+         * from a FreePBX installation, and also assumes Asterisk 11 or lower.
+         * This must be modified when migrating to a higher Asterisk version that
+         * always emits the events. */
         $queueflags = array();
         if (file_exists('/etc/asterisk/queues_additional.conf')) {
             $queue = NULL;
@@ -545,12 +612,14 @@ class SQLWorkerProcess extends TuberiaProcess
                     } elseif ($regs[1] == 'member' && (stripos($regs[2], 'SIP/') === 0 || stripos($regs[2], 'IAX2/') === 0)) {
                         $this->_log->output('WARN: '.__METHOD__.': agente estático '.
                             $regs[2].' encontrado en cola '.$queue.' - puede causar problemas.');
+                            // WARN: static agent X found in queue Y - may cause problems.
                     }
                 }
             }
         }
 
         // Mandar el recordset a AMIEventProcess como un mensaje
+        // Send the recordset to AMIEventProcess as a message
         return array(
             array('AMIEventProcess', 'nuevaListaAgentes', array($lista, $queueflags)),
         );
@@ -561,6 +630,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $eventos = array();
 
         // Porción que identifica la tabla a modificar
+        // Portion that identifies the table to modify
         $tipo_llamada = $paramInsertar['tipo_llamada'];
         unset($paramInsertar['tipo_llamada']);
         switch ($tipo_llamada) {
@@ -577,9 +647,13 @@ class SQLWorkerProcess extends TuberiaProcess
         }
 
         // Caso especial: llamada entrante requiere ID de contacto
+        // Special case: incoming call requires contact ID
         if ($tipo_llamada == 'incoming') {
             /* Se consulta el posible contacto en base al caller-id. Si hay
-             * exactamente un contacto, su ID se usa para la inserción. */
+             * exactamente un contacto, su ID se usa para la inserción.
+             *
+             * The possible contact is queried based on caller-id. If there is
+             * exactly one contact, its ID is used for insertion. */
             $recordset = $this->_db->prepare('SELECT id FROM contact WHERE telefono = ?');
 
             $recordset->execute(array($paramInsertar['callerid']));
@@ -603,12 +677,15 @@ class SQLWorkerProcess extends TuberiaProcess
         $idCall = $this->_db->lastInsertId();
 
         // Mandar de vuelta el ID de inserción a AMIEventProcess
+        // Send back the insertion ID to AMIEventProcess
         $eventos[] = array('AMIEventProcess', 'idnewcall',
             array($tipo_llamada, $paramInsertar['uniqueid'], $idCall));
 
         // Para llamada entrante se debe de insertar el log de progreso
+        // For incoming call, progress log must be inserted
         if ($tipo_llamada == 'incoming') {
             // Notificar el progreso de la llamada
+            // Notify call progress
             $infoProgreso = array(
                 'datetime_entry'        =>  $paramInsertar['datetime_entry_queue'],
                 'new_status'            =>  'OnQueue',
@@ -627,6 +704,7 @@ class SQLWorkerProcess extends TuberiaProcess
     }
 
     // Procedimiento que actualiza una sola llamada de la tabla calls o call_entry
+    // Procedure that updates a single call from the calls or call_entry table
     private function _sqlupdatecalls($paramActualizar)
     {
         $eventos = array();
@@ -635,6 +713,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $id_llamada = NULL;
 
         // Porción que identifica la tabla a modificar
+        // Portion that identifies the table to modify
         $tipo_llamada = $paramActualizar['tipo_llamada'];
         unset($paramActualizar['tipo_llamada']);
         switch ($tipo_llamada) {
@@ -651,6 +730,7 @@ class SQLWorkerProcess extends TuberiaProcess
         }
 
         // Porción que identifica la tupla a modificar
+        // Portion that identifies the tuple to modify
         $sqlWhere = array();
         $paramWhere = array();
         if (isset($paramActualizar['id_campaign'])) {
@@ -668,13 +748,17 @@ class SQLWorkerProcess extends TuberiaProcess
         }
 
         // Parámetros a modificar
+        // Parameters to modify
         $sqlCampos = array();
         $paramCampos = array();
 
         // TODO: revisar si es necesario inc_retries, porque campañas
         // salientes incrementan directamente al cambiar a Placing
+        // TODO: review if inc_retries is necessary, because outgoing
+        // campaigns increment directly when changing to Placing
         //
         // Caso especial: retries se debe de incrementar
+        // Special case: retries must be incremented
         if (isset($paramActualizar['inc_retries'])) {
             $sqlCampos[] = 'retries = retries + ?';
             $paramCampos[] = $paramActualizar['inc_retries'];
@@ -701,11 +785,13 @@ class SQLWorkerProcess extends TuberiaProcess
     }
 
     // Procedimiento que inserta un solo registro en current_calls o current_call_entry
+    // Procedure that inserts a single record in current_calls or current_call_entry
     private function _sqlinsertcurrentcalls($paramInsertar)
     {
         $eventos = array();
 
         // Porción que identifica la tabla a modificar
+        // Portion that identifies the table to modify
         $tipo_llamada = $paramInsertar['tipo_llamada'];
         unset($paramInsertar['tipo_llamada']);
         switch ($tipo_llamada) {
@@ -734,6 +820,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $sth->execute($params);
 
         // Mandar de vuelta el ID de inserción a AMIEventProcess
+        // Send back the insertion ID to AMIEventProcess
         $eventos[] = array('AMIEventProcess', 'idcurrentcall', array(
             $tipo_llamada,
             isset($paramInsertar['id_call_entry'])
@@ -746,11 +833,13 @@ class SQLWorkerProcess extends TuberiaProcess
     }
 
     // Procedimiento que actualiza un solo registro en current_calls o current_call_entry
+    // Procedure that updates a single record in current_calls or current_call_entry
     private function _sqlupdatecurrentcalls($paramActualizar)
     {
         $eventos = array();
 
         // Porción que identifica la tabla a modificar
+        // Portion that identifies the table to modify
         switch ($paramActualizar['tipo_llamada']) {
         case 'outgoing':
             $sqlTabla = 'UPDATE current_calls SET ';
@@ -766,6 +855,7 @@ class SQLWorkerProcess extends TuberiaProcess
         unset($paramActualizar['tipo_llamada']);
 
         // Porción que identifica la tupla a modificar
+        // Portion that identifies the tuple to modify
         $sqlWhere = array();
         $paramWhere = array();
         if (isset($paramActualizar['id'])) {
@@ -775,6 +865,7 @@ class SQLWorkerProcess extends TuberiaProcess
         }
 
         // Parámetros a modificar
+        // Parameters to modify
         $sqlCampos = array();
         $paramCampos = array();
 
@@ -797,6 +888,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $eventos = array();
 
         // Esto no debería pasar (manualdialing)
+        // This should not happen (manualdialing)
         if (!in_array($paramBorrar['tipo_llamada'], array('incoming', 'outgoing'))) {
             $this->_log->output('ERR: '.__METHOD__.' no debió haberse recibido para '.
                 print_r($paramBorrar, TRUE));
@@ -804,6 +896,7 @@ class SQLWorkerProcess extends TuberiaProcess
         }
 
         // Porción que identifica la tabla a modificar
+        // Portion that identifies the table to modify
         $sth = $this->_db->prepare(($paramBorrar['tipo_llamada'] == 'outgoing')
             ? 'DELETE FROM current_calls WHERE id = ?'
             : 'DELETE FROM current_call_entry WHERE id = ?');
@@ -829,13 +922,16 @@ class SQLWorkerProcess extends TuberiaProcess
         $eventos = array();
 
         // TODO: configurar prefijo de monitoring
+        // TODO: configure monitoring prefix
         $sDirBaseMonitor = '/var/spool/asterisk/monitor/';
 
         // Quitar el prefijo de monitoring de todos los archivos
+        // Remove monitoring prefix from all files
         if (strpos($recordingfile, $sDirBaseMonitor) === 0)
             $recordingfile = substr($recordingfile, strlen($sDirBaseMonitor));
 
         // Se asume que el archivo está completo con extensión
+        // It is assumed that the file is complete with extension
         $field = 'id_call_'.$tipo_llamada;
         $recordset = $this->_db->prepare("SELECT COUNT(*) AS N FROM call_recording WHERE {$field} = ? AND recordingfile = ?");
         $recordset->execute(array($id_llamada, $recordingfile));
@@ -843,6 +939,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $recordset->closeCursor();
         if ($iNumDuplicados <= 0) {
             // El archivo no constaba antes - se inserta con los datos actuales
+            // The file was not recorded before - inserted with current data
             $sth = $this->_db->prepare(
                 "INSERT INTO call_recording (datetime_entry, {$field}, uniqueid, channel, recordingfile) ".
                 'VALUES (NOW(), ?, ?, ?, ?)');
@@ -859,6 +956,7 @@ class SQLWorkerProcess extends TuberiaProcess
 
         if (is_null($id_agent)) {
             // Ha fallado un intento de login
+            // A login attempt has failed
             $eventos_forward[] = array('AgentLogin', array($sAgente, FALSE));
         } else {
             $id_sesion = $this->_marcarInicioSesionAgente($id_agent, $iTimestampLogin);
@@ -866,6 +964,7 @@ class SQLWorkerProcess extends TuberiaProcess
                 $eventos[] = array('AMIEventProcess', 'idNuevaSesionAgente', array($sAgente, $id_sesion));
 
                 // Notificar a todas las conexiones abiertas
+                // Notify all open connections
                 $eventos_forward[] = array('AgentLogin', array($sAgente, TRUE));
             }
         }
@@ -880,14 +979,17 @@ class SQLWorkerProcess extends TuberiaProcess
         $eventos_forward = array();
 
         // Escribir la información de auditoría en la base de datos
+        // Write audit information to database
         foreach ($pausas as $tipo_pausa => $id_pausa) if (!is_null($id_pausa)) {
             // TODO: ¿Qué ocurre con la posible llamada parqueada?
+            // TODO: What happens with the possible parked call?
             marcarFinalBreakAgente($this->_db, $id_pausa, $iTimestampLogout);
             $eventos_forward[] = construirEventoPauseEnd($this->_db, $sAgente, $id_pausa, $tipo_pausa);
         }
         marcarFinalBreakAgente($this->_db, $id_sesion, $iTimestampLogout);
 
         // Notificar a todas las conexiones abiertas
+        // Notify all open connections
         $eventos_forward[] = array('AgentLogoff', array($sAgente));
 
         $eventos[] = array('ECCPProcess', 'emitirEventos', array($eventos_forward));
@@ -900,15 +1002,24 @@ class SQLWorkerProcess extends TuberiaProcess
      * previamente como que inició la sesión, y sólo marca el inicio si no está
      * ya marcado antes.
      *
+     * Method to mark in audit tables that the agent has started the session.
+     * This implementation checks if the agent has already been marked as having
+     * started the session, and only marks the start if not already marked before.
+     *
      * @param   string  $sAgente    Canal del agente que se verifica sesión
+     *                              Agent channel for which session is verified
      * @param   int     $id_agent   ID en base de datos del agente
+     *                              Database ID of the agent
      * @param   float   $iTimestampLogin timestamp devuelto por microtime() de login
+     *                                    timestamp returned by microtime() of login
      *
      * @return  mixed   NULL en error, o el ID de la auditoría de inicio de sesión
+     *                  NULL on error, or the ID of the login audit
      */
     private function _marcarInicioSesionAgente($idAgente, $iTimestampLogin)
     {
         // Verificación de sesión activa
+        // Active session verification
         $sPeticionExiste = <<<SQL_EXISTE_AUDIT
 SELECT id FROM audit
 WHERE id_agent = ? AND datetime_init >= ? AND datetime_end IS NULL
@@ -921,14 +1032,17 @@ SQL_EXISTE_AUDIT;
         $recordset->closeCursor();
 
         // Se indica éxito de inmediato si ya hay una sesión
+        // Success is indicated immediately if there is already a session
         $idAudit = NULL;
         if ($tupla) {
             $idAudit = $tupla['id'];
             $this->_log->output('WARN: '.__METHOD__.": id_agente={$idAgente} ".
                     'inició sesión en '.date('Y-m-d H:i:s', $iTimestampLogin).
                     " pero hay sesión abierta ID={$idAudit}, se reusa.");
+                    // started session at but there is open session ID=, reusing.
         } else {
             // Ingreso de sesión del agente
+            // Agent session entry
             $sTimeStamp = date('Y-m-d H:i:s', $iTimestampLogin);
             $sth = $this->_db->prepare('INSERT INTO audit (id_agent, datetime_init) VALUES (?, ?)');
             $sth->execute(array($idAgente, $sTimeStamp));
@@ -947,7 +1061,10 @@ SQL_EXISTE_AUDIT;
         $infoLlamada = leerInfoLlamada($this->_db, $sTipoLlamada, $idCampania, $idLlamada);
         /* Ya que la escritura a la base de datos es asíncrona, puede
          * ocurrir que se lea la llamada en el estado OnQueue y sin fecha
-         * de linkstart. */
+         * de linkstart.
+         *
+         * Since database writing is asynchronous, it may happen that the
+         * call is read in OnQueue state and without linkstart date. */
         $infoLlamada['status'] = ($infoLlamada['calltype'] == 'incoming') ? 'activa' : 'Success';
         if (!isset($infoLlamada['queue']) && !is_null($queue))
             $infoLlamada['queue'] = $queue;
@@ -956,6 +1073,7 @@ SQL_EXISTE_AUDIT;
             $infoLlamada['trunk'] = $trunk;
 
         // Notificar el progreso de la llamada
+        // Notify call progress
         $paramProgreso = array(
             'datetime_entry'    =>  $sFechaLink,
             'new_status'        =>  'Success',
@@ -1002,7 +1120,9 @@ SQL_EXISTE_AUDIT;
         $eventos_forward = array();
 
         // Actualizar las tablas de calls y current_calls
+        // Update calls and current_calls tables
         // TODO: esto es equivalente a SQLWorkerProcess->sqlupdatecurrentcalls
+        // TODO: this is equivalent to SQLWorkerProcess->sqlupdatecurrentcalls
         if ($infoLlamada['calltype'] == 'incoming') {
             $sth = $this->_db->prepare(
                 'UPDATE current_call_entry SET hold = ? WHERE id = ?');
@@ -1018,7 +1138,9 @@ SQL_EXISTE_AUDIT;
         }
 
         // Auditoría del fin del hold
+        // Audit of the end of hold
         marcarFinalBreakAgente($this->_db, $infoSeguimiento['id_audit_hold'], $iTimestampFinalPausa);
+        $eventos_forward[] = construirEventoPauseEnd($this->_db, $sAgente, $infoSeguimiento['id_audit_hold'], 'hold');
         $eventos_forward[] = construirEventoPauseEnd($this->_db, $sAgente, $infoSeguimiento['id_audit_hold'], 'hold');
 
         $eventos[] = array('ECCPProcess', 'emitirEventos', array($eventos_forward));
@@ -1056,6 +1178,7 @@ SQL_EXISTE_AUDIT;
         $eventos_forward = array();
 
         // Para asegurar orden estricto de eventos
+        // To ensure strict order of events
         if (isset($prop['extra_events'])) {
             $eventos_forward = array_merge($eventos_forward, $prop['extra_events']);
             unset($prop['extra_events']);
@@ -1071,9 +1194,9 @@ SQL_EXISTE_AUDIT;
     private function _construirEventoProgresoLlamada($prop)
     {
 // CUSTOMIZATIONS WC 05/08/2025
-	$temp_data=var_export($prop,true);   
-        $this->_log->output('LOGDATA: '.$temp_data); 
-// CUSTOMIZATIONS WC 05/08/2025	    
+	$temp_data=var_export($prop,true);
+        $this->_log->output('LOGDATA: '.$temp_data);
+// CUSTOMIZATIONS WC 05/08/2025
         $id_campaignlog = NULL;
         $ev = NULL;
         $evlist = array();
@@ -1087,14 +1210,18 @@ SQL_EXISTE_AUDIT;
         }
 
         /* Se leen las propiedades del último log de la llamada, o NULL si no
-	 * hay cambio de estado previo. */
+	 * hay cambio de estado previo.
+         *
+         * The properties of the last call log are read, or NULL if there is
+	 * no previous status change. */
 // CUSTOMIZATIONS WC 05/08/2025
 	if($campaign_type=="")
 	{
 	    $campaign_type="incoming";
 	    $this->_log->output('LOGDATA: no se encontro la informacion de campaign_type, utilizando incoming...');
+	    // campaign_type information not found, using incoming...
 	}
-// CUSTOMIZATIONS WC 05/08/2025 	
+// CUSTOMIZATIONS WC 05/08/2025
         $recordset = $this->_db->prepare(
             "SELECT retry, uniqueid, trunk, id_agent, duration ".
             "FROM call_progress_log WHERE id_call_{$campaign_type} = ? ".
@@ -1113,6 +1240,7 @@ SQL_EXISTE_AUDIT;
         }
 
         // Obtener agente agendado avisado por CampaignProcess o AMIEventProcess
+        // Get scheduled agent notified by CampaignProcess or AMIEventProcess
         $agente_agendado = NULL;
         if (isset($prop['agente_agendado'])) {
             $agente_agendado = $prop['agente_agendado'];
@@ -1120,6 +1248,7 @@ SQL_EXISTE_AUDIT;
         }
 
         // Si el número de reintento es distinto, se anulan datos anteriores
+        // If retry number is different, previous data is invalidated
         if (isset($prop['retry']) && $tuplaAnterior['retry'] != $prop['retry']) {
             $tuplaAnterior['uniqueid'] = NULL;
             $tuplaAnterior['trunk'] = NULL;
@@ -1129,6 +1258,7 @@ SQL_EXISTE_AUDIT;
         $tuplaAnterior = array_merge($tuplaAnterior, $prop);
 
         // Escribir los valores nuevos en un nuevo registro
+        // Write new values in a new record
         unset($tuplaAnterior['queue']);
         $columnas = array_keys($tuplaAnterior);
         $paramSQL = array();
@@ -1142,6 +1272,7 @@ SQL_EXISTE_AUDIT;
         $id_campaignlog = $tuplaAnterior['id'] = $this->_db->lastInsertId();
 
         // Avisar el inicio del marcado de la llamada saliente agendada
+        // Notify the start of dialing of the scheduled outgoing call
         if ($campaign_type == 'outgoing' && !is_null($agente_agendado)) {
             if ($tuplaAnterior['new_status'] == 'Placing') {
                 $ev = array('ScheduledCallStart', array($agente_agendado, $campaign_type,
@@ -1157,9 +1288,14 @@ SQL_EXISTE_AUDIT;
 
         /* Emitir el evento a las conexiones ECCP. Para mantener la
          * consistencia con el resto del API, se quitan los valores de
-        * id_call_* y id_campaign_*, y se sintetiza tipo_llamada. */
+        * id_call_* y id_campaign_*, y se sintetiza tipo_llamada.
+        *
+        * Emit the event to ECCP connections. To maintain consistency with
+        * the rest of the API, the values of id_call_* and id_campaign_* are
+        * removed, and call_type is synthesized. */
         if (!in_array($tuplaAnterior['new_status'], array('Success', 'Hangup', 'ShortCall'))) {
             // Todavía no se soporta emitir agente conectado para OnHold/OffHold
+            // Emitting connected agent for OnHold/OffHold is not yet supported
             unset($tuplaAnterior['id_agent']);
 
             $tuplaAnterior['campaign_type'] = $campaign_type;
@@ -1170,6 +1306,7 @@ SQL_EXISTE_AUDIT;
             unset($tuplaAnterior['id_call_'.$campaign_type]);
 
             // Agregar el teléfono callerid o marcado
+            // Add the callerid or dialed phone
             $sql = array(
                 'outgoing'  =>
                     'SELECT calls.phone, campaign.queue '.
@@ -1204,6 +1341,14 @@ SQL_EXISTE_AUDIT;
      * la base de datos es modificada únicamente por este proceso, y no por
      * otras copias concurrentes del dialer (lo cual no está soportado
      * actualmente).
+     *
+     * Procedure that attempts to repair audit records that are not properly
+     * closed, i.e., that have NULL as closing date. First, agents for which
+     * incomplete audits exist are identified, and then an attempt is made to
+     * repair for each agent. It is assumed that this method is invoked BEFORE
+     * starting to listen to ECCP requests, and that the database is modified
+     * only by this process, and not by other concurrent copies of the dialer
+     * (which is not currently supported).
      */
     private function _repararAuditoriasIncompletas()
     {
@@ -1222,16 +1367,19 @@ AGENTES_AUDIT_INCOMPLETO;
             	$this->_log->output('INFO: se ha detectado auditoría incompleta '.
                     "para {$row['type']}/{$row['number']} - {$row['name']} ".
                     "(id_agent={$row['id']} ".(($row['estatus'] == 'A') ? 'ACTIVO' : 'INACTIVO').")");
+                    // INFO: incomplete audit detected for X - Y (id_agent=Z ACTIVE/INACTIVE)
                 $this->_repararAuditoriaAgente($row['id']);
             }
         } catch (PDOException $e) {
             $this->_stdManejoExcepcionDB($e, 'no se puede terminar de reparar auditorías');
+            // cannot finish repairing audits
         }
     }
 
     private function _repararAuditoriaAgente($idAgente)
     {
         // Listar todas las auditorías incompletas para este agente
+        // List all incomplete audits for this agent
         $sPeticionAuditorias = <<<LISTA_AUDITORIAS_AGENTE
 SELECT id, datetime_init FROM audit
 WHERE id_agent = ? AND id_break IS NULL AND datetime_end IS NULL
@@ -1245,8 +1393,13 @@ LISTA_AUDITORIAS_AGENTE;
         foreach ($listaAudits as $auditIncompleto) {
             /* Se intenta examinar la base de datos para obtener la fecha
              * máxima para la cual hay evidencia de actividad entre el inicio
-             * de este registro y el inicio del siguiente registro. */
+             * de este registro y el inicio del siguiente registro.
+             *
+             * Attempt to examine the database to obtain the maximum date for
+             * which there is evidence of activity between the start of this
+             * record and the start of the next record. */
             $this->_log->output("INFO:\tSesión ID={$auditIncompleto['id']} iniciada en {$auditIncompleto['datetime_init']}");
+            // INFO: Session ID=X started at
 
             $sFechaSiguienteSesion = NULL;
             $idUltimoBreak = NULL;
@@ -1256,6 +1409,7 @@ LISTA_AUDITORIAS_AGENTE;
             $sFechaFinalLlamada = NULL;
 
             // El inicio de la siguiente sesión es un tope máximo para el final de la sesión incompleta.
+            // The start of the next session is a maximum limit for the end of the incomplete session.
             $recordset = $this->_db->prepare(
                 'SELECT datetime_init FROM audit WHERE id_agent = ? AND id_break IS NULL '.
                 'AND datetime_init > ? ORDER BY datetime_init LIMIT 0,1');
@@ -1264,13 +1418,18 @@ LISTA_AUDITORIAS_AGENTE;
             $recordset->closeCursor();
             if (!$tupla) {
                 $this->_log->output("INFO:\tNo hay sesiones posteriores a esta sesión incompleta.");
+                // INFO: There are no sessions after this incomplete session.
             } else {
                 $this->_log->output("INFO:\tSiguiente sesión iniciada en {$tupla['datetime_init']}");
+                // INFO: Next session started at
                 $sFechaSiguienteSesion = $tupla['datetime_init'];
             }
 
             /* La sesión sólo puede extenderse hasta el final de la pausa antes de
-             * la siguiente sesión, o la fecha actual */
+             * la siguiente sesión, o la fecha actual
+             *
+             * The session can only extend until the end of the pause before the
+             * next session, or the current date */
             $recordset = $this->_db->prepare(
                 'SELECT id, datetime_init, datetime_end FROM audit WHERE id_agent = ? '.
                     'AND id_break IS NOT NULL AND datetime_init > ? AND datetime_init < ? ' .
@@ -1281,9 +1440,11 @@ LISTA_AUDITORIAS_AGENTE;
             $recordset->closeCursor();
             if (!$tupla) {
                 $this->_log->output("INFO:\tNo hay breaks pertenecientes a esta sesión incompleta.");
+                // INFO: There are no breaks belonging to this incomplete session.
             } else {
                 $this->_log->output("INFO:\tÚltimo break de sesión incompleta inicia en {$tupla['datetime_init']}, ".
                     (is_null($tupla['datetime_end']) ? 'está incompleto' : 'termina en '.$tupla['datetime_end']));
+                    // INFO: Last break of incomplete session starts at, is incomplete / ends at
                 $idUltimoBreak = $tupla['id'];
                 $sFechaInicioBreak = $tupla['datetime_init'];
                 $sFechaFinalBreak = $tupla['datetime_end'];
@@ -1291,7 +1452,10 @@ LISTA_AUDITORIAS_AGENTE;
 
             /* La sesión sólo puede extenderse hasta el final de la última llamada
              * atendida antes de la siguiente sesión, si existe, o hasta la fecha
-             * actual */
+             * actual
+             *
+             * The session can only extend until the end of the last call attended
+             * before the next session, if it exists, or until the current date */
             $recordset = $this->_db->prepare(
                 'SELECT start_time, end_time FROM calls '.
                 'WHERE id_agent = ? AND start_time >= ? AND start_time < ? '.
@@ -1302,9 +1466,11 @@ LISTA_AUDITORIAS_AGENTE;
             $recordset->closeCursor();
             if (!$tupla) {
                 $this->_log->output("INFO:\tNo hay llamadas salientes pertenecientes a esta sesión incompleta.");
+                // INFO: There are no outgoing calls belonging to this incomplete session.
             } else {
                 $this->_log->output("INFO:\tÚltima llamada saliente de sesión incompleta inicia en {$tupla['start_time']}, ".
                     (is_null($tupla['end_time']) ? 'está incompleta' : 'termina en '.$tupla['end_time']));
+                    // INFO: Last outgoing call of incomplete session starts at, is incomplete / ends at
                 $sFechaInicioLlamada = $tupla['start_time'];
                 $sFechaFinalLlamada = $tupla['end_time'];
             }
@@ -1318,9 +1484,11 @@ LISTA_AUDITORIAS_AGENTE;
             $recordset->closeCursor();
             if (!$tupla) {
                 $this->_log->output("INFO:\tNo hay llamadas entrantes pertenecientes a esta sesión incompleta.");
+                // INFO: There are no incoming calls belonging to this incomplete session.
             } else {
                 $this->_log->output("INFO:\tÚltima llamada entrante de sesión incompleta inicia en {$tupla['datetime_init']}, ".
                     (is_null($tupla['datetime_end']) ? 'está incompleta' : 'termina en '.$tupla['datetime_end']));
+                    // INFO: Last incoming call of incomplete session starts at, is incomplete / ends at
                 if (is_null($sFechaInicioLlamada) || $sFechaInicioLlamada < $tupla['datetime_init'])
                     $sFechaInicioLlamada = $tupla['datetime_init'];
                 if (is_null($sFechaFinalLlamada) || $sFechaFinalLlamada < $tupla['datetime_end'])
@@ -1330,7 +1498,11 @@ LISTA_AUDITORIAS_AGENTE;
             /* De entre todas las fecha recogidas, se elige la más reciente como
              * la fecha de final de auditoría. Esto incluye a la fecha de inicio
              * de auditoría, con lo que una auditoría sin otros indicios quedará
-             * de longitud cero. */
+             * de longitud cero.
+             *
+             * From all the dates collected, the most recent is chosen as the audit
+             * end date. This includes the audit start date, so that an audit without
+             * other indications will have zero length. */
             $sFechaFinal = $auditIncompleto['datetime_init'];
             if (!is_null($sFechaInicioBreak) && $sFechaInicioBreak > $sFechaFinal)
                 $sFechaFinal = $sFechaInicioBreak;
@@ -1342,6 +1514,7 @@ LISTA_AUDITORIAS_AGENTE;
                 $sFechaFinal = $sFechaFinalLlamada;
 
             $this->_log->output("INFO:\t\\--> Fecha estimada de final de sesión es $sFechaFinal, se actualiza...");
+            // INFO: --> Estimated session end date is, updating...
             $sth = $this->_db->prepare(
                 'UPDATE audit SET datetime_end = ?, duration = TIMEDIFF(?, datetime_init) WHERE id = ?');
             if (!is_null($idUltimoBreak) && is_null($sFechaFinalBreak)) {
@@ -1355,10 +1528,13 @@ LISTA_AUDITORIAS_AGENTE;
     {
         $this->_log->output('ERR: '.__METHOD__. ": $s: ".implode(' - ', $e->errorInfo));
         $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
+        // ERR: stack trace:
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
+            // Codes corresponding to database connection loss
             $this->_log->output('WARN: '.__METHOD__.
                 ': conexión a DB parece ser inválida, se cierra...');
+                // : DB connection seems invalid, closing...
             $this->_db = NULL;
         }
     }

@@ -2,8 +2,8 @@
 
 # Unified installation script for Issabel CallCenter
 # Usage:
-#   ./install-issabel-callcenter-unified.sh          # Install from GitHub
-#   ./install-issabel-callcenter-unified.sh --local  # Install from local directory
+#   ./install-issabel-callcenter.sh          # Install from GitHub
+#   ./install-issabel-callcenter.sh --local  # Install from local directory
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

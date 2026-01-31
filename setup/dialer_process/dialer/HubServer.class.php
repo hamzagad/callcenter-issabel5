@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -27,12 +28,20 @@
  * vez hecho los forks, la única tarea en el proceso padre de esta clase es la
  * de recibir los mensajes en cada tubería, y rutearlos al destino indicado en
  * el mensaje.
+ *
+ * This class implements a central message hub. New instances of TuberiaMensaje
+ * must be requested before performing fork() for each process. Once the forks
+ * are done, the only task in the parent process of this class is to receive
+ * messages in each pipe, and route them to the destination indicated in the
+ * message.
  */
 class HubServer extends MultiplexServer
 {
     private $_tuberias = array();   // Lista de tuberías, una por cada proceso
+                                    // List of pipes, one for each process
     private $_iNumFinalizados = 0;
     private $_inspectores = array();    // Lista de inspectores de mensajes
+                                        // List of message inspectors
 
     function __construct(&$oLog)
     {
@@ -40,6 +49,7 @@ class HubServer extends MultiplexServer
     }
 
     // Pedir la creación de una nueva tubería
+    // Request the creation of a new pipe
     function crearTuberia($sFuente)
     {
     	$t = new TuberiaMensaje($sFuente);
@@ -48,6 +58,7 @@ class HubServer extends MultiplexServer
     }
 
     // Remover una tubería de un proceso que ha terminado
+    // Remove a pipe from a process that has finished
     function quitarTuberia($sFuente)
     {
     	if (isset($this->_tuberias[$sFuente])) {
@@ -57,6 +68,7 @@ class HubServer extends MultiplexServer
     }
 
     // Registrar el multiplex con las tuberías luego del fork()
+    // Register the multiplex with the pipes after the fork()
     function registrarMultiplexPadre()
     {
     	foreach ($this->_tuberias as $t) {
@@ -66,6 +78,7 @@ class HubServer extends MultiplexServer
     }
 
     // Registrar un inspector de mensajes ruteados
+    // Register a routed message inspector
     function registrarInspectorMsg($msgH)
     {
         if (!($msgH instanceof iRoutedMessageHook)) {
@@ -76,21 +89,25 @@ class HubServer extends MultiplexServer
     }
 
     // Rutear el mensaje recibido de una fuente a un destino específico
+    // Route the received message from a source to a specific destination
     function rutearMensaje($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         // Proveer oportunidad para que el inspector tome acción según el mensaje
+        // Provide opportunity for the inspector to take action based on the message
         foreach ($this->_inspectores as $msgH) {
             $msgH->inspeccionarMensaje($sFuente, $sDestino, $sNombreMensaje, $datos);
         }
 
     	if (!isset($this->_tuberias[$sDestino])) {
     		$this->_oLog->output('ERR: '.__METHOD__." - no se encuentra destino para $sNombreMensaje($sFuente-->$sDestino)");
+    		// Destination not found for message
             return;
     	}
         $this->_tuberias[$sDestino]->enviarMensajeDesdeFuente($sFuente, $sDestino, $sNombreMensaje, $datos);
     }
 
     // Mandar mensaje de término del programa
+    // Send program termination message
     function enviarFinalizacion()
     {
         foreach ($this->_tuberias as $k => $t) {
@@ -102,6 +119,7 @@ class HubServer extends MultiplexServer
     function msg_finalizacionTerminada($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
     	$this->_oLog->output("INFO: $sFuente indica que ya terminó de prepararse para finalización.");
+    	// Source indicates it has finished preparing for termination
         $this->_iNumFinalizados++;
     }
 

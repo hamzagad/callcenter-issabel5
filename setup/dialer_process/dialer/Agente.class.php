@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 4.0                                                  |
   | http://www.issabel.org                                               |
@@ -36,6 +37,7 @@ define('AST_DEVICE_ONHOLD',     8);
 class Agente
 {
     // Relaciones con otros objetos conocidos
+    // Relationships with other known objects
     private $_log;
     private $_tuberia;
 
@@ -43,10 +45,14 @@ class Agente
 
     /* Referencia a la llamada atendida por el agente, o NULL si no atiende.
      * Para entrar y salir de hold se requiere [incoming/outgoing, canal cliente,
+     * id call, id current call ]
+     * Reference to the call attended by the agent, or NULL if not attending.
+     * To enter and exit hold requires [incoming/outgoing, client channel,
      * id call, id current call ]*/
     private $_llamada = NULL;
 
     // ID en la base de datos del agente
+    // ID in the database of the agent
     private $_id_agent = NULL;
     private $_name = NULL;
     private $_number = NULL;
@@ -57,67 +63,95 @@ class Agente
         logged-out  No hay agente logoneado
         logging     Agente intenta autenticarse con la llamada
         logged-in   Agente fue autenticado y está logoneado en consola
+        Console state. Possible values are:
+        logged-out  No agent logged in
+        logging     Agent tries to authenticate with the call
+        logged-in   Agent was authenticated and is logged in to console
      */
     private $_estado_consola = 'logged-out';
 
     /* El número de la extensión interna que se logonea al agente. En estado
        logout la extensión es NULL. Se supone que el canal debería contener
        como prefijo a esta cadena. Formato esperado SIP/1064.
+       The number of the internal extension that logs into the agent. In logout
+       state the extension is NULL. The channel is supposed to contain
+       this string as a prefix. Expected format SIP/1064.
      */
     private $_extension = NULL;
 
     /* El ID de la sesión de auditoría iniciada para este agente */
+    /* The ID of the audit session started for this agent */
     private $_id_sesion = NULL;
 
     /* El ID del break en que se encuentre el agente, o NULL si no está en break */
+    /* The ID of the break where the agent is, or NULL if not on break */
     private $_id_break = NULL;
 
     /* El ID de la sesión de auditoría correspondiente al break del agente */
+    /* The ID of the audit session corresponding to the agent's break */
     private $_id_audit_break = NULL;
 
     /* El ID del hold en que se encuentra el agente, o NULL si no está en hold */
+    /* The ID of the hold where the agent is, or NULL if not on hold */
     private $_id_hold = NULL;
 
     /* El ID de la sesión de auditoría correspondiente al hold del agente */
+    /* The ID of the audit session corresponding to the agent's hold */
     private $_id_audit_hold = NULL;
 
     /* El Uniqueid de la llamada que se usó para iniciar el login de agente */
+    /* The Uniqueid of the call used to initiate the agent login */
     private $_Uniqueid = NULL;
 
     /* El canal que se usó para el login del agente */
+    /* The channel that was used for the agent login */
     private $_login_channel = NULL;
 
     /* El Uniqueid de la llamada por parte del canal del agente que se contrapone
      * al Uniqueid de la llamada generada o recibida. Para llamadas salientes
      * es sólo informativo, pero es esencial registrarlo para llamadas entrantes.
      * Sólo este Uniqueid recibe un Hangup cuando una llamada es transferida.
+     * The Uniqueid of the call on the agent channel side that opposes
+     * the Uniqueid of the generated or received call. For outgoing calls
+     * it is only informational, but it is essential to register it for incoming calls.
+     * Only this Uniqueid receives a Hangup when a call is transferred.
      */
     private $_UniqueidAgente = NULL;
 
     /* VERDADERO si el agente ha sido reservado para agendamiento */
+    /* TRUE if the agent has been reserved for scheduling */
     private $_reservado = FALSE;
 
     /* Cuenta de pausas del agente. El agente debe estar pausado si distinto de
-     * cero. Por ahora se usa para break y para hold. */
+     * cero. Por ahora se usa para break y para hold.
+     * Count of agent pauses. The agent must be paused if different from
+     * zero. Currently used for break and for hold. */
     private $_num_pausas = 0;
 
     /* Si no es NULL, máximo intervalo de inactividad, en segundos */
+    /* If not NULL, maximum inactivity interval, in seconds */
     private $_max_inactivo = NULL;
 
     /* Timestamp de la última actividad del agente */
+    /* Timestamp of the agent's last activity */
     private $_ultima_actividad;
 
     /* Estado del agente en todas las colas a la que pertenece */
+    /* State of the agent in all queues to which it belongs */
     private $_estado_agente_colas = array();
 
     /* Sólo agentes dinámicos: lista de colas dinámicas a las que debe
      * pertenecer. Las claves son las colas y los valores son el valor de
-     * penalty en cada cola. */
+     * penalty en cada cola.
+     * Only dynamic agents: list of dynamic queues to which it must
+     * belong. The keys are the queues and the values are the penalty
+     * value in each queue. */
     private $_colas_dinamicas = array();
 
     var $llamada_agendada = NULL;
 
     // Timestamp de inicio de login, debe setearse a NULL al entrar a estado logged-in
+    // Login start timestamp, must be set to NULL when entering logged-in state
     private $_logging_inicio = NULL;
 
     function __construct(ListaAgentes $lista, $idAgente, $iNumero, $sNombre,
@@ -132,11 +166,13 @@ class Agente
         $this->_log = $log;
         $this->resetTimeout();
 
-        // Se setea vía interfaz pública para invocar __set()
+        // Se setea vía interfaz pública para invocar __set__()
+        // Set via public interface to invoke __set__()
         $this->number = $iNumero;
     }
 
     private function _nul($i) { return is_null($i) ? '(ninguno)' : "$i"; }
+    // "(none)"
 
     public function dump($log)
     {
@@ -192,18 +228,20 @@ class Agente
     {
         // El estado de la cola sólo es usable si eventmemberstatus está activo
         // para la cola en cuestión.
+        // The queue state is only usable if eventmemberstatus is active
+        // for the queue in question.
         /*
         $states = array(
-            -1  =>  'Not in queue',
-            0   =>  "Unknown",
-            1   =>  "Not in use",
-            2   =>  "In use",
-            3   =>  "Busy",
-            4   =>  "Invalid",
-            5   =>  "Unavailable",
-            6   =>  "Ringing",
-            7   =>  "Ring+Inuse",
-            8   =>  "On Hold",
+            -1  =>  'Not in queue',    // Not in queue
+            0   =>  "Unknown",         // Unknown
+            1   =>  "Not in use",      // Not in use
+            2   =>  "In use",          // In use
+            3   =>  "Busy",            // Busy
+            4   =>  "Invalid",         // Invalid
+            5   =>  "Unavailable",     // Unavailable
+            6   =>  "Ringing",         // Ringing
+            7   =>  "Ring+Inuse",      // Ring+Inuse
+            8   =>  "On Hold",         // On Hold
         );
         $s = array();
         foreach ($this->_estado_agente_colas as $q => $st)
@@ -327,6 +365,7 @@ class Agente
         }
 
         // ATENCIÓN: la implementación anterior anulaba llamada_agendada siempre
+        // ATTENTION: the previous implementation always canceled llamada_agendada
         if (!is_null($this->llamada_agendada)) {
             $this->llamada_agendada->agente_agendado = NULL;
             $this->llamada_agendada = NULL;
@@ -381,6 +420,7 @@ class Agente
     public function asyncQueuePause($ami, $nstate, $queue = NULL, $reason = '')
     {
         // For Agent type, queue member interface is Local/XXXX@agents, not Agent/XXXX
+        // Para tipo Agent, la interfaz del miembro de cola es Local/XXXX@agents, no Agent/XXXX
         $sInterface = $this->channel;
         if ($this->type == 'Agent' && preg_match('|^Agent/(\d+)$|', $this->channel, $regs)) {
             $sInterface = 'Local/'.$regs[1].'@agents';
@@ -404,10 +444,12 @@ class Agente
     }
 
     // Se llama en OriginateResponse exitoso, o en Hangup antes de completar login
+    // Called on successful OriginateResponse, or on Hangup before completing login
     public function respuestaLoginAgente($response, $uniqueid, $channel)
     {
         if ($response == 'Success') {
             // El sistema espera ahora la contraseña del agente
+            // The system now expects the agent password
             $this->_estado_consola = 'logging';
             $this->_Uniqueid = $uniqueid;
             $this->_listaAgentes->agregarIndice('uniqueidlogin', $uniqueid, $this);
@@ -422,6 +464,7 @@ class Agente
             }
 
             // El agente no ha podido responder la llamada de login
+            // The agent was unable to answer the login call
             $this->_estado_consola = 'logged-out';
             if (!is_null($this->_Uniqueid))
                 $this->_listaAgentes->removerIndice('uniqueidlogin', $this->_Uniqueid);
@@ -435,6 +478,7 @@ class Agente
     }
 
     // Se llama en Agentlogin al confirmar que agente está logoneado
+    // Called on Agentlogin when confirming that agent is logged in
     // $sLoginChannel: For app_agent_pool, the actual channel running AgentLogin (e.g., SIP/101-00000xxx)
     public function completarLoginAgente($ami, $sLoginChannel = NULL)
     {
@@ -442,6 +486,7 @@ class Agente
         $this->resetTimeout();
         $this->_logging_inicio = NULL;
         // Store the login channel for app_agent_pool logout (hangup this channel to logout)
+        // Almacenar el canal de login para logout de app_agent_pool (colgar este canal para logout)
         if (!is_null($sLoginChannel)) {
             $this->_login_channel = $sLoginChannel;
         }
@@ -455,9 +500,11 @@ class Agente
     }
 
     // Se llama en Agentlogoff
+    // Called on Agentlogoff
     public function terminarLoginAgente($ami, $timestamp)
     {
         // Emitir AgentLogoff ANTES de limpiar pausas e ID de sesión
+        // Emit AgentLogoff BEFORE clearing pauses and session ID
         $this->_tuberia->msg_SQLWorkerProcess_AgentLogoff(
             $this->channel,
             $timestamp,
@@ -488,6 +535,7 @@ class Agente
     public function resumenSeguimiento()
     {
         // Get highest queue status (6=RINGING is higher priority than 1=NOT_INUSE)
+        // Obtener el estado de cola más alto (6=RINGING tiene mayor prioridad que 1=NOT_INUSE)
         $max_queue_status = AST_DEVICE_UNKNOWN;
         foreach ($this->_estado_agente_colas as $queue => $status) {
             if ($status > $max_queue_status) $max_queue_status = $status;
@@ -561,12 +609,15 @@ class Agente
 
         // Emit event when status changes to/from ringing (for real-time UI updates)
         // Only emit if agent is logged in and status actually changed
+        // Emitir evento cuando el estado cambia a/de ringing (para actualizaciones UI en tiempo real)
+        // Solo emitir si el agente está logoneado y el estado realmente cambió
         if ($this->estado_consola == 'logged-in' && $oldStatus != $status) {
             $isNowRinging = ($status == AST_DEVICE_RINGING || $status == AST_DEVICE_RINGINUSE);
             $wasRinging = ($oldStatus == AST_DEVICE_RINGING || $oldStatus == AST_DEVICE_RINGINUSE);
 
             if ($isNowRinging || $wasRinging) {
                 // Determine the new agent status string
+                // Determinar la nueva cadena de estado del agente
                 $sNewStatus = $isNowRinging ? 'ringing' : 'online';
                 $this->_tuberia->msg_SQLWorkerProcess_AgentStateChange(
                     $this->channel,
@@ -584,6 +635,8 @@ class Agente
 
     // El estado de la cola sólo es usable si eventmemberstatus está activo
     // para la cola en cuestión. Excepto que siempre se sabe si está o no en cola.
+    // The queue state is only usable if eventmemberstatus is active
+    // for the queue in question. Except that it's always known whether it's in the queue or not.
     public function estadoEnCola($queue)
     {
         return isset($this->_estado_agente_colas[$queue]) ? $this->_estado_agente_colas[$queue] : AST_DEVICE_NOTINQUEUE;
@@ -608,8 +661,8 @@ class Agente
         $currcolas = $this->colas_actuales;
         $dyncolas = $this->colas_dinamicas;
         $r = array(
-            array_diff($dyncolas, $currcolas), // colas a las cuales agregar agente
-            array_diff($currcolas, $dyncolas), // colas de las cuales quitar agente
+            array_diff($dyncolas, $currcolas), // colas a las cuales agregar agente / queues to which to add agent
+            array_diff($currcolas, $dyncolas), // colas de las cuales quitar agente / queues from which to remove agent
         );
         $qp = array();
         foreach ($r[0] as $q) $qp[$q] = $this->_colas_dinamicas[$q];
@@ -639,12 +692,17 @@ class Agente
      * Initiate agent logoff from Asterisk's perspective
      * For app_agent_pool (Asterisk 12+): Hangup the login channel
      * For dynamic agents (SIP/IAX2/PJSIP): QueueRemove from all queues
+     * Iniciar el logout del agente desde la perspectiva de Asterisk
+     * Para app_agent_pool (Asterisk 12+): Colgar el canal de login
+     * Para agentes dinámicos (SIP/IAX2/PJSIP): QueueRemove de todas las colas
      */
     public function forzarLogoffAgente($ami, $log)
     {
         if ($this->type == 'Agent') {
             // app_agent_pool: Hangup the AgentLogin channel to logout
             // No Agentlogoff AMI command exists in app_agent_pool
+            // app_agent_pool: Colgar el canal AgentLogin para hacer logout
+            // No existe comando AMI Agentlogoff en app_agent_pool
             if (!is_null($this->_login_channel)) {
                 $ami->asyncHangup(
                     array($this, '_cb_HangupLogoff'),
@@ -652,6 +710,7 @@ class Agente
                     $this->_login_channel);
             } elseif (!is_null($this->_extension)) {
                 // Fallback to extension if login_channel not tracked
+                // Alternativa a la extensión si login_channel no está rastreado
                 $ami->asyncHangup(
                     array($this, '_cb_HangupLogoff'),
                     array($log),
@@ -661,6 +720,7 @@ class Agente
             }
         } else {
             // Dynamic agents: remove from all queues
+            // Agentes dinámicos: quitar de todas las colas
             foreach ($this->colas_actuales as $q) {
                 $ami->asyncQueueRemove(
                     array($this, '_cb_QueueRemove'),
@@ -681,6 +741,7 @@ class Agente
     {
         if ($r['Response'] != 'Success') {
             $this->_log->output("ERR: falla al quitar {$this->channel} de cola {$q}: ".print_r($r, TRUE));
+            // "ERR: failure to remove {$this->channel} from queue {$q}"
         }
     }
 
@@ -690,6 +751,7 @@ class Agente
             $this->_log->output('ERR: '.__METHOD__.' (internal) no se puede '.
                 ($nstate ? 'pausar' : 'despausar').' al agente '.$sAgente.': '.
                 $sAgente.' - '.$r['Message']);
+                // cannot pause/unpause agent
         } else {
             $partes = preg_split("/\//",$sAgente);
             $numAgente = $partes[1];

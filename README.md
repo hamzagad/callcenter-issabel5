@@ -60,7 +60,7 @@ git clone https://github.com/ISSABELPBX/callcenter-issabel5.git callcenter
 cd callcenter
 bash build/5.0/install-issabel-callcenter.sh
 # For Local Installation:
-bash build/5.0/install-issabel-callcenter-local.sh
+bash build/5.0/install-issabel-callcenter.sh -l
 
 # Service management
 systemctl start issabeldialer

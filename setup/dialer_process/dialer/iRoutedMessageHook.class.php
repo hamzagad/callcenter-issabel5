@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -25,6 +26,9 @@
  * Esta interfaz define un solo método, el cual se llama cada vez que se
  * rutea un mensaje. En este método se puede tomar cualquier acción que modifica
  * cualquiera de los parámetros provistos.
+ * This interface defines a single method, which is called every time a message
+ * is routed. In this method any action can be taken that modifies any of the
+ * provided parameters.
  */
 
 interface iRoutedMessageHook

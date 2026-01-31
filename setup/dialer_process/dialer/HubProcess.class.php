@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -22,28 +23,38 @@
   $Id: DialerProcess.class.php,v 1.48 2009/03/26 13:46:58 alex Exp $ */
 
 define('MIN_ECCP_WORKERS', 2);  // Número mínimo de ECCPWorkerProcess a mantener
+                                    // Minimum number of ECCPWorkerProcess to maintain
 
 class HubProcess extends AbstractProcess implements iRoutedMessageHook
 {
     private $_log;      // Log abierto por framework de demonio
+                    // Log opened by daemon framework
     private $_config;   // Información de configuración copiada del archivo
+                    // Configuration information copied from file
     private $_hub;      // Hub de mensajes entre todos los procesos
+                    // Message hub between all processes
     private $_tareas;   // Lista de tareas, nombreClase => PID
+                    // List of tasks, className => PID
 
     // Estas tareas deben estar siempre en ejecución
+    // These tasks must always be running
     private $_tareasFijas = array('AMIEventProcess', 'CampaignProcess',
         'ECCPProcess', 'SQLWorkerProcess');
 
     // Contador para garantizar unicidad de nombre de tarea dinámica
+    // Counter to guarantee uniqueness of dynamic task name
     private $_dynProcessCounter = 0;
 
     // Conexión debido a la cual se marcó como ocupada cada tarea dinámica
+    // Connection due to which each dynamic task was marked as busy
     private $_conexionTareaOcupada = array();
 
     // Lista de tareas dinámicas que avisaron que atendieron su última petición
+    // List of dynamic tasks that notified they attended their last request
     private $_tareasUltimaPeticion = array();
 
     // Último instante en que se verificó que los procesos estaban activos
+    // Last instant when it was verified that processes were active
     private $_iTimestampVerificacionProcesos = NULL;
 
     public function inicioPostDemonio($infoConfig, &$oMainLog)
@@ -58,11 +69,14 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
 
     /* Verificar si la tarea indicada sigue activa. Devuelve VERDADERO si la
      * tarea sigue corriendo, FALSO si inactiva o si se detecta que terminó. */
+    /* Verify if the indicated task is still active. Returns TRUE if the
+     * task is still running, FALSE if inactive or if it is detected that it ended. */
     private function _revisarTareaActiva($sTarea, $finalizando = FALSE)
     {
         $bTareaActiva = FALSE;
 
         // Si está definido el PID del proceso, se verifica si se ejecuta.
+        // If the process PID is defined, it is verified if it is running.
         if (isset($this->_tareas[$sTarea])) {
             $iStatus = NULL;
             $iPidDevuelto = pcntl_waitpid($this->_tareas[$sTarea], $iStatus, WNOHANG);
@@ -79,6 +93,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 $this->_tareasUltimaPeticion = array_diff($this->_tareasUltimaPeticion, array($sTarea));
 
                 // Quitar la tubería del proceso que ha terminado
+                // Remove the pipe of the process that has finished
                 $this->_hub->quitarTuberia($sTarea);
             } else {
                 $bTareaActiva = TRUE;
@@ -93,13 +108,16 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         $bHayNuevasTareas = FALSE;
 
         // Si la tarea ha finalizado o no existe, se debe iniciar
+        // If the task has finished or does not exist, it must be started
         if (is_null($this->_iTimestampVerificacionProcesos) || time() - $this->_iTimestampVerificacionProcesos > 0) {
             foreach (array_keys($this->_tareas) as $sTarea) {
                 // Si está definido el PID del proceso, se verifica si se ejecuta.
+                // If the process PID is defined, it is verified if it is running.
                 $this->_revisarTareaActiva($sTarea);
             }
             foreach ($this->_tareasFijas as $sTarea) {
                 // Si no está definido el PID del proceso, se intenta iniciar
+                // If the process PID is not defined, attempt to start it
                 if (!isset($this->_tareas[$sTarea])) {
                     $this->_tareas[$sTarea] = $this->_iniciarTarea($sTarea);
                     $bHayNuevasTareas = TRUE;
@@ -111,11 +129,13 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         }
 
         // Registrar el multiplex con todas las conexiones nuevas
+        // Register the multiplex with all new connections
         if ($bHayNuevasTareas) $this->_hub->registrarMultiplexPadre();
 
         $this->propagarSIGHUP();
 
         // Rutear todos los mensajes pendientes entre tareas
+        // Route all pending messages between tasks
         if ($this->_hub->procesarPaquetes())
             $this->_hub->procesarActividad(0);
         else $this->_hub->procesarActividad(1);
@@ -129,6 +149,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
 
         if (!is_null($gsNombreSignal) && $gsNombreSignal == SIGHUP) {
             // Mandar la señal a todos los procesos controlados
+            // Send the signal to all controlled processes
             $this->_log->output("PID = ".posix_getpid().", se ha recibido señal #$gsNombreSignal, ".
                 (($gsNombreSignal == SIGHUP) ? 'cambiando logs' : 'terminando')."...");
             $this->_propagarSIG($gsNombreSignal);
@@ -137,6 +158,8 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
 
     /* Iniciar una tarea específica en un proceso separado. Para el proceso
      * padre, devuelve el PID del proceso hijo. */
+    /* Start a specific task in a separate process. For the parent
+     * process, returns the PID of the child process. */
     private function _iniciarTarea($sNombreTarea)
     {
         return $this->_iniciarTareaClase($sNombreTarea, $sNombreTarea);
@@ -147,16 +170,19 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         global $gsNombreSignal;
 
         // Verificar que el nombre de la clase que implementa el proceso es válido
+        // Verify that the class name that implements the process is valid
         if (!class_exists($sNombreClase)) {
             $this->_log->output("FATAL: (internal) Invalid process classname '$sNombreClase'");
             die("(internal) Invalid process classname '$sNombreClase'\n");
         }
 
         // Nueva tubería con el nombre de la tarea
+        // New pipe with the task name
         $oTuberia = $this->_hub->crearTuberia($sNombreTarea);
         $oTuberia->setLog($this->_log);
 
         // Iniciar tarea en proceso separado
+        // Start task in separate process
         $iPidProceso = pcntl_fork();
         if ($iPidProceso != -1) {
             if ($iPidProceso == 0) {
@@ -164,12 +190,14 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 $this->_log->output("iniciando proceso...");
 
                 // Instalar los manejadores de señal para el proceso hijo
+                // Install signal handlers for the child process
                 pcntl_signal(SIGTERM, 'manejadorPrimarioSignal');
                 pcntl_signal(SIGQUIT, 'manejadorPrimarioSignal');
                 pcntl_signal(SIGINT, 'manejadorPrimarioSignal');
                 pcntl_signal(SIGHUP, 'manejadorPrimarioSignal');
 
                 // Elegir la tarea que debe de ejecutarse
+                // Choose the task that must be executed
                 $oProceso = NULL;
                 try {
                     $oProceso = new $sNombreClase($oTuberia);
@@ -180,6 +208,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 }
 
                 // Realizar inicialización adicional de la tarea
+                // Perform additional initialization of the task
                 try {
                     $bContinuar = $oProceso->inicioPostDemonio($this->_config, $this->_log);
                     if ($bContinuar) $this->_log->output("PID = ".posix_getpid().", proceso iniciado normalmente");
@@ -189,8 +218,10 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 }
 
                 // Continuar la tarea hasta que se finalice
+                // Continue the task until it finishes
                 while ($bContinuar) {
                     // Ejecutar el procedimiento de trabajo del demonio
+                    // Execute the daemon work procedure
                     if (is_null($gsNombreSignal)) {
                         try {
                             $bContinuar = $oProceso->procedimientoDemonio();
@@ -201,6 +232,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                     }
 
                     // Revisar si existe señal que indique finalización del programa
+                    // Check if there is a signal indicating program termination
                     if (!is_null($gsNombreSignal)) {
                         if (in_array($gsNombreSignal, array(SIGTERM, SIGINT, SIGQUIT))) {
                             $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, terminando...");
@@ -215,6 +247,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 }
 
                 // Indicar al módulo de trabajo por qué se está finalizando
+                // Indicate to the work module why it is finishing
                 try {
                     $oProceso->limpiezaDemonio($gsNombreSignal);
                 } catch (Exception $ex) {
@@ -224,9 +257,11 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 $this->_log->close();
 
                 exit(0);   // Finalizar el proceso hijo
+                          // Terminate the child process
             }
         } else {
             // Avisar que no se puede iniciar la tarea requerida
+            // Notify that the required task cannot be started
             $this->_log->output("Unable to fork $sNombreTarea - $!");
         }
         return $iPidProceso;
@@ -255,6 +290,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
     }
 
     // Por interfaz iRoutedMessageHook
+    // Through iRoutedMessageHook interface
     public function inspeccionarMensaje(&$sFuente, &$sDestino, &$sNombreMensaje, &$datos)
     {
         if ($sFuente == 'ECCPProcess' && $sDestino == 'ECCPWorkerProcess') {
@@ -263,6 +299,11 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
              * Aquí debe elegirse la instancia, y una vez elegida, asignar el
              * estado de ocupado hasta que mande una respuesta. Si es necesario,
              * debe de crearse un nuevo proceso. */
+            /* When handling ECCP, ECCPProcess requires that the request be handled
+             * by an ECCPWorkerProcess instance, but cannot know which one.
+             * Here the instance must be chosen, and once chosen, assign the
+             * busy state until it sends a response. If necessary,
+             * a new process must be created. */
             $sTareaElegida = NULL;
             foreach (array_keys($this->_tareas) as $sTarea) {
                 if ($this->_revisarTareaActiva($sTarea) &&
@@ -275,6 +316,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
             }
 
             // Iniciar nuevo proceso si no hay tarea elegida
+            // Start new process if no task is chosen
             if (is_null($sTareaElegida)) {
                 $sTarea = $this->_iniciarTareaDinamica('ECCPWorkerProcess');
                 $this->_hub->registrarMultiplexPadre();
@@ -282,6 +324,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
             }
 
             // El primer parámetro es la conexión proxy
+            // The first parameter is the proxy connection
             $this->_conexionTareaOcupada[$sTareaElegida] = $datos[0];
             $sDestino = $sTareaElegida;
         } elseif (strpos($sFuente, 'ECCPWorkerProcess-') === 0 && $sDestino == 'ECCPProcess'
@@ -289,16 +332,22 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
             /* Al mandar la respuesta asíncrona desde un ECCPWorkerProcess, se
              * debe de limpiar el estado de ocupado para esa instancia en
              * particular. */
+            /* When sending the asynchronous response from an ECCPWorkerProcess,
+             * the busy state must be cleared for that particular instance. */
             unset($this->_conexionTareaOcupada[$sFuente]);
 
             /* El ECCPWorkerProcess manda como primer parámetro una bandera que
              * indica si finaliza por haber atendido su última petición. Si es
              * así, se lo agrega a la lista negra de procesos que terminan. */
+            /* The ECCPWorkerProcess sends as first parameter a flag that
+             * indicates if it finishes after having attended its last request. If
+             * so, it is added to the blacklist of terminating processes. */
             $bUltimaPeticion = array_shift($datos);
             if ($bUltimaPeticion) {
                 $this->_tareasUltimaPeticion[] = $sFuente;
 
                 // Permitir al proceso ECCPWorkerProcess que finalice
+                // Allow the ECCPWorkerProcess to finish
                 $this->_hub->rutearMensaje(
                     'HubProcess',
                     $sFuente,
@@ -341,8 +390,10 @@ XML_CRASH_MSG;
     public function limpiezaDemonio($signum)
     {
         // Propagar la señal si no es NULL
+        // Propagate the signal if not NULL
         if (!is_null($signum)) {
             // Mandar la señal a todos los procesos controlados
+            // Send the signal to all controlled processes
             $this->_log->output("PID = ".posix_getpid().", se ha recibido señal #$signum, terminando...");
         } else {
             $signum = SIGTERM;
@@ -350,6 +401,7 @@ XML_CRASH_MSG;
         }
 
         // Avisar a todos los procesos que se terminará el programa
+        // Notify all processes that the program will terminate
         $this->_log->output('INFO: avisando de finalización a todos los procesos...');
         $this->_hub->enviarFinalizacion();
         $this->_log->output('INFO: esperando respuesta de todos los procesos...');
@@ -370,8 +422,10 @@ XML_CRASH_MSG;
             $bTodosTerminaron = TRUE;
             foreach (array_keys($this->_tareas) as $sTarea) {
                 // Si está definido el PID del proceso, se verifica si se ejecuta.
+                // If the process PID is defined, it is verified if it is running.
                 if ($this->_revisarTareaActiva($sTarea, TRUE)) {
                     // Este proceso aún no termina...
+                    // This process has not finished yet...
                     $bTodosTerminaron = FALSE;
                 }
             }
@@ -385,6 +439,7 @@ XML_CRASH_MSG;
                 }
 
                 // Rutear todos los mensajes pendientes entre tareas
+                // Route all pending messages between tasks
                 if ($this->_hub->procesarPaquetes())
                     $this->_hub->procesarActividad(0);
                 else $this->_hub->procesarActividad(1);
@@ -393,10 +448,12 @@ XML_CRASH_MSG;
         $this->_log->output('INFO: todas las tareas han terminado.');
 
         // Mandar a cerrar todas las conexiones activas
+        // Send to close all active connections
         $this->_hub->finalizarServidor();
     }
 
     // Propagar la señal recibida o sintetizada
+    // Propagate the received or synthesized signal
     private function _propagarSIG($signum)
     {
         foreach (array_keys($this->_tareas) as $sTarea) {

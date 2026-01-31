@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -26,17 +27,28 @@ class ECCPProxyConn extends MultiplexConn
     private $_log;
     private $_tuberia;
     private $_listaReq = array();    // Lista de requerimientos pendientes
+                                    // List of pending requirements
     private $_parser = NULL;        // Parser expat para separar los paquetes
+                                    // Expat parser to separate packets
     private $_iPosFinal = NULL;     // Posición de parser para el paquete parseado
+                                    // Parser position for the parsed packet
     private $_sTipoDoc = NULL;      // Tipo de paquete. Sólo se acepta 'request'
+                                    // Packet type. Only 'request' is accepted
     private $_bufferXML = '';       // Datos pendientes que no forman un paquete completo
+                                    // Pending data that does not form a complete packet
     private $_iNestLevel = 0;       // Al llegar a cero, se tiene fin de paquete
+                                    // When reaching zero, end of packet is reached
 
     // Estado de la conexión
+    // Connection status
     private $_sUsuarioECCP  = NULL; // Nombre de usuario para cliente logoneado, o NULL si no logoneado
+                                    // Username for logged in client, or NULL if not logged in
     private $_sAppCookie = NULL;    // Cadena a usar como cookie de la aplicación
+                                    // String to use as application cookie
     private $_sAgenteFiltrado = NULL;   // Si != NULL, eventos sólo se despachan si el agente coincide con este valor
+                                            // If != NULL, events are only dispatched if the agent matches this value
     private $_bProgresoLlamada = FALSE; // Si VERDADERO, cliente está interesado en eventos de progreso de llamada
+                                         // If TRUE, client is interested in call progress events
 
     private $_bFinalizando = FALSE;
 
@@ -48,9 +60,11 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Datos a mandar a escribir apenas se inicia la conexión
+    // Data to send for writing as soon as the connection starts
     function procesarInicial() {}
 
     // Separar flujo de datos en paquetes, devuelve número de bytes de paquetes aceptados
+    // Separate data stream into packets, returns number of bytes of accepted packets
     function parsearPaquetes($sDatos)
     {
         $this->parsearPaquetesXML($sDatos);
@@ -58,6 +72,7 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Procesar cierre de la conexión
+    // Process connection closure
     function procesarCierre()
     {
         if (!is_null($this->_parser)) {
@@ -67,11 +82,13 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Preguntar si hay paquetes pendientes de procesar
+    // Check if there are packets pending processing
     function hayPaquetes() {
         return (count($this->_listaReq) > 0);
     }
 
     // Procesar un solo paquete de la cola de paquetes
+    // Process a single packet from the packet queue
     function procesarPaquete()
     {
         $request = array_shift($this->_listaReq);
@@ -86,10 +103,16 @@ class ECCPProxyConn extends MultiplexConn
              * worker dedicado exclusivamente a los accesos de DB necesarios
              * para los eventos recibidos de AMIEventProcess. No se puede usar
              * el mismo pool de workers que para las peticiones ECCP porque no
-             * se garantizaría el orden de atención de eventos. */
+             * se garantizaría el orden de atención de eventos.
+             * TODO: In a future phase, if necessary, a worker dedicated
+             * exclusively to the DB accesses required for events received
+             * from AMIEventProcess is required. The same pool of workers
+             * used for ECCP requests cannot be used because the order of
+             * event attention would not be guaranteed. */
             $this->_tuberia->msg_ECCPWorkerProcess_eccprequest($this->sKey, $request, $connvars);
         } else {
             // Marcador de error, se cierra la conexión
+            // Error marker, connection is closed
             $r = $this->_generarRespuestaFallo(400, 'Bad request');
             $s = $r->asXML();
             $this->multiplexSrv->encolarDatosEscribir($this->sKey, $s);
@@ -119,6 +142,7 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Función que construye una respuesta de petición incorrecta
+    // Function that builds an incorrect request response
     private function _generarRespuestaFallo($iCodigo, $sMensaje, $idPeticion = NULL)
     {
         $x = new SimpleXMLElement("<response />");
@@ -129,6 +153,7 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Agregar etiqueta failure a la respuesta indicada
+    // Add failure tag to the indicated response
     private function _agregarRespuestaFallo($x, $iCodigo, $sMensaje)
     {
         $failureTag = $x->addChild("failure");
@@ -138,9 +163,11 @@ class ECCPProxyConn extends MultiplexConn
 
     // Procedimiento a llamar cuando se finaliza la conexión en cierre normal
     // del programa.
+    // Procedure to call when terminating the connection in normal program shutdown
     function finalizarConexion()
     {
         // Mandar a cerrar la conexión en sí
+        // Send command to close the connection itself
         $this->multiplexSrv->marcarCerrado($this->sKey);
 
         if (!is_null($this->_parser)) {
@@ -150,8 +177,10 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Implementación de parser expat: inicio
+    // Expat parser implementation: start
 
     // Parsear y separar tantos paquetes XML como sean posibles
+    // Parse and separate as many XML packets as possible
     private function parsearPaquetesXML($data)
     {
         $this->_bufferXML .= $data;
@@ -188,6 +217,7 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Resetear el parseador, para iniciarlo, o luego de parsear un paquete
+    // Reset the parser, to start it, or after parsing a packet
     private function _resetParser()
     {
         if (!is_null($this->_parser)) xml_parser_free($this->_parser);
@@ -213,8 +243,10 @@ class ECCPProxyConn extends MultiplexConn
     }
 
     // Implementación de parser expat: final
+    // Expat parser implementation: end
 
     /***************************** EVENTOS *****************************/
+    /***************************** EVENTS *****************************/
 
     function notificarEvento_AgentLogin($sAgente, $bExitoLogin)
     {

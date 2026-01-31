@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -28,10 +29,14 @@ class ListaAgentes implements IteratorAggregate
 
     private $_agentes = array();
     private $_indices = array(
-        'agentchannel'  =>  array(),    // agent->channel canal de agente (Agent/9000)
-        'uniqueidlogin' =>  array(),    // agent->Uniqueid uniqueid de llamada usada para login de agente
-        'uniqueidlink'  =>  array(),    // agent->UniqueidAgente uniqueid de pata enlazada con llamada atendida
-        'extension'     =>  array(),    // agent->extension extensión (SIP/1064) que inició la llamada de login
+        'agentchannel'  =>  array(),    // agent->channel agent channel (Agent/9000)
+                                        // agent->channel canal de agente (Agent/9000)
+        'uniqueidlogin' =>  array(),    // agent->Uniqueid uniqueid of call used for agent login
+                                        // agent->Uniqueid uniqueid de llamada usada para login de agente
+        'uniqueidlink'  =>  array(),    // agent->UniqueidAgente uniqueid of leg linked with attended call
+                                        // agent->UniqueidAgente uniqueid de pata enlazada con llamada atendida
+        'extension'     =>  array(),    // agent->extension extension (SIP/1064) that initiated the login call
+                                        // agent->extension extensión (SIP/1064) que inició la llamada de login
     );
 
     function __construct($tuberia, $log)

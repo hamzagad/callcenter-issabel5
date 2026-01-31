@@ -22,7 +22,9 @@
   $Id: Campania.class.php,v 1.48 2009/03/26 13:46:58 alex Exp $ */
 
 /* Número de llamadas por campaña para las que se lleva la cuenta de cuánto
- * tardó en ser contestada */
+ * tardó en ser contestada
+ * Number of calls per campaign for which the account is kept of how long
+ * it took to be answered */
 define('NUM_LLAMADAS_HISTORIAL_CONTESTADA', 20);
 
 class Campania
@@ -32,28 +34,45 @@ class Campania
     private $_tuberia;
 
     var $id;                // ID en base de datos de la campaña
+                            // Campaign ID in database
     var $name;              // Nombre de la campaña
+                            // Campaign name
     var $queue;             // Número de la cola que recibe las llamadas
+                            // Number of the queue that receives calls
     var $datetime_init;     // Fecha yyyy-mm-dd del inicio de vigencia de campaña
+                            // Date yyyy-mm-dd of campaign validity start
     var $datetime_end;      // Fecha yyyy-mm-dd del final de vigencia de campaña
+                            // Date yyyy-mm-dd of campaign validity end
     var $daytime_init;      // Hora hh:mm:ss del inicio del horario de la campaña
+                            // Time hh:mm:ss of the campaign schedule start
     var $daytime_end;       // Hora hh:mm:ss del final del horario de la campaña
+                            // Time hh:mm:ss of the campaign schedule end
     var $tipo_campania;     // Tipo de campaña 'outgoing' o 'incoming'
+                            // Campaign type 'outgoing' or 'incoming'
 
     // Variables sólo para campañas salientes
+    // Variables only for outgoing campaigns
     var $trunk;             // Troncal a usar para la campaña, o NULL para plan marcado
+                            // Trunk to use for campaign, or NULL for dialing plan
     var $context;           // Contexto para marcado de la campaña
+                            // Context for campaign dialing
     private $_num_completadas;   // Número de llamadas completadas
+                                    // Number of completed calls
     private $_promedio;          // Promedio de la duración de la llamada, en segundos
+                                    // Average of call duration, in seconds
     private $_desviacion;        // Desviación estándar en el promedio de duración
+                                    // Standard deviation in duration average
     private $_variancia = 0;
 
     // Muestra de cuánto se tardaron las últimas llamadas en ser contestadas
+    // Sample of how long the last calls took to be answered
     private $_historial_contestada = array();
     private $_iTiempoContestacion = 8;
 
     // Variables sólo para campañas entrantes
+    // Variables only for incoming campaigns
     var $id_queue_call_entry;   // ID de la cola registrada como entrante
+                                // ID of the queue registered as incoming
 
     function __construct($tuberia, $log)
     {
@@ -104,6 +123,8 @@ class Campania
 
     /* Procedimiento que actualiza la lista de las últimas llamadas que fueron
      * contestadas o perdidas.
+     * Procedure that updates the list of the last calls that were
+     * answered or missed.
      */
     function agregarTiempoContestar($iMuestra)
     {
@@ -126,11 +147,13 @@ class Campania
     }
 
     // Calcular promedio y desviación estándar
+    // Calculate average and standard deviation
     function actualizarEstadisticas($iDuracionLlamada)
     {
     	if (is_null($this->_num_completadas)) $this->_num_completadas = 0;
 
         // Calcular nuevo promedio
+        // Calculate new average
         if ($this->_num_completadas > 0) {
             $iNuevoPromedio = $this->_nuevoPromedio($this->_promedio,
                 $this->_num_completadas, $iDuracionLlamada);
@@ -139,6 +162,7 @@ class Campania
         }
 
         // Calcular nueva desviación estándar
+        // Calculate new standard deviation
         if ($this->_num_completadas > 1) {
             $iNuevaVariancia = $this->_nuevaVarianciaMuestra($this->_promedio,
                 $iNuevoPromedio, $this->_num_completadas, $this->_variancia,

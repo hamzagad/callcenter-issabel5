@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -26,6 +27,9 @@
  * una llamada de campaña. Se usa para el evento agentlinked, así como para
  * el requerimiento getcallinfo.
  *
+ * Procedure that queries all database information about a campaign call.
+ * It is used for the agentlinked event, as well as for the getcallinfo request.
+ *
  * @param   string  $sTipoLlamada   Uno de 'incoming', 'outgoing'
  * @param   integer $idCampania     ID de la campaña, puede ser NULL para incoming
  * @param   integer $idLlamada      ID de la llamada dentro de la campaña
@@ -47,9 +51,14 @@ function leerInfoLlamada($db, $sTipoLlamada, $idCampania, $idLlamada)
 // almacenado en la tabla calls, más los atributos asociados a la llamada
 // en la tabla call_attribute, y los datos ya recogidos en las tablas
 // form_data_recolected y form_field
+// Read the information of an outgoing call. The information includes what is
+// stored in the calls table, plus the attributes associated with the call
+// in the call_attribute table, and the data already collected in the
+// form_data_recolected and form_field tables
 function _leerInfoLlamadaOutgoing($db, $idCampania, $idLlamada)
 {
     // Leer información de la llamada principal
+    // Read main call information
     $sPeticionSQL = <<<INFO_LLAMADA
 SELECT 'outgoing' AS calltype, calls.id AS call_id, id_campaign AS campaign_id, phone, status, uniqueid,
     duration, datetime_originate, fecha_llamada AS datetime_originateresponse,
@@ -65,13 +74,16 @@ INFO_LLAMADA;
     $tuplaLlamada = $recordset->fetch(PDO::FETCH_ASSOC); $recordset->closeCursor();
     if (!$tuplaLlamada) {
         // No se encuentra la llamada indicada
+        // The indicated call is not found
         return array();
     }
 
     // Leer información de los atributos de la llamada
+    // Read call attribute information
     $tuplaLlamada['call_attributes'] = leerAtributosContacto($db, 'outgoing', $idLlamada);
 
     // Leer información de los datos recogidos vía formularios
+    // Read information from data collected via forms
     $tuplaLlamada['call_survey'] = leerDatosRecogidosFormularios($db, 'outgoing', $idLlamada);
 
     return $tuplaLlamada;
@@ -80,9 +92,13 @@ INFO_LLAMADA;
 // Leer la información de la llamada entrante. En esta implementación, a
 // diferencia de las llamadas salientes, las llamadas entrantes tienen un
 // solo formulario, y su conjunto de atributos es fijo.
+// Read the information of an incoming call. In this implementation, unlike
+// outgoing calls, incoming calls have only one form, and their set of
+// attributes is fixed.
 function _leerInfoLlamadaIncoming($db, $idCampania, $idLlamada)
 {
     // Leer información de la llamada principal
+    // Read main call information
     $sPeticionSQL = <<<INFO_LLAMADA
 SELECT 'incoming' AS calltype, call_entry.id AS call_id, id_campaign AS campaign_id,
     callerid AS phone, status, uniqueid, duration, datetime_entry_queue AS datetime_join,
@@ -97,11 +113,14 @@ INFO_LLAMADA;
     $tuplaLlamada = $recordset->fetch(PDO::FETCH_ASSOC); $recordset->closeCursor();
     if (!$tuplaLlamada) {
         // No se encuentra la llamada indicada
+        // The indicated call is not found
         return array();
     }
 
     // Leer información de los atributos de la llamada
     // TODO: expandir cuando se tenga tabla de atributos arbitrarios
+    // Read call attribute information
+    // TODO: expand when arbitrary attributes table is available
     $idContact = $tuplaLlamada['id_contact'];
     unset($tuplaLlamada['id_contact']);
     $tuplaLlamada['call_attributes'] = array();
@@ -110,6 +129,7 @@ INFO_LLAMADA;
     }
 
     // Leer información de todos los contactos que coincidan en callerid
+    // Read information of all contacts that match callerid
     $tuplaLlamada['matching_contacts'] = array();
     $sPeticionSQL = <<<INFO_ATRIBUTOS
 SELECT id, name AS first_name, apellido AS last_name, telefono AS phone, cedula_ruc
@@ -143,6 +163,7 @@ INFO_ATRIBUTOS;
     }
 
     // Leer información de los datos recogidos vía formularios
+    // Read information from data collected via forms
     $tuplaLlamada['call_survey'] = leerDatosRecogidosFormularios($db, 'incoming', $idLlamada);
 
     return $tuplaLlamada;
@@ -173,6 +194,7 @@ INFO_ATRIBUTOS;
     }
 
     // Caso especial: llamadas entrantes
+    // Special case: incoming calls
     if ($sTipoLlamada == 'incoming') {
         $sPeticionSQL = <<<INFO_ATRIBUTOS
 SELECT name AS first_name, apellido AS last_name, telefono AS phone, cedula_ruc, origen AS contact_source
@@ -213,6 +235,7 @@ function leerDatosRecogidosFormularios($db, $sTipoLlamada, $idLlamada)
     list($fdr_tabla, $fdr_campo) = nombresCamposFormulariosEstaticos($sTipoLlamada);
 
     // Leer información de los datos recogidos vía formularios
+    // Read information from data collected via forms
     $sPeticionSQL = <<<INFO_FORMULARIOS
 SELECT form_field.id_form, form_field.id, form_field.etiqueta AS label,
     $fdr_tabla.value
@@ -241,7 +264,11 @@ INFO_FORMULARIOS;
  * Método para marcar en las tablas de auditoría que el agente ha terminado
  * su hold o break.
  *
+ * Method to mark in the audit tables that the agent has finished their
+ * hold or break.
+ *
  * @param   int     $idAuditBreak   ID del break devuelto por marcarInicioBreakAgente()
+ *                                 ID of the break returned by marcarInicioBreakAgente()
  */
 function marcarFinalBreakAgente($db, $idAuditBreak, $iTimestampLogout)
 {
@@ -254,6 +281,7 @@ function marcarFinalBreakAgente($db, $idAuditBreak, $iTimestampLogout)
 function construirEventoPauseEnd($db, $sAgente, $id_audit_break, $pause_class)
 {
     // Obtener inicio, fin y duración de break para lanzar evento
+    // Get break start, end, and duration to launch event
     $recordset = $db->prepare(
         'SELECT break.id AS break_id, break.name AS break_name, '.
             'audit.datetime_init AS datetime_breakstart, audit.datetime_end AS datetime_breakend, '.
