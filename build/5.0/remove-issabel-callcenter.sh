@@ -7,11 +7,12 @@ chkconfig --level 2345 issabeldialer off 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
 #remove folder and files
-rm -rf /var/www/html/modules/{agent_console,agents,break_administrator,callcenter_config,calls_detail,calls_per_agent,calls_per_hour}
-rm -rf /var/www/html/modules/{campaign_in,campaign_lists,campaign_monitoring,campaign_out,cb_extensions,client,dont_call_list}
-rm -rf /var/www/html/modules/{eccp_users,external_url,form_designer,form_list,graphic_calls,hold_time,ingoings_calls_success}
-rm -rf /var/www/html/modules/{login_logout,queues,rep_agent_information,rep_agents_monitoring,rep_incoming_calls_monitoring}
-rm -rf /var/www/html/modules/{rep_trunks_used_per_hour,reports_break}
+rm -rf /var/www/html/modules/{agent_break,agent_console,agent_journey,agents,break_administrator,callcenter_config}
+rm -rf /var/www/html/modules/{calls_detail,calls_per_agent,calls_per_hour,campaign_in,campaign_monitoring,campaign_out}
+rm -rf /var/www/html/modules/{cb_extensions,client,dont_call_list,eccp_users,external_url,form_designer,form_list}
+rm -rf /var/www/html/modules/{graphic_calls,hold_time,ingoings_calls_success,login_logout,queues}
+rm -rf /var/www/html/modules/{rep_agent_information,rep_agents_monitoring,rep_incoming_calls_monitoring}
+rm -rf /var/www/html/modules/{rep_incoming_campaigns_panel,rep_outgoing_campaigns_panel,reports_break,rep_trunks_used_per_hour}
 
 #remove dialer
 rm -rf /opt/issabel/dialer
