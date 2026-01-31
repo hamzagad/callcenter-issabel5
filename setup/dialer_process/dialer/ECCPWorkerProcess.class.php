@@ -81,7 +81,7 @@ class ECCPWorkerProcess extends TuberiaProcess
         try {
             $this->_configDB = new ConfigDB($this->_db, $this->_log);
         } catch (PDOException $e) {
-            $this->_log->output("FATAL: no se puede leer configuración DB - ".$e->getMessage());
+            $this->_log->output("FATAL: no se puede leer configuración DB - ".$e->getMessage()." | EN: cannot read DB configuration - ");
             return FALSE;
         }
         $this->DEBUG = $this->_configDB->dialer_debug;
@@ -111,10 +111,10 @@ class ECCPWorkerProcess extends TuberiaProcess
         $dbPass = 'asterisk';
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbhost'])) {
             $dbHost = $infoConfig['database']['dbhost'];
-            $this->_log->output('Usando host de base de datos: '.$dbHost);
+            $this->_log->output('Usando host de base de datos: '.$dbHost.' | EN: Using database host: '.$dbHost);
             // Using database host
         } else {
-            $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost);
+            $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost.' | EN: Using default database host: '.$dbHost);
             // Using default database host
         }
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbuser']))
@@ -135,7 +135,7 @@ class ECCPWorkerProcess extends TuberiaProcess
             return TRUE;
         } catch (PDOException $e) {
             $this->_db = NULL;
-            $this->_log->output("FATAL: no se puede conectar a DB - ".$e->getMessage());
+            $this->_log->output("FATAL: no se puede conectar a DB - ".$e->getMessage()." | EN: cannot connect to DB - ");
             return FALSE;
         }
     }
@@ -145,14 +145,14 @@ class ECCPWorkerProcess extends TuberiaProcess
         // Verificar posible desconexión de la base de datos
         // Verify possible database disconnection
         if (is_null($this->_db)) {
-            $this->_log->output('INFO: intentando volver a abrir conexión a DB...');
+            $this->_log->output('INFO: intentando volver a abrir conexión a DB... | EN: trying to reopen DB connection...');
             // Trying to reopen DB connection
             if (!$this->_iniciarConexionDB()) {
-                $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera...');
+                $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera... | EN: cannot restore DB connection, waiting...');
                 // Cannot restore DB connection, waiting
                 usleep(5000000);
             } else {
-                $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal.');
+                $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal. | EN: DB connection restored, resuming normal operation.');
                 // DB connection restored, normal operation resumed
                 $this->_configDB->setDBConn($this->_db);
                 $this->_eccpconn->setDbConn($this->_db);
@@ -166,7 +166,7 @@ class ECCPWorkerProcess extends TuberiaProcess
         }
         if (is_null($this->_ami) && !$this->_finalizandoPrograma) {
             if (!$this->_iniciarConexionAMI()) {
-                $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera...');
+                $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera... | EN: cannot restore Asterisk connection, waiting...');
                 // Cannot restore Asterisk connection, waiting
                 if (!is_null($this->_db)) {
                     if ($this->_multiplex->procesarPaquetes())
@@ -176,7 +176,7 @@ class ECCPWorkerProcess extends TuberiaProcess
                     usleep(5000000);
                 }
             } else {
-                $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal.');
+                $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal. | EN: Asterisk connection restored, resuming normal operation.');
                 // Asterisk connection restored, normal operation resumed
             }
         }
@@ -214,7 +214,7 @@ class ECCPWorkerProcess extends TuberiaProcess
         // Disconnect from the database
         $this->_configDB = NULL;
         if (!is_null($this->_db)) {
-            $this->_log->output('INFO: desconectando de la base de datos...');
+            $this->_log->output('INFO: desconectando de la base de datos... | EN: disconnecting from the database...');
             // Disconnecting from the database
             $this->_db = NULL;
         }
@@ -225,19 +225,19 @@ class ECCPWorkerProcess extends TuberiaProcess
     private function _iniciarConexionAMI()
     {
         if (!is_null($this->_ami)) {
-            $this->_log->output('INFO: Desconectando de sesión previa de Asterisk...');
+            $this->_log->output('INFO: Desconectando de sesión previa de Asterisk... | EN: Disconnecting from previous Asterisk session...');
             $this->_ami->disconnect();
             $this->_ami = NULL;
             $this->_eccpconn->setAstConn(NULL, NULL);
         }
         $astman = new AMIClientConn($this->_multiplex, $this->_log);
 
-        $this->_log->output('INFO: Iniciando sesión de control de Asterisk...');
+        $this->_log->output('INFO: Iniciando sesión de control de Asterisk... | EN: Starting Asterisk control session...');
         if (!$astman->connect(
                 $this->_configDB->asterisk_asthost,
                 $this->_configDB->asterisk_astuser,
                 $this->_configDB->asterisk_astpass)) {
-            $this->_log->output("FATAL: no se puede conectar a Asterisk Manager");
+            $this->_log->output("FATAL: no se puede conectar a Asterisk Manager | EN: cannot connect to Asterisk Manager");
             return FALSE;
         } else {
             // Averiguar la versión de Asterisk que se usa
@@ -247,7 +247,7 @@ class ECCPWorkerProcess extends TuberiaProcess
                 $asteriskVersion = explode('.', $r['AsteriskVersion']);
                 $this->_log->output("INFO: CoreSettings reporta Asterisk ".implode('.', $asteriskVersion));
             } else {
-                $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x.");
+                $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x. | EN: no CoreSettings support in Asterisk Manager, assuming Asterisk 1.4.x.");
             }
 
             // ECCPWorkerProcess no tiene manejadores de eventos AMI
@@ -279,12 +279,12 @@ class ECCPWorkerProcess extends TuberiaProcess
     private function _stdManejoExcepcionDB($e, $s)
     {
         $this->_log->output('ERR: '.__METHOD__. ": $s: ".implode(' - ', $e->errorInfo));
-        $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
+        $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString()." | EN: stack trace: \n");
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
             // Codes corresponding to database connection loss
             $this->_log->output('WARN: '.__METHOD__.
-                ': conexión a DB parece ser inválida, se cierra...');
+                ': conexión a DB parece ser inválida, se cierra... | EN: DB connection appears invalid, closing...');
             $this->_db = NULL;
             $this->_eccpconn->setDbConn(NULL);
         }
@@ -309,14 +309,14 @@ class ECCPWorkerProcess extends TuberiaProcess
 
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output('INFO: recibido mensaje de finalización, se desconectan conexiones...');
+        $this->_log->output('INFO: recibido mensaje de finalización, se desconectan conexiones... | EN: received shutdown message, disconnecting connections...');
         $this->_finalizandoPrograma = TRUE;
         $this->_tuberia->msg_HubProcess_finalizacionTerminada();
     }
 
     public function msg_finalizarWorker($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output('INFO: se permite terminar luego de última petición ECCP...');
+        $this->_log->output('INFO: se permite terminar luego de última petición ECCP... | EN: allowing termination after last ECCP request...');
         $this->_finalizandoPrograma = TRUE;
     }
 }

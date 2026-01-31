@@ -225,7 +225,7 @@ class TuberiaMensaje extends MultiplexConn
                 $handler = $hCualquiera['*'];
             else {
                 if (!is_null($this->_log))
-                    $this->_log->output("ERR: no se ha registrado manejador para $sNombreMensaje($sFuente-->$sDestino)");
+                    $this->_log->output("ERR: no se ha registrado manejador para $sNombreMensaje($sFuente-->$sDestino) | EN: no handler registered for $sNombreMensaje($sFuente-->$sDestino)");
                 return;
             }
 
@@ -234,11 +234,11 @@ class TuberiaMensaje extends MultiplexConn
                 call_user_func($handler, $sFuente, $sDestino, $sNombreMensaje, $paquete['timestamp'], $paquete['datos']);
             } else {
                 if (!is_null($this->_log))
-                    $this->_log->output("ERR: no se encuentra manejador registrado para $sNombreMensaje($sFuente-->$sDestino)");
+                    $this->_log->output("ERR: no se encuentra manejador registrado para $sNombreMensaje($sFuente-->$sDestino) | EN: registered handler not found for $sNombreMensaje($sFuente-->$sDestino)");
             }
         } else {
             if (!is_null($this->_log))
-                $this->_log->output("ERR: se descarta paquete mal formado: ".print_r($paquete, 1));
+                $this->_log->output("ERR: se descarta paquete mal formado: ".print_r($paquete, 1)." | EN: discarding malformed packet: ");
         }
     }
 

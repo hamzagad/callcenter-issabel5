@@ -105,7 +105,7 @@ class CampaignProcess extends TuberiaProcess
         try {
             $this->_configDB = new ConfigDB($this->_db, $this->_log);
         } catch (PDOException $e) {
-            $this->_log->output("FATAL: no se puede leer configuración DB - ".$e->getMessage());
+            $this->_log->output("FATAL: no se puede leer configuración DB - ".$e->getMessage()." | EN: cannot read DB configuration - ".$e->getMessage());
             return FALSE;
         }
 
@@ -116,7 +116,7 @@ class CampaignProcess extends TuberiaProcess
             $this->_db->query('DELETE FROM current_call_entry WHERE 1');
             $this->_db->query("UPDATE call_entry SET status = 'fin-monitoreo' WHERE datetime_end IS NULL AND status <> 'fin-monitoreo'");
         } catch (PDOException $e) {
-            $this->_log->output("FATAL: error al limpiar tablas current_calls - ".$e->getMessage());
+            $this->_log->output("FATAL: error al limpiar tablas current_calls - ".$e->getMessage()." | EN: error when cleaning current_calls tables - ".$e->getMessage());
         	return FALSE;
         }
 
@@ -148,11 +148,9 @@ class CampaignProcess extends TuberiaProcess
         $dbPass = 'asterisk';
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbhost'])) {
             $dbHost = $infoConfig['database']['dbhost'];
-            $this->_log->output('Usando host de base de datos: '.$dbHost);
-            $this->_log->output('Using database host: '.$dbHost);
+            $this->_log->output('Usando host de base de datos: '.$dbHost.' | EN: Using database host: '.$dbHost);
         } else {
-            $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost);
-            $this->_log->output('Using (default) database host: '.$dbHost);
+            $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost.' | EN: Using (default) database host: '.$dbHost);
         }
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbuser']))
             $dbUser = $infoConfig['database']['dbuser'];
@@ -199,17 +197,15 @@ class CampaignProcess extends TuberiaProcess
             if ($item != 'trunks') {
                 // Probablemente error de que asterisk.trunks no existe
                 // Probably error that asterisk.trunks does not exist
-            	$this->_log->output("INFO: tabla asterisk.trunks no existe, se asume FreePBX viejo.");
-            	$this->_log->output("INFO: asterisk.trunks table does not exist, assuming old FreePBX.");
+            	$this->_log->output("INFO: tabla asterisk.trunks no existe, se asume FreePBX viejo. | EN: asterisk.trunks table does not exist, assuming old FreePBX.");
             } else {
                 // asterisk.trunks existe
                 // asterisk.trunks exists
-                $this->_log->output("INFO: tabla asterisk.trunks sí existe, se asume FreePBX reciente.");
-                $this->_log->output("INFO: asterisk.trunks table does exist, assuming recent FreePBX.");
+                $this->_log->output("INFO: tabla asterisk.trunks sí existe, se asume FreePBX reciente. | EN: asterisk.trunks table does exist, assuming recent FreePBX.");
                 $this->_existeTrunksFPBX = TRUE;
             }
         } catch (PDOException $e) {
-        	$this->_log->output("ERR: al consultar tabla de troncales: ".implode(' - ', $e->errorInfo));
+        	$this->_log->output("ERR: al consultar tabla de troncales: ".implode(' - ', $e->errorInfo)." | EN: querying trunk table: ".implode(' - ', $e->errorInfo));
         }
         $dbConn = NULL;
     }
@@ -219,15 +215,12 @@ class CampaignProcess extends TuberiaProcess
         // Verificar posible desconexión de la base de datos
         // Verify possible database disconnection
         if (is_null($this->_db)) {
-            $this->_log->output('INFO: intentando volver a abrir conexión a DB...');
-            $this->_log->output('INFO: trying to reopen DB connection...');
+            $this->_log->output('INFO: intentando volver a abrir conexión a DB... | EN: trying to reopen DB connection...');
             if (!$this->_iniciarConexionDB()) {
-                $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera...');
-                $this->_log->output('ERR: cannot restore DB connection, waiting...');
+                $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera... | EN: cannot restore DB connection, waiting...');
                 usleep(5000000);
             } else {
-                $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal.');
-                $this->_log->output('INFO: DB connection restored, resuming normal operation.');
+                $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal. | EN: DB connection restored, resuming normal operation.');
                 $this->_configDB->setDBConn($this->_db);
             }
         }
@@ -237,8 +230,7 @@ class CampaignProcess extends TuberiaProcess
         if (!is_null($this->_ami) && is_null($this->_ami->sKey)) $this->_ami = NULL;
         if (is_null($this->_ami) && !$this->_finalizandoPrograma) {
             if (!$this->_iniciarConexionAMI()) {
-                $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera...');
-                $this->_log->output('ERR: cannot restore Asterisk connection, waiting...');
+                $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera... | EN: cannot restore Asterisk connection, waiting...');
                 if (!is_null($this->_db)) {
                     if ($this->_multiplex->procesarPaquetes())
                         $this->_multiplex->procesarActividad(0);
@@ -247,8 +239,7 @@ class CampaignProcess extends TuberiaProcess
                     usleep(5000000);
                 }
             } else {
-                $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal.');
-                $this->_log->output('INFO: Asterisk connection restored, resuming normal operation.');
+                $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal. | EN: Asterisk connection restored, resuming normal operation.');
 
                 /* TODO: si el Asterisk ha sido reiniciado, probablemente ha
                  * olvidado la totalidad de las llamadas en curso, así como los
@@ -285,19 +276,14 @@ class CampaignProcess extends TuberiaProcess
             } catch (PDOException $e) {
                 $this->_log->output('ERR: '.__METHOD__.
                     ': no se puede realizar operación de base de datos: '.
+                    implode(' - ', $e->errorInfo).' | EN: cannot perform database operation: '.
                     implode(' - ', $e->errorInfo));
-                $this->_log->output('ERR: '.__METHOD__.
-                    ': cannot perform database operation: '.
-                    implode(' - ', $e->errorInfo));
-                $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
-                $this->_log->output("ERR: stack trace: \n".$e->getTraceAsString());
+                $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString()." | EN: stack trace: \n".$e->getTraceAsString());
                 if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
                     // Códigos correspondientes a pérdida de conexión de base de datos
                     // Codes corresponding to database connection loss
                     $this->_log->output('WARN: '.__METHOD__.
-                        ': conexión a DB parece ser inválida, se cierra...');
-                    $this->_log->output('WARN: '.__METHOD__.
-                        ': DB connection appears invalid, closing...');
+                        ': conexión a DB parece ser inválida, se cierra... | EN: DB connection appears invalid, closing...');
                     $this->_db = NULL;
                 }
             }
@@ -325,20 +311,18 @@ class CampaignProcess extends TuberiaProcess
     private function _iniciarConexionAMI()
     {
         if (!is_null($this->_ami)) {
-            $this->_log->output('INFO: Desconectando de sesión previa de Asterisk...');
+            $this->_log->output('INFO: Desconectando de sesión previa de Asterisk... | EN: Disconnecting from previous Asterisk session...');
             $this->_ami->disconnect();
             $this->_ami = NULL;
         }
         $astman = new AMIClientConn($this->_multiplex, $this->_log);
 
-        $this->_log->output('INFO: Iniciando sesión de control de Asterisk...');
-        $this->_log->output('INFO: Starting Asterisk control session...');
+        $this->_log->output('INFO: Iniciando sesión de control de Asterisk... | EN: Starting Asterisk control session...');
         if (!$astman->connect(
                 $this->_configDB->asterisk_asthost,
                 $this->_configDB->asterisk_astuser,
                 $this->_configDB->asterisk_astpass)) {
-            $this->_log->output("FATAL: no se puede conectar a Asterisk Manager");
-            $this->_log->output("FATAL: cannot connect to Asterisk Manager");
+            $this->_log->output("FATAL: no se puede conectar a Asterisk Manager | EN: cannot connect to Asterisk Manager");
             return FALSE;
         } else {
             // Averiguar la versión de Asterisk que se usa
@@ -348,11 +332,9 @@ class CampaignProcess extends TuberiaProcess
                                           // Only available in Asterisk >= 1.6.0
             if ($r['Response'] == 'Success' && isset($r['AsteriskVersion'])) {
                 $this->_asteriskVersion = explode('.', $r['AsteriskVersion']);
-                $this->_log->output("INFO: CoreSettings reporta Asterisk ".implode('.', $this->_asteriskVersion));
-                $this->_log->output("INFO: CoreSettings reports Asterisk ".implode('.', $this->_asteriskVersion));
+                $this->_log->output("INFO: CoreSettings reporta Asterisk ".implode('.', $this->_asteriskVersion)." | EN: CoreSettings reports Asterisk ".implode('.', $this->_asteriskVersion));
             } else {
-                $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x.");
-                $this->_log->output("INFO: no CoreSettings support in Asterisk Manager, assuming Asterisk 1.4.x.");
+                $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x. | EN: no CoreSettings support in Asterisk Manager, assuming Asterisk 1.4.x.");
             }
 
             /* CampaignProcess no tiene manejadores de eventos AMI. Aunque el
@@ -514,7 +496,7 @@ PETICION_CAMPANIAS_ENTRANTES;
                 if (isset($listaColasInactivas[$id])) {
                     $listaCampaniasAvisar['incoming_queue_old'][$id] = $listaColasInactivas[$id];
                 } else {
-                    $this->_log->output("WARN: ".__METHOD__." no se encuentra queue_call_entry(id=$id)");
+                    $this->_log->output("WARN: ".__METHOD__." no se encuentra queue_call_entry(id=$id) | EN: queue_call_entry(id=$id) not found");
                 }
             }
             if (count($listaCampaniasAvisar['incoming_queue_new']) != 0 ||
@@ -579,11 +561,9 @@ PETICION_CAMPANIAS_ENTRANTES;
         // Build dialing pattern from campaign trunk
         $datosTrunk = $this->_construirPlantillaMarcado($infoCampania['trunk']);
         if (is_null($datosTrunk)) {
-            $this->_log->output("ERR: no se puede construir plantilla de marcado a partir de trunk '{$infoCampania['trunk']}'!");
-            $this->_log->output("ERR: cannot build dial template from trunk '{$infoCampania['trunk']}'!");
+            $this->_log->output("ERR: no se puede construir plantilla de marcado a partir de trunk '{$infoCampania['trunk']}'! | EN: cannot build dial template from trunk '{$infoCampania['trunk']}'!");
             $this->_log->output("ERR: Revise los mensajes previos. Si el problema es un tipo de trunk no manejado, ".
-                "se requiere informar este tipo de trunk y/o actualizar su versión de CallCenter");
-            $this->_log->output("ERR: Review previous messages. If the problem is an unhandled trunk type, ".
+                "se requiere informar este tipo de trunk y/o actualizar su versión de CallCenter | EN: Review previous messages. If the problem is an unhandled trunk type, ".
                 "this trunk type needs to be reported and/or update your CallCenter version");
             return FALSE;
         }
@@ -619,7 +599,7 @@ PETICION_CAMPANIAS_ENTRANTES;
         if (is_null($infoCola)) {
             $this->_log->output('ERR: '.__METHOD__." no se puede obtener información de ".
                 "estado de cola para (campania {$infoCampania['id']} ".
-                "cola {$infoCampania['queue']}).");
+                "cola {$infoCampania['queue']}). | EN: cannot get queue status information for (campaign {$infoCampania['id']} queue {$infoCampania['queue']}).");
             return FALSE;
         }
 
@@ -690,10 +670,8 @@ $pepe = $iNumLlamadasColocar;
         if ($this->DEBUG) {
             $this->_log->output("DEBUG: ".__METHOD__." (campania {$infoCampania['id']} cola ".
                 "{$infoCampania['queue']}) se pueden colocar un máximo de ".
-                "$iNumLlamadasColocar llamadas...");
-            $this->_log->output("DEBUG: ".__METHOD__." (campaign {$infoCampania['id']} queue ".
-                "{$infoCampania['queue']}) se pueden colocar un máximo de ".
-                "$iNumLlamadasColocar llamadas...");
+                "$iNumLlamadasColocar llamadas... | EN: can place maximum of ".
+                "$iNumLlamadasColocar calls...");
         }
 
         if ($iNumLlamadasColocar > 0 && $this->_configDB->dialer_overcommit) {
@@ -807,8 +785,7 @@ PETICION_LLAMADAS;
                 	// Se ha encontrado en la lectura un número de teléfono repetido
                     // A repeated phone number was found in the reading
                     $this->_log->output("INFO: se ignora llamada $sKey con DialString ".
-                        "$sCanalTrunk - mismo DialString usado por llamada a punto de originar.");
-                    $this->_log->output("INFO: call $sKey with DialString ".
+                        "$sCanalTrunk - mismo DialString usado por llamada a punto de originar. | EN: call $sKey with DialString ".
                         "$sCanalTrunk ignored - same DialString used by call about to originate.");
                 }
             }
@@ -865,9 +842,7 @@ PETICION_LLAMADAS;
             if ($iNumDNC > 0) {
             	if ($this->DEBUG) {
             		$this->_log->output('DEBUG: '.__METHOD__." (campania {$infoCampania['id']} ".
-                        "número $k encontrado en lista DNC, no se marcará.");
-            		$this->_log->output('DEBUG: '.__METHOD__." (campaign {$infoCampania['id']} ".
-                        "number $k found in DNC list, will not be dialed.");
+                        "número $k encontrado en lista DNC, no se marcará. | EN: number $k found in DNC list, will not be dialed.");
             	}
                 $sth->execute(array($infoCampania['id'], $tupla['id']));
                 unset($listaLlamadas[$k]);
@@ -886,8 +861,7 @@ PETICION_LLAMADAS;
             	$sKey = $listaLlamadas[$k]['actionid'];
                 $sCanalTrunk = $listaLlamadas[$k]['dialstring'];
                 $this->_log->output("INFO: se ignora llamada $sKey con DialString ".
-                    "$sCanalTrunk - mismo DialString usado por llamada monitoreada.");
-                $this->_log->output("INFO: call $sKey with DialString ".
+                    "$sCanalTrunk - mismo DialString usado por llamada monitoreada. | EN: call $sKey with DialString ".
                     "$sCanalTrunk ignored - same DialString used by monitored call.");
                 unset($listaLlamadas[$k]);
             }
@@ -994,8 +968,7 @@ SQL_LLAMADA_COLOCADA;
                 // Se deshace AMIEventProcess_nuevasLlamadasMarcar sin marcar
                 // Undo AMIEventProcess_nuevasLlamadasMarcar without dialing
                 $this->_log->output('WARN: '.__METHOD__.' abortando '.
-                    count($listaLlamadas).' llamadas sin marcar debido a excepción de DB...');
-                $this->_log->output('WARN: '.__METHOD__.' aborting '.
+                    count($listaLlamadas).' llamadas sin marcar debido a excepción de DB... | EN: aborting '.
                     count($listaLlamadas).' undialed calls due to DB exception...');
                 $llamadasAbortar = array($tupla['actionid']);
                 foreach ($listaLlamadas as $t) $llamadasAbortar[] = $t['actionid'];
@@ -1021,8 +994,7 @@ SQL_LLAMADA_COLOCADA;
          * and active campaign, the calls have finished. Therefore the campaign
          * has already finished. */
         if ($iNumLlamadasColocar > 0 && $iNumTotalLlamadas <= 0) {
-        	$this->_log->output('INFO: marcando campaña como finalizada: '.$infoCampania['id']);
-            $this->_log->output('INFO: marking campaign as finished: '.$infoCampania['id']);
+        	$this->_log->output('INFO: marcando campaña como finalizada: '.$infoCampania['id'].' | EN: marking campaign as finished: '.$infoCampania['id']);
             $sth = $this->_db->prepare('UPDATE campaign SET estatus = "T" WHERE id = ?');
             $sth->execute(array($infoCampania['id']));
         }
@@ -1096,16 +1068,13 @@ SQL_LLAMADA_COLOCADA;
                     // A repeated phone number was found in the reading
                     $this->_log->output("INFO: se ignora llamada {$tupla['actionid']} ".
                         "con DialString {$tupla['dialstring']} - mismo DialString ".
-                        "usado por llamada a punto de originar.");
-                    $this->_log->output("INFO: ignoring call {$tupla['actionid']} ".
+                        "usado por llamada a punto de originar. | EN: ignoring call {$tupla['actionid']} ".
                         "with DialString {$tupla['dialstring']} - same DialString ".
                         "used by call about to originate.");
                 }
             } else {
                 $this->_log->output('WARN: '.__METHOD__.': no se encontró '.
-                    'llamada agendada esperada para agente: '.$sAgente);
-                $this->_log->output('WARN: '.__METHOD__.': expected scheduled call '.
-                    'not found for agent: '.$sAgente);
+                    'llamada agendada esperada para agente: '.$sAgente.' | EN: expected scheduled call not found for agent: '.$sAgente);
             }
         }
 
@@ -1299,8 +1268,7 @@ PETICION_LLAMADAS_AGENTE;
                 $plantilla['CID'] = $infoTrunk['CID'];
             return $plantilla;
         } else {
-            $this->_log->output("ERR: trunk '$sTrunk' es un tipo de trunk desconocido. Actualice su versión de CallCenter.");
-            $this->_log->output("ERR: trunk '$sTrunk' is an unknown trunk type. Update your CallCenter version.");
+            $this->_log->output("ERR: trunk '$sTrunk' es un tipo de trunk desconocido. Actualice su versión de CallCenter. | EN: trunk '$sTrunk' is an unknown trunk type. Update your CallCenter version.");
             return NULL;
         }
     }
@@ -1351,8 +1319,7 @@ PETICION_LLAMADAS_AGENTE;
                  * fields in the asterisk.trunks table. */
                 $camposTrunk = explode('/', $sTrunkConsulta, 2);
                 if (count($camposTrunk) < 2) {
-                    $this->_log->output("ERR: trunk '$sTrunkConsulta' no se puede interpretar, se espera formato TECH/CHANNELID");
-                    $this->_log->output("ERR: trunk '$sTrunkConsulta' cannot be interpreted, TECH/CHANNELID format expected");
+                    $this->_log->output("ERR: trunk '$sTrunkConsulta' no se puede interpretar, se espera formato TECH/CHANNELID | EN: trunk '$sTrunkConsulta' cannot be interpreted, TECH/CHANNELID format expected");
                     $dbConn = NULL;
                     return NULL;
                 }
@@ -1407,8 +1374,7 @@ PETICION_LLAMADAS_AGENTE;
                 $sVariable = $recordset->fetch(PDO::FETCH_COLUMN, 0);
                 $recordset->closeCursor();
                 if (!$sVariable && strpos($sTrunkConsulta, 'DAHDI') !== 0) {
-                    $this->_log->output("ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX (1) - trunk no se encuentra!");
-                    $this->_log->output("ERR: querying trunk information '$sTrunkConsulta' in FreePBX (1) - trunk not found!");
+                    $this->_log->output("ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX (1) - trunk no se encuentra! | EN: querying trunk information '$sTrunkConsulta' in FreePBX (1) - trunk not found!");
                     $dbConn = NULL;
                     return NULL;
                 }
@@ -1426,8 +1392,7 @@ PETICION_LLAMADAS_AGENTE;
                     $sVariable = $recordset->fetch(PDO::FETCH_COLUMN, 0);
                     $recordset->closeCursor();
                     if (!$sVariable) {
-                        $this->_log->output("ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX (1) - trunk no se encuentra!");
-                        $this->_log->output("ERR: querying trunk information '$sTrunkConsulta' in FreePBX (1) - trunk not found!");
+                        $this->_log->output("ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX (1) - trunk no se encuentra! | EN: querying trunk information '$sTrunkConsulta' in FreePBX (1) - trunk not found!");
                         $dbConn = NULL;
                         return NULL;
                     }
@@ -1435,8 +1400,7 @@ PETICION_LLAMADAS_AGENTE;
 
                 $regs = NULL;
                 if (!preg_match('/^OUT_([[:digit:]]+)$/', $sVariable, $regs)) {
-                    $this->_log->output("ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX (1) - se esperaba OUT_NNN pero se encuentra $sVariable - versión incompatible de FreePBX?");
-                    $this->_log->output("ERR: querying trunk information '$sTrunkConsulta' in FreePBX (1) - expected OUT_NNN but found $sVariable - incompatible FreePBX version?");
+                    $this->_log->output("ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX (1) - se esperaba OUT_NNN pero se encuentra $sVariable - versión incompatible de FreePBX? | EN: querying trunk information '$sTrunkConsulta' in FreePBX (1) - expected OUT_NNN but found $sVariable - incompatible FreePBX version?");
                 } else {
                     $iNumTrunk = $regs[1];
 
@@ -1488,8 +1452,7 @@ PETICION_LLAMADAS_AGENTE;
         $dbParams = array();
         $hConfig = fopen($sNombreConfig, 'r');
         if (!$hConfig) {
-            $this->_log->output('ERR: no se puede abrir archivo '.$sNombreConfig.' para lectura de parámetros FreePBX.');
-            $this->_log->output('ERR: cannot open file '.$sNombreConfig.' for FreePBX parameter reading.');
+            $this->_log->output('ERR: no se puede abrir archivo '.$sNombreConfig.' para lectura de parámetros FreePBX. | EN: cannot open file '.$sNombreConfig.' for FreePBX parameter reading.');
             return NULL;
         }
         while (!feof($hConfig)) {
@@ -1515,16 +1478,14 @@ PETICION_LLAMADAS_AGENTE;
         // Open database connection if all parameters are available
         if (count($dbParams) < 4) {
             $this->_log->output('ERR: archivo '.$sNombreConfig.
-                ' de parámetros FreePBX no tiene todos los parámetros requeridos para conexión.');
-            $this->_log->output('ERR: file '.$sNombreConfig.
+                ' de parámetros FreePBX no tiene todos los parámetros requeridos para conexión. | EN: file '.$sNombreConfig.
                 ' of FreePBX parameters does not have all required parameters for connection.');
             return NULL;
         }
         if ($dbParams['AMPDBENGINE'] != 'mysql' && $dbParams['AMPDBENGINE'] != 'mysqli') {
             $this->_log->output('ERR: archivo '.$sNombreConfig.
                 ' de parámetros FreePBX especifica AMPDBENGINE='.$dbParams['AMPDBENGINE'].
-                ' que no ha sido probado.');
-            $this->_log->output('ERR: file '.$sNombreConfig.
+                ' que no ha sido probado. | EN: file '.$sNombreConfig.
                 ' of FreePBX parameters specifies AMPDBENGINE='.$dbParams['AMPDBENGINE'].
                 ' which has not been tested.');
             return NULL;
@@ -1537,8 +1498,7 @@ PETICION_LLAMADAS_AGENTE;
             return $dbConn;
         } catch (PDOException $e) {
             $this->_log->output("ERR: no se puede conectar a DB de FreePBX - ".
-                $e->getMessage());
-            $this->_log->output("ERR: cannot connect to FreePBX DB - ".
+                $e->getMessage()." | EN: cannot connect to FreePBX DB - ".
                 $e->getMessage());
             return NULL;
         }
@@ -1594,7 +1554,7 @@ PETICION_LLAMADAS_AGENTE;
 
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output('INFO: recibido mensaje de finalización, se detienen campañas...');
+        $this->_log->output('INFO: recibido mensaje de finalización, se detienen campañas... | EN: received shutdown message, stopping campaigns...');
         $this->_tuberia->msg_HubProcess_finalizacionTerminada();
         $this->_finalizandoPrograma = TRUE;
     }

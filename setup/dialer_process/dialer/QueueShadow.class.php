@@ -142,7 +142,7 @@ class QueueShadow
             $this->_log->output('WARN: '.__METHOD__.': para mejorar el desempeño de '.
                 'campañas salientes, se recomienda activar eventwhencalled y '.
                 'eventmemberstatus en las siguientes colas: ['.
-                'WARN: '.__METHOD__.': to improve outbound campaign performance, '.
+                implode(' ', $colasSinEventos).'] | EN: to improve outbound campaign performance, '.
                 'it is recommended to activate eventwhencalled and '.
                 'eventmemberstatus in the following queues: ['.
                 implode(' ', $colasSinEventos).']');
@@ -154,7 +154,7 @@ class QueueShadow
     function msg_QueueMemberAdded($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -170,7 +170,7 @@ class QueueShadow
     function msg_QueueMemberRemoved($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -181,7 +181,7 @@ class QueueShadow
     function msg_QueueMemberPaused($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -190,14 +190,15 @@ class QueueShadow
             $this->_queues[$params['Queue']]['members'][$params['Location']]['Paused'] = ($params['Paused'] != 0);
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Location'].
-                    ' en cola '.$params['Queue']);
+                    ' en cola '.$params['Queue'].' | EN: member '.$params['Location'].
+                    ' not found in queue '.$params['Queue']);
         }
     }
 
     function msg_QueueMemberStatus($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -213,7 +214,8 @@ class QueueShadow
             // I'm going to assume I can keep the LinkStart value
         } else {
            $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Location'].
-               ' en cola '.$params['Queue'].', se agrega');
+               ' en cola '.$params['Queue'].', se agrega | EN: member '.$params['Location'].
+               ' not found in queue '.$params['Queue'].', adding');
             $this->_queues[$params['Queue']]['members'][$params['Location']] = array(
                 'removed'   => FALSE,
                 'Status'    => $params['Status'],
@@ -225,7 +227,7 @@ class QueueShadow
     function msg_Join($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -235,7 +237,7 @@ class QueueShadow
     function msg_Leave($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return FALSE;
         }
 
@@ -251,7 +253,7 @@ class QueueShadow
     function msg_AgentCalled($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -266,7 +268,7 @@ class QueueShadow
     function msg_AgentComplete($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -289,7 +291,7 @@ class QueueShadow
     function msg_AgentConnect($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -312,7 +314,7 @@ class QueueShadow
     function msg_AgentDump($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -339,7 +341,7 @@ class QueueShadow
     function infoPrediccionCola($queue)
     {
         if (!isset($this->_queues[$queue])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$queue);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$queue.' | EN: queue '.$queue.' not found');
             return NULL;
         }
 

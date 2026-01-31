@@ -82,12 +82,12 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
             $iPidDevuelto = pcntl_waitpid($this->_tareas[$sTarea], $iStatus, WNOHANG);
             if ($iPidDevuelto > 0) {
                 if (!$finalizando && in_array($sTarea, $this->_tareasFijas)) {
-                    $this->_log->output("WARN: $sTarea (PID=$iPidDevuelto) ha terminado inesperadamente (status=$iStatus), se agenda reinicio...");
+                    $this->_log->output("WARN: $sTarea (PID=$iPidDevuelto) ha terminado inesperadamente (status=$iStatus), se agenda reinicio... | EN: $sTarea (PID=$iPidDevuelto) terminated unexpectedly (status=$iStatus), scheduling restart...");
                 }
                 $iErrCode = pcntl_wifexited($iStatus) ? pcntl_wexitstatus($iStatus) : 255;
                 $iRcvSignal = pcntl_wifsignaled($iStatus) ? pcntl_wtermsig($iStatus) : 0;
-                if ($iRcvSignal != 0) { $this->_log->output("WARN: $sTarea terminó debido a señal $iRcvSignal..."); }
-                if ($iErrCode != 0) { $this->_log->output("WARN: $sTarea devolvió código de error $iErrCode..."); }
+                if ($iRcvSignal != 0) { $this->_log->output("WARN: $sTarea terminó debido a señal $iRcvSignal... | EN: $sTarea terminated due to signal $iRcvSignal..."); }
+                if ($iErrCode != 0) { $this->_log->output("WARN: $sTarea devolvió código de error $iErrCode... | EN: $sTarea returned error code $iErrCode..."); }
                 $this->_manejarCaidaECCPWorker($sTarea);
                 unset($this->_tareas[$sTarea]);
                 $this->_tareasUltimaPeticion = array_diff($this->_tareasUltimaPeticion, array($sTarea));
@@ -151,7 +151,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
             // Mandar la señal a todos los procesos controlados
             // Send the signal to all controlled processes
             $this->_log->output("PID = ".posix_getpid().", se ha recibido señal #$gsNombreSignal, ".
-                (($gsNombreSignal == SIGHUP) ? 'cambiando logs' : 'terminando')."...");
+                (($gsNombreSignal == SIGHUP) ? 'cambiando logs | EN: changing logs' : 'terminando | EN: terminating')."...");
             $this->_propagarSIG($gsNombreSignal);
         }
     }
@@ -203,7 +203,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                     $oProceso = new $sNombreClase($oTuberia);
                     if (!($oProceso instanceof TuberiaProcess)) throw new Exception('Not a subclass of TuberiaProcess!');
                 } catch (Exception $ex) {
-                    $this->_log->output("ERR: al crear $sNombreTarea - excepción no manejada: ".$ex->getMessage());
+                    $this->_log->output("ERR: al crear $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when creating $sNombreTarea - unhandled exception: ".$ex->getMessage());
                     die("ERR: al crear $sNombreTarea - ".$ex->getMessage()."\n");
                 }
 
@@ -214,7 +214,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                     if ($bContinuar) $this->_log->output("PID = ".posix_getpid().", proceso iniciado normalmente");
                 } catch (Exception $ex) {
                     $bContinuar = FALSE;
-                    $this->_log->output("ERR: al inicializar $sNombreTarea - excepción no manejada: ".$ex->getMessage());
+                    $this->_log->output("ERR: al inicializar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when initializing $sNombreTarea - unhandled exception: ".$ex->getMessage());
                 }
 
                 // Continuar la tarea hasta que se finalice
@@ -227,7 +227,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                             $bContinuar = $oProceso->procedimientoDemonio();
                         } catch (Exception $ex) {
                             $bContinuar = FALSE;
-                            $this->_log->output("ERR: al ejecutar $sNombreTarea - excepción no manejada: ".$ex->getMessage());
+                            $this->_log->output("ERR: al ejecutar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when executing $sNombreTarea - unhandled exception: ".$ex->getMessage());
                         }
                     }
 
@@ -235,12 +235,12 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                     // Check if there is a signal indicating program termination
                     if (!is_null($gsNombreSignal)) {
                         if (in_array($gsNombreSignal, array(SIGTERM, SIGINT, SIGQUIT))) {
-                            $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, terminando...");
+                            $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, terminando... | EN: process received signal $gsNombreSignal, terminating...");
                             $bContinuar = FALSE;
                         } elseif ($gsNombreSignal == SIGHUP) {
-                            $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, cambiando logs...");
+                            $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, cambiando logs... | EN: process received signal $gsNombreSignal, changing logs...");
                             $this->_log->reopen();
-                            $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, usando nuevo log.");
+                            $this->_log->output("PID = ".posix_getpid().", proceso recibió señal $gsNombreSignal, usando nuevo log. | EN: process received signal $gsNombreSignal, using new log.");
                             $gsNombreSignal = NULL;
                         }
                     }
@@ -251,9 +251,9 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 try {
                     $oProceso->limpiezaDemonio($gsNombreSignal);
                 } catch (Exception $ex) {
-                    $this->_log->output("ERR: al finalizar $sNombreTarea - excepción no manejada: ".$ex->getMessage());
+                    $this->_log->output("ERR: al finalizar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when finalizing $sNombreTarea - unhandled exception: ".$ex->getMessage());
                 }
-                $this->_log->output("PID = ".posix_getpid().", proceso terminó normalmente.");
+                $this->_log->output("PID = ".posix_getpid().", proceso terminó normalmente. | EN: process finished normally.");
                 $this->_log->close();
 
                 exit(0);   // Finalizar el proceso hijo
@@ -363,7 +363,9 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         if (isset($this->_conexionTareaOcupada[$sTarea])) {
             $this->_log->output("WARN: tarea $sTarea con PID=".
                 $this->_tareas[$sTarea]." ha terminado mientras procesaba una ".
-                "petición ECCP para la conexión ".$this->_conexionTareaOcupada[$sTarea]);
+                "petición ECCP para la conexión ".$this->_conexionTareaOcupada[$sTarea]." | EN: task $sTarea with PID=".
+                $this->_tareas[$sTarea]." terminated while processing an ".
+                "ECCP request for connection ".$this->_conexionTareaOcupada[$sTarea]);
             $sCrashMsg = <<<XML_CRASH_MSG
 <?xml version="1.0"?>
 <response><failure><code>503</code><message>Internal server error - worker crash while handling request</message></failure></response>
@@ -394,17 +396,17 @@ XML_CRASH_MSG;
         if (!is_null($signum)) {
             // Mandar la señal a todos los procesos controlados
             // Send the signal to all controlled processes
-            $this->_log->output("PID = ".posix_getpid().", se ha recibido señal #$signum, terminando...");
+            $this->_log->output("PID = ".posix_getpid().", se ha recibido señal #$signum, terminando... | EN: received signal #$signum, terminating...");
         } else {
             $signum = SIGTERM;
-            $this->_log->output("Término normal del programa, se terminará procesos hijos...");
+            $this->_log->output("Término normal del programa, se terminará procesos hijos... | EN: Normal program termination, terminating child processes...");
         }
 
         // Avisar a todos los procesos que se terminará el programa
         // Notify all processes that the program will terminate
-        $this->_log->output('INFO: avisando de finalización a todos los procesos...');
+        $this->_log->output('INFO: avisando de finalización a todos los procesos... | EN: notifying all processes of termination...');
         $this->_hub->enviarFinalizacion();
-        $this->_log->output('INFO: esperando respuesta de todos los procesos...');
+        $this->_log->output('INFO: esperando respuesta de todos los procesos... | EN: waiting for response from all processes...');
         while ($this->_hub->numFinalizados() < count(array_filter($this->_tareas))) {
             foreach (array_keys($this->_tareas) as $sTarea)
                 $this->_revisarTareaActiva($sTarea, TRUE);
@@ -433,7 +435,7 @@ XML_CRASH_MSG;
             if (!$bTodosTerminaron) {
                 $t2 = time();
                 if ($t2 - $t1 >= 4) {
-                    $this->_log->output('WARN: no todas las tareas han terminado, se vuelve a enviar señal...');
+                    $this->_log->output('WARN: no todas las tareas han terminado, se vuelve a enviar señal... | EN: not all tasks have finished, resending signal...');
                     $this->_propagarSIG($signum);
                     $t1 = $t2;
                 }
@@ -445,7 +447,7 @@ XML_CRASH_MSG;
                 else $this->_hub->procesarActividad(1);
             }
         } while (!$bTodosTerminaron);
-        $this->_log->output('INFO: todas las tareas han terminado.');
+        $this->_log->output('INFO: todas las tareas han terminado. | EN: all tasks have finished.');
 
         // Mandar a cerrar todas las conexiones activas
         // Send to close all active connections
@@ -457,9 +459,9 @@ XML_CRASH_MSG;
     private function _propagarSIG($signum)
     {
         foreach (array_keys($this->_tareas) as $sTarea) {
-            $this->_log->output("Propagando señal #$signum a $sTarea...");
+            $this->_log->output("Propagando señal #$signum a $sTarea... | EN: propagating signal #$signum to $sTarea...");
             posix_kill($this->_tareas[$sTarea], $signum);
-            $this->_log->output("Completada propagación de señal a $sTarea");
+            $this->_log->output("Completada propagación de señal a $sTarea | EN: completed signal propagation to $sTarea");
         }
     }
 }

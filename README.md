@@ -40,9 +40,9 @@ GPLv2 or Later
 Callcenter Issabel 5
 ==========
 
-Call Center Module V4.0.0.6, Updated for installing on rocky 8 , with php compatiblle with v5.4 up to v8.0 , In callback and agent modes. 
+Call Center Module V5.0.0-1, Updated for installing on rocky 8 , with php compatiblle with v5.4 up to v8.0 , In callback and agent modes. 
 
-esta version puede ser instalada en asterisk 16 o 18 en IssabelPBX 
+esta version puede ser instalada en asterisk 16 o 18 en IssabelPBX, tested with Asterisk 18, and it is no logner backward compatible with Issabel 4
 
 #### Version actualizada por la comunidad de Issabel, cualquier duda o problema escribir a https://t.me/IssabelPBXip:
 Gracias a la colaboracion de Nicolás Gudiño, Julio pacheco, y comunidad de Issabel en telegram

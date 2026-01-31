@@ -740,7 +740,7 @@ class Agente
     public function _cb_QueueRemove($r, $log, $q)
     {
         if ($r['Response'] != 'Success') {
-            $this->_log->output("ERR: falla al quitar {$this->channel} de cola {$q}: ".print_r($r, TRUE));
+            $this->_log->output("ERR: falla al quitar {$this->channel} de cola {$q}: ".print_r($r, TRUE)." | EN: failure to remove {$this->channel} from queue {$q}: ");
             // "ERR: failure to remove {$this->channel} from queue {$q}"
         }
     }
@@ -750,7 +750,7 @@ class Agente
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.' (internal) no se puede '.
                 ($nstate ? 'pausar' : 'despausar').' al agente '.$sAgente.': '.
-                $sAgente.' - '.$r['Message']);
+                $sAgente.' - '.$r['Message'].' | EN: cannot '.($nstate ? 'pause' : 'unpause').' agent '.$sAgente.': ');
                 // cannot pause/unpause agent
         } else {
             $partes = preg_split("/\//",$sAgente);

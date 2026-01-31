@@ -133,7 +133,7 @@ class ECCPConn
                         $sRequerimiento.' params: '.print_r($comando, TRUE));
                 }
                 if (!isset($this->_peticionesAttr[$sRequerimiento])) {
-                    $this->_log->output('ERR: (interno) no existe implementación para método: '.$sRequerimiento);
+                    $this->_log->output('ERR: (interno) no existe implementación para método: '.$sRequerimiento.' | EN: no implementation exists for method: '.$sRequerimiento);
                     $response = $this->_generarRespuestaFallo(501, 'Not Implemented');
                 } else {
                     $sMetodoImplementacion = $this->_peticionesAttr[$sRequerimiento]['method'];
@@ -1495,7 +1495,7 @@ class ECCPConn
         $dbParams = array();
         $hConfig = fopen($sNombreConfig, 'r');
         if (!$hConfig) {
-            $this->_log->output('ERR: no se puede abrir archivo '.$sNombreConfig.' para lectura de parámetros FreePBX.');
+            $this->_log->output('ERR: no se puede abrir archivo '.$sNombreConfig.' para lectura de parámetros FreePBX. | EN: cannot open file '.$sNombreConfig.' for FreePBX parameter reading.');
             return NULL;
         }
         while (!feof($hConfig)) {
@@ -1640,7 +1640,7 @@ class ECCPConn
             $listaColas = $this->_tuberia->AMIEventProcess_listarTotalColasTrabajoAgente(array($sAgente));
             if (count($listaColas[$sAgente][1]) <= 0) {
                 // Este agente no tiene colas asociadas
-                $this->_log->output('WARN: agente dinámico '.$sAgente.' no es miembro dinámico de ninguna cola, no se puede realizar login.');
+                $this->_log->output('WARN: agente dinámico '.$sAgente.' no es miembro dinámico de ninguna cola, no se puede realizar login. | EN: dynamic agent '.$sAgente.' is not dynamic member of any queue, cannot login.');
                 $r = array(
                     'Response'  =>  'Error',
                     'Message'   =>  'Extension not a dynamic member of any queue.',
@@ -2888,19 +2888,19 @@ LEER_STATS_CAMPANIA;
         if (is_array($horario)) {
             // Formatos correctos de fecha
             if (!isset($horario['date_init']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $horario['date_init'])) {
-                $this->_log->output('ERR: al agendar llamada: fecha de inicio inválida, se espera YYYY-MM-DD');
+                $this->_log->output('ERR: al agendar llamada: fecha de inicio inválida, se espera YYYY-MM-DD | EN: when scheduling call: invalid start date, expected YYYY-MM-DD');
                 $errcode = 400; $errdesc = 'Bad request: invalid date_init';
                 return FALSE;
             } elseif (!isset($horario['date_end']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $horario['date_end'])) {
-                $this->_log->output('ERR: al agendar llamada: fecha de fin inválida, se espera YYYY-MM-DD');
+                $this->_log->output('ERR: al agendar llamada: fecha de fin inválida, se espera YYYY-MM-DD | EN: when scheduling call: invalid end date, expected YYYY-MM-DD');
                 $errcode = 400; $errdesc = 'Bad request: invalid date_end';
                 return FALSE;
             } elseif (!isset($horario['time_init']) || !preg_match('/^\d{2}:\d{2}:\d{2}$/', $horario['time_init'])) {
-                $this->_log->output('ERR: al agendar llamada: hora de inicio inválida, se espera HH:MM:SS');
+                $this->_log->output('ERR: al agendar llamada: hora de inicio inválida, se espera HH:MM:SS | EN: when scheduling call: invalid start time, expected HH:MM:SS');
                 $errcode = 400; $errdesc = 'Bad request: invalid time_init';
                 return FALSE;
             } elseif (!isset($horario['time_end']) || !preg_match('/^\d{2}:\d{2}:\d{2}$/', $horario['time_end'])) {
-                $this->_log->output('ERR: al agendar llamada: hora de fin inválida, se espera HH:MM:SS');
+                $this->_log->output('ERR: al agendar llamada: hora de fin inválida, se espera HH:MM:SS | EN: when scheduling call: invalid end time, expected HH:MM:SS');
                 $errcode = 400; $errdesc = 'Bad request: invalid time_end';
                 return FALSE;
             }

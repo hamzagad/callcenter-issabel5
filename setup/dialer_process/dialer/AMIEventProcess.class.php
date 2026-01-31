@@ -154,12 +154,12 @@ class AMIEventProcess extends TuberiaProcess
             if (!is_null($this->_ami) && is_null($this->_ami->sKey)) $this->_ami = NULL;
             if (is_null($this->_ami) && !$this->_finalizandoPrograma) {
                 if (!$this->_iniciarConexionAMI()) {
-                    $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera...');
+                    $this->_log->output('ERR: no se puede restaurar conexión a Asterisk, se espera... | EN: cannot restore Asterisk connection, waiting...');
                     if ($this->_multiplex->procesarPaquetes())
                         $this->_multiplex->procesarActividad(0);
                     else $this->_multiplex->procesarActividad(5);
                 } else {
-                    $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal.');
+                    $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal. | EN: Asterisk connection restored, resuming normal operation.');
                 }
             }
         } else {
@@ -172,11 +172,11 @@ class AMIEventProcess extends TuberiaProcess
         // Verify if there are pending QueueStatus requests
         if (!is_null($this->_ami) && !is_null($this->_pendiente_QueueStatus) && !$this->_finalizandoPrograma) {
             if (is_null($this->_tmp_actionid_queuestatus)) {
-                $this->_log->output("INFO: conexión AMI disponible, se ejecuta consulta QueueStatus retrasada...");
+                $this->_log->output("INFO: conexión AMI disponible, se ejecuta consulta QueueStatus retrasada... | EN: AMI connection available, executing delayed QueueStatus query...");
                 $this->_iniciarQueueStatus($this->_pendiente_QueueStatus);
                 $this->_pendiente_QueueStatus = NULL;
             } else {
-                $this->_log->output("INFO: conexión AMI disponible, QueueStatus en progreso, se olvida consulta QueueStatus retrasada...");
+                $this->_log->output("INFO: conexión AMI disponible, QueueStatus en progreso, se olvida consulta QueueStatus retrasada... | EN: AMI connection available, QueueStatus in progress, forgetting delayed QueueStatus query...");
                 $this->_pendiente_QueueStatus = NULL;
             }
         }
@@ -243,7 +243,7 @@ class AMIEventProcess extends TuberiaProcess
     private function _cb_faltaConfig()
     {
         if (is_null($this->_config)) {
-            $this->_log->output('WARN: no se dispone de credenciales para conexión a Asterisk, se piden a SQLWorkerProcess y espera...');
+            $this->_log->output('WARN: no se dispone de credenciales para conexión a Asterisk, se piden a SQLWorkerProcess y espera... | EN: no credentials available for Asterisk connection, requesting from SQLWorkerProcess and waiting...');
             $this->_tuberia->msg_SQLWorkerProcess_requerir_credencialesAsterisk();
             $this->_alarma_faltaconfig = $this->_agregarAlarma(3, array($this, '_cb_faltaConfig'), array());
         }
@@ -252,12 +252,12 @@ class AMIEventProcess extends TuberiaProcess
     private function _iniciarConexionAMI()
     {
         if (!is_null($this->_ami)) {
-            $this->_log->output('INFO: Desconectando de sesión previa de Asterisk...');
+            $this->_log->output('INFO: Desconectando de sesión previa de Asterisk... | EN: Disconnecting from previous Asterisk session...');
             $this->_ami->disconnect();
             $this->_ami = NULL;
         }
         if (!is_null($this->_tmp_actionid_queuestatus)) {
-            $this->_log->output('WARN: se desecha enumeración de colas/agentes en progreso por cierre de conexión AMI...');
+            $this->_log->output('WARN: se desecha enumeración de colas/agentes en progreso por cierre de conexión AMI... | EN: discarding in-progress queue/agent enumeration due to AMI connection closure...');
             $this->_tmp_actionid_queuestatus = NULL;
             $this->_tmp_estadoAgenteCola = NULL;
             $this->_tmp_actionid_agents = NULL;
@@ -266,12 +266,12 @@ class AMIEventProcess extends TuberiaProcess
         $astman = new AMIClientConn($this->_multiplex, $this->_log);
         //$this->_momentoUltimaConnAsterisk = time();
 
-        $this->_log->output('INFO: Iniciando sesión de control de Asterisk...');
+        $this->_log->output('INFO: Iniciando sesión de control de Asterisk... | EN: Starting Asterisk control session...');
         if (!$astman->connect(
                 $this->_config['asterisk']['asthost'],
                 $this->_config['asterisk']['astuser'],
                 $this->_config['asterisk']['astpass'])) {
-            $this->_log->output("FATAL: no se puede conectar a Asterisk Manager");
+            $this->_log->output("FATAL: no se puede conectar a Asterisk Manager | EN: cannot connect to Asterisk Manager");
             return FALSE;
         } else {
             // Averiguar la versión de Asterisk que se usa
@@ -303,14 +303,14 @@ class AMIEventProcess extends TuberiaProcess
                 $r = $astman->CoreStatus();
                 if (isset($r['Response']) && $r['Response'] == 'Success') {
                     $sFechaInicio = $r['CoreStartupDate'].' '.$r['CoreStartupTime'];
-                    $this->_log->output('INFO: esta instancia de Asterisk arrancó en: '.$sFechaInicio);
+                    $this->_log->output('INFO: esta instancia de Asterisk arrancó en: '.$sFechaInicio.' | EN: this Asterisk instance started at: '.$sFechaInicio);
                 } else {
-                    $this->_log->output('INFO: esta versión de Asterisk no soporta CoreStatus');
+                    $this->_log->output('INFO: esta versión de Asterisk no soporta CoreStatus | EN: this Asterisk version does not support CoreStatus');
                     break;
                 }
                 $regs = NULL;
                 if (preg_match('/^(\d+)/', $sFechaInicio, $regs) && (int)$regs[1] <= 1970) {
-                    $this->_log->output('INFO: fecha de inicio de Asterisk no está lista, se espera');
+                    $this->_log->output('INFO: fecha de inicio de Asterisk no está lista, se espera | EN: Asterisk start date not ready yet, waiting');
                 	usleep(1 * 1000000);
                 } else {
                 	$bFechaValida = TRUE;
@@ -320,7 +320,7 @@ class AMIEventProcess extends TuberiaProcess
             if (is_null($this->_asteriskStartTime)) {
                 $this->_asteriskStartTime = $sFechaInicio;
             } elseif ($this->_asteriskStartTime != $sFechaInicio) {
-                $this->_log->output('INFO: esta instancia de Asterisk ha sido reiniciada, se eliminará información obsoleta...');
+                $this->_log->output('INFO: esta instancia de Asterisk ha sido reiniciada, se eliminará información obsoleta... | EN: this Asterisk instance has been restarted, removing obsolete information...');
                 $this->_bReinicioAsterisk = TRUE;
             }
 
@@ -577,7 +577,7 @@ class AMIEventProcess extends TuberiaProcess
                 $a = $this->_listaAgentes->buscar('agentchannel', $listaECCP[4]);
                 if (is_null($a)) {
                     $this->_log->output("ERR: ".__METHOD__.": no se ha ".
-                        "cargado información de agente {$listaECCP[4]}");
+                        "cargado información de agente {$listaECCP[4]} | EN: agent information not loaded for {$listaECCP[4]}");
                     $this->_tuberia->msg_SQLWorkerProcess_requerir_nuevaListaAgentes();
                 } else {
                     $a->respuestaLoginAgente(
@@ -607,7 +607,7 @@ class AMIEventProcess extends TuberiaProcess
                 $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberAdded detectado");
                 return TRUE;
             default:
-                $this->_log->output("ERR: ".__METHOD__.": no se ha implementado soporte ECCP para: {$sKey}");
+                $this->_log->output("ERR: ".__METHOD__.": no se ha implementado soporte ECCP para: {$sKey} | EN: ECCP support not implemented for: {$sKey}");
                 return TRUE;
             }
         }
@@ -639,7 +639,7 @@ class AMIEventProcess extends TuberiaProcess
                 $this->_campaniasSalientes[$id]->tiempoContestarOmision(
                     $this->_config['dialer']['tiempo_contestar']);
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': nueva campaña saliente: '.print_r($tupla, 1));
+                    $this->_log->output('DEBUG: '.__METHOD__.': nueva campaña saliente: '.print_r($tupla, 1).' | EN: new outgoing campaign: ');
                 }
             }
             $c = $this->_campaniasSalientes[$id];
@@ -672,7 +672,7 @@ class AMIEventProcess extends TuberiaProcess
                     $this->_colasEntrantes[$queue]['campania'] = NULL;
                 if ($this->DEBUG && is_null($this->_colasEntrantes[$queue]['campania'])) {
                 	$this->_log->output('DEBUG: '.__METHOD__.': campaña entrante '.
-                        'quitada por salir de horario: '.sprintf('%d %s', $c->id, $c->name));
+                        'quitada por salir de horario: '.sprintf('%d %s', $c->id, $c->name).' | EN: incoming campaign removed for being outside schedule: '.sprintf('%d %s', $c->id, $c->name));
                 }
             }
         }
@@ -683,7 +683,7 @@ class AMIEventProcess extends TuberiaProcess
         	if (isset($this->_colasEntrantes[$tupla['queue']])) {
                 if ($this->DEBUG) {
                     $this->_log->output('DEBUG: '.__METHOD__.': cola entrante '.
-                        'quitada: '.$tupla['queue']);
+                        'quitada: '.$tupla['queue'].' | EN: incoming queue removed: ');
                 }
                 unset($this->_colasEntrantes[$tupla['queue']]);
             }
@@ -695,7 +695,7 @@ class AMIEventProcess extends TuberiaProcess
             if (!isset($this->_colasEntrantes[$tupla['queue']]))
                 if ($this->DEBUG) {
                     $this->_log->output('DEBUG: '.__METHOD__.': cola entrante '.
-                        'agregada: '.$tupla['queue']);
+                        'agregada: '.$tupla['queue'].' | EN: incoming queue added: ');
                 }
                 $this->_colasEntrantes[$tupla['queue']] = array(
                     'id_queue_call_entry'   =>  $id,
@@ -710,7 +710,7 @@ class AMIEventProcess extends TuberiaProcess
             if (!isset($this->_colasEntrantes[$tupla['queue']]))
                 if ($this->DEBUG) {
                     $this->_log->output('DEBUG: '.__METHOD__.': cola entrante '.
-                        'agregada: '.$tupla['queue']);
+                        'agregada: '.$tupla['queue'].' | EN: incoming queue added: ');
                 }
                 $this->_colasEntrantes[$tupla['queue']] = array(
                     'id_queue_call_entry'   =>  $tupla['id_queue_call_entry'],
@@ -731,7 +731,7 @@ class AMIEventProcess extends TuberiaProcess
                 $this->_colasEntrantes[$tupla['queue']]['campania'] = $c;
 
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': nueva campaña entrante: '.print_r($tupla, 1));
+                    $this->_log->output('DEBUG: '.__METHOD__.': nueva campaña entrante: '.print_r($tupla, 1).' | EN: new incoming campaign: ');
                 }
             }
         }
@@ -760,7 +760,7 @@ class AMIEventProcess extends TuberiaProcess
                 if (!isset($cl[$tupla['id_campaign']])) {
                     $this->_log->output('ERR: '.__METHOD__.": no se encuentra ".
                         "campaña [{$tupla['id_campaign']}] requerida por llamada: ".
-                        print_r($tupla, 1));
+                        print_r($tupla, 1).' | EN: campaign not found ');
                 } else {
                     $llamada = $this->_listaLlamadas->nuevaLlamada($tipo_llamada);
                     $llamada->id_llamada = $tupla['id'];
@@ -773,10 +773,10 @@ class AMIEventProcess extends TuberiaProcess
                     	$a = $this->_listaAgentes->buscar('agentchannel', $tupla['agent']);
                         if (is_null($a)) {
                         	$this->_log->output('ERR: '.__METHOD__.": no se ".
-                                "encuentra agente para llamada agendada: {$tupla['agent']}");
+                                "encuentra agente para llamada agendada: {$tupla['agent']} | EN: agent not found for scheduled call: {$tupla['agent']}");
                         } elseif (!$a->reservado) {
                             $this->_log->output('ERR: '.__METHOD__.": agente no ".
-                                "fue reservado para llamada agendada: {$tupla['agent']}");
+                                "fue reservado para llamada agendada: {$tupla['agent']} | EN: agent was not reserved for scheduled call: {$tupla['agent']}");
                         } else {
                         	$a->llamada_agendada = $llamada;
                             $llamada->agente_agendado = $a;
@@ -794,7 +794,7 @@ class AMIEventProcess extends TuberiaProcess
             $llamada = $this->_listaLlamadas->buscar('actionid', $sActionID);
             if (is_null($llamada)) {
                 $this->_log->output('ERR: '.__METHOD__." no se encuentra llamada con ".
-                    "actionid=$sActionID para abortar intento de marcado");
+                    "actionid=$sActionID para abortar intento de marcado | EN: call not found with actionid=$sActionID to abort dial attempt");
                 continue;
             }
 
@@ -802,7 +802,7 @@ class AMIEventProcess extends TuberiaProcess
             // Status is not expected to be non-NULL for abortable call
             if (!is_null($llamada->status)) {
                 $this->_log->output('ERR: '.__METHOD__." llamada con ".
-                    "actionid=$sActionID ya inició marcado, no es abortable");
+                    "actionid=$sActionID ya inició marcado, no es abortable | EN: call with actionid=$sActionID already started dialing, not abortable");
                 continue;
             }
 
@@ -830,7 +830,7 @@ class AMIEventProcess extends TuberiaProcess
         $llamada = $this->_listaLlamadas->buscar('actionid', $sActionID);
         if (is_null($llamada)) {
             $this->_log->output('ERR: '.__METHOD__." no se encuentra llamada con ".
-                "actionid=$sActionID para iniciar Originate");
+                "actionid=$sActionID para iniciar Originate | EN: call not found with actionid=$sActionID to initiate Originate");
             $this->_tuberia->enviarRespuesta($sFuente, FALSE);
             return;
         }
@@ -848,7 +848,7 @@ class AMIEventProcess extends TuberiaProcess
     	if ($tipo_llamada == 'incoming') {
     		$llamada = $this->_listaLlamadas->buscar('uniqueid', $uniqueid);
             if (is_null($llamada)) {
-            	$this->_log->output('ERR: '.__METHOD__." no se encuentra llamada con tipo=$tipo_llamada id=$id_call");
+            	$this->_log->output('ERR: '.__METHOD__." no se encuentra llamada con tipo=$tipo_llamada id=$id_call | EN: call not found with type=$tipo_llamada id=$id_call");
             } else {
             	$llamada->id_llamada = $id_call;
             }
@@ -867,14 +867,14 @@ class AMIEventProcess extends TuberiaProcess
         if (is_null($llamada)) {
             if ($this->_listaLlamadas->remover_llamada_sin_idcurrentcall($tipo_llamada, $id_call)) {
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__." la llamada se cerró antes de conocer su id_current_call.");
+                    $this->_log->output('DEBUG: '.__METHOD__." la llamada se cerró antes de conocer su id_current_call. | EN: call closed before knowing its id_current_call.");
                 }
                 $this->_tuberia->msg_SQLWorkerProcess_sqldeletecurrentcalls(array(
                     'tipo_llamada'  =>  $tipo_llamada,
                     'id'            =>  $id_current_call,
                 ));
             } else {
-        	    $this->_log->output('ERR: '.__METHOD__." no se encuentra llamada con tipo=$tipo_llamada id=$id_call");
+        	    $this->_log->output('ERR: '.__METHOD__." no se encuentra llamada con tipo=$tipo_llamada id=$id_call | EN: call not found with type=$tipo_llamada id=$id_call");
             }
         } else {
         	$llamada->id_current_call = (int)$id_current_call;
@@ -931,23 +931,23 @@ class AMIEventProcess extends TuberiaProcess
             break;
         /*
         case 'asterisk_duracion_sesion':
-            $this->_log->output('INFO: actualizando duración de sesión a '.$v);
+            $this->_log->output('INFO: actualizando duración de sesión a '.$v.' | EN: updating session duration to '.$v);
             $this->_config['asterisk']['duracion_sesion'] = $v;
             break;
         */
         case 'dialer_llamada_corta':
-            $this->_log->output('INFO: actualizando intervalo de llamada corta a '.$v);
+            $this->_log->output('INFO: actualizando intervalo de llamada corta a '.$v.' | EN: updating short call interval to '.$v);
             $this->_config['dialer']['llamada_corta'] = $v;
             break;
         case 'dialer_tiempo_contestar':
-            $this->_log->output('INFO: actualizando intervalo inicial de contestar a '.$v);
+            $this->_log->output('INFO: actualizando intervalo inicial de contestar a '.$v.' | EN: updating initial answer interval to '.$v);
             $this->_config['dialer']['tiempo_contestar'] = $v;
             foreach ($this->_campaniasSalientes as $c) {
             	$c->tiempoContestarOmision($v);
             }
             break;
         case 'dialer_debug':
-            $this->_log->output('INFO: actualizando DEBUG...');
+            $this->_log->output('INFO: actualizando DEBUG... | EN: updating DEBUG...');
             $this->_config['dialer']['debug'] = $v;
             $this->DEBUG = $this->_config['dialer']['debug'];
             $this->_queueshadow->DEBUG = $this->DEBUG;
@@ -960,7 +960,7 @@ class AMIEventProcess extends TuberiaProcess
             }
             break;
         default:
-            $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k);
+            $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k.' | EN: ignoring unimplemented config key: '.$k);
             break;
     	}
     }
@@ -993,7 +993,7 @@ class AMIEventProcess extends TuberiaProcess
             foreach ($listaLlamadasViejas as $llamada) {
             	$iEspera = $iTimestamp - $llamada->timestamp_originatestart;
                 $this->_log->output('ERR: '.__METHOD__.": llamada {$llamada->actionid} ".
-                    "espera respuesta desde hace $iEspera segundos, se elimina.");
+                    "espera respuesta desde hace $iEspera segundos, se elimina. | EN: call {$llamada->actionid} has been waiting for response for $iEspera seconds, removing.");
                 $llamada->llamadaFueOriginada($iTimestamp, NULL, NULL, 'Failure');
             }
 
@@ -1002,7 +1002,7 @@ class AMIEventProcess extends TuberiaProcess
             foreach ($listaLlamadasSinFailureCause as $llamada) {
                 $iEspera = $iTimestamp - $llamada->timestamp_originateend;
                 $this->_log->output('ERR: '.__METHOD__.": llamada {$llamada->actionid} ".
-                    "espera causa de fallo desde hace $iEspera segundos, se elimina.");
+                    "espera causa de fallo desde hace $iEspera segundos, se elimina. | EN: call {$llamada->actionid} has been waiting for failure cause for $iEspera seconds, removing.");
                 $this->_listaLlamadas->remover($llamada);
             }
 
@@ -1016,7 +1016,7 @@ class AMIEventProcess extends TuberiaProcess
             if ($a->estado_consola == 'logged-in' && is_null($a->llamada) &&
                 $a->num_pausas <= 0 && $a->timeout_inactivo) {
 
-                $this->_log->output('INFO: deslogoneando a '.$a->channel.' debido a inactividad...');
+                $this->_log->output('INFO: deslogoneando a '.$a->channel.' debido a inactividad... | EN: logging out '.$a->channel.' due to inactivity...');
                 $a->resetTimeout();
                 $a->forzarLogoffAgente($this->_ami, $this->_log);
             }
@@ -1056,7 +1056,7 @@ class AMIEventProcess extends TuberiaProcess
         foreach ($this->_listaLlamadas as $llamada)
             $listaLlamadasRemover[] = $llamada;
 
-        $this->_log->output("WARN: abortando todas las llamadas activas...");
+        $this->_log->output("WARN: abortando todas las llamadas activas... | EN: aborting all active calls...");
         foreach ($listaLlamadasRemover as $llamada) {
         	if (is_null($llamada->status)) {
                 // Llamada no ha sido iniciada todavía
@@ -1084,7 +1084,7 @@ class AMIEventProcess extends TuberiaProcess
                         $this->_config['dialer']['llamada_corta']);
                 break;
             default:
-                $this->_log->output("WARN: estado extraño {$llamada->status} al abortar llamada");
+                $this->_log->output("WARN: estado extraño {$llamada->status} al abortar llamada | EN: strange status {$llamada->status} when aborting call");
                 $llamada->llamadaFinalizaSeguimiento(time(),
                         $this->_config['dialer']['llamada_corta']);
                 break;
@@ -1096,11 +1096,11 @@ class AMIEventProcess extends TuberiaProcess
     {
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (is_null($a)) {
-            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente para grabación silenciada ".$sAgente);
+            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente para grabación silenciada ".$sAgente." | EN: agent not found for silent recording ".$sAgente);
             return;
         }
         if (is_null($a->llamada)) {
-            $this->_log->output("ERR: ".__METHOD__." agente  ".$sAgente." no tiene llamada");
+            $this->_log->output("ERR: ".__METHOD__." agente  ".$sAgente." no tiene llamada | EN: agent ".$sAgente." has no call");
             return;
         }
 
@@ -1114,11 +1114,11 @@ class AMIEventProcess extends TuberiaProcess
     {
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (is_null($a)) {
-            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente para grabación silenciada ".$sAgente);
+            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente para grabación silenciada ".$sAgente." | EN: agent not found for silent recording ".$sAgente);
             return;
         }
         if (is_null($a->llamada)) {
-            $this->_log->output("ERR: ".__METHOD__." agente  ".$sAgente." no tiene llamada");
+            $this->_log->output("ERR: ".__METHOD__." agente  ".$sAgente." no tiene llamada | EN: agent ".$sAgente." has no call");
             return;
         }
 
@@ -1133,15 +1133,15 @@ class AMIEventProcess extends TuberiaProcess
     {
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (is_null($a)) {
-            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente ".$sAgente);
+            $this->_log->output("ERR: ".__METHOD__." no se encuentra agente ".$sAgente." | EN: agent not found ".$sAgente);
             return;
         }
         if (is_null($a->llamada)) {
-            $this->_log->output("WARN: ".__METHOD__." agente ".$sAgente." no tiene llamada activa");
+            $this->_log->output("WARN: ".__METHOD__." agente ".$sAgente." no tiene llamada activa | EN: agent ".$sAgente." has no active call");
             return;
         }
 
-        $this->_log->output("INFO: ".__METHOD__." finalizando seguimiento de llamada transferida para agente ".$sAgente);
+        $this->_log->output("INFO: ".__METHOD__." finalizando seguimiento de llamada transferida para agente ".$sAgente." | EN: ending tracking of transferred call for agent ".$sAgente);
 
         // Finalize call tracking - this releases the agent
         $a->llamada->llamadaFinalizaSeguimiento(
@@ -1230,13 +1230,13 @@ class AMIEventProcess extends TuberiaProcess
                 if ($this->DEBUG) {
                 	$iEspera = time() - $llamada->timestamp_originatestart;
                     $this->_log->output("DEBUG: ".__METHOD__.": llamada {$llamada->actionid} ".
-                        "espera respuesta desde hace $iEspera segundos.");
+                        "espera respuesta desde hace $iEspera segundos. | EN: call {$llamada->actionid} has been waiting for response for $iEspera seconds.");
                 }
             }
         }
         if ($this->DEBUG && $iNumEspera > 0) {
         	$this->_log->output("DEBUG: ".__METHOD__.": en campaña en cola $queue todavía ".
-                "quedan $iNumEspera llamadas pendientes de OriginateResponse.");
+                "quedan $iNumEspera llamadas pendientes de OriginateResponse. | EN: in campaign for queue $queue there are still $iNumEspera calls pending OriginateResponse.");
         }
         $this->_tuberia->enviarRespuesta($sFuente, $iNumEspera);
     }
@@ -1475,11 +1475,11 @@ class AMIEventProcess extends TuberiaProcess
         if (!is_null($this->_tmp_actionid_queuestatus)) {
             $this->_log->output('WARN: '.__METHOD__.': se ignora nueva lista '.
                 'de agentes porque ya hay una verificación de pertenencia a '.
-                'colas en progreso: '.$this->_tmp_actionid_queuestatus);
+                'colas en progreso: '.$this->_tmp_actionid_queuestatus.' | EN: ignoring new agent list because queue membership verification is already in progress: ');
             return;
         }
         if (is_null($this->_ami)) {
-            $this->_log->output('WARN: '.__METHOD__.': no se dispone de conexión Asterisk, se ignora petición...');
+            $this->_log->output('WARN: '.__METHOD__.': no se dispone de conexión Asterisk, se ignora petición... | EN: no Asterisk connection available, ignoring request...');
             return;
         }
 
@@ -1495,7 +1495,7 @@ class AMIEventProcess extends TuberiaProcess
     {
         if (!isset($r['data'])) {
             $this->_log->output('ERR: '.__METHOD__.': fallo al ejecutar database show QPENALTY : '.
-                print_r($r, TRUE));
+                print_r($r, TRUE).' | EN: failed to execute database show QPENALTY : ');
             return;
         }
 
@@ -1538,14 +1538,14 @@ class AMIEventProcess extends TuberiaProcess
                 // Agente ha cambiado de ID de base de datos, y está deslogoneado
                 // Agent has changed database ID and is logged out
                 if ($a->estado_consola == 'logged-out') {
-                    $this->_log->output("INFO: agente deslogoneado $sAgente cambió de ID de base de datos");
+                    $this->_log->output("INFO: agente deslogoneado $sAgente cambió de ID de base de datos | EN: logged-out agent $sAgente changed database ID");
                     $a->id_agent = $tupla['id'];
                     $a->number = $tupla['number'];
                     $a->name = $tupla['name'];
                     $a->estatus = ($tupla['estatus'] == 'A');
                 } else {
                     $this->_log->output("INFO: agente $sAgente cambió de ID de base de datos pero está ".
-                        $a->estado_consola);
+                        $a->estado_consola.' | EN: agent '.$sAgente.' changed database ID but is '.$a->estado_consola);
                 }
             }
 
@@ -1558,10 +1558,10 @@ class AMIEventProcess extends TuberiaProcess
         }
 
         if (!is_null($this->_ami)) {
-            if ($this->DEBUG) $this->_log->output("DEBUG: iniciando verificación de pertenencia a colas con QueueStatus...");
+            if ($this->DEBUG) $this->_log->output("DEBUG: iniciando verificación de pertenencia a colas con QueueStatus... | EN: starting queue membership verification with QueueStatus...");
             $this->_iniciarQueueStatus($queueflags);
         } else {
-            $this->_log->output("INFO: conexión AMI no disponible, se retrasa consulta QueueStatus...");
+            $this->_log->output("INFO: conexión AMI no disponible, se retrasa consulta QueueStatus... | EN: AMI connection not available, delaying QueueStatus query...");
             $this->_pendiente_QueueStatus = $queueflags;
         }
 
@@ -1712,7 +1712,7 @@ class AMIEventProcess extends TuberiaProcess
 
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output('INFO: recibido mensaje de finalización, se desloguean agentes...');
+        $this->_log->output('INFO: recibido mensaje de finalización, se desloguean agentes... | EN: received shutdown message, logging out agents...');
         $this->_finalizandoPrograma = TRUE;
         foreach ($this->_listaAgentes as $a) {
         	if ($a->estado_consola != 'logged-out') {
@@ -1728,7 +1728,7 @@ class AMIEventProcess extends TuberiaProcess
                 }
             }
         }
-        $this->_log->output('INFO: esperando a que finalicen todas las llamadas monitoreadas...');
+        $this->_log->output('INFO: esperando a que finalicen todas las llamadas monitoreadas... | EN: waiting for all monitored calls to finish...');
         $this->_verificarFinalizacionLlamadas();
     }
 
@@ -2057,11 +2057,11 @@ Uniqueid: 1429642067.241008
                 // $a->extension should have been set in $a->iniciarLoginAgente()
                 $this->_log->output('WARN: '.__METHOD__.': se ignora ingreso a '.
                     'cola '.$params['Queue'].' de '.$sAgente.
-                    ' - no iniciado por requerimiento loginagente.');
+                    ' - no iniciado por requerimiento loginagente. | EN: ignoring queue join to '.$params['Queue'].' by '.$sAgente.' - not initiated by loginagente request.');
             }
         } else {
         	if ($this->DEBUG) {
-        		$this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) duplicado (múltiples colas), ignorando");
+        		$this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) duplicado (múltiples colas), ignorando | EN: duplicate AgentLogin($sAgente) (multiple queues), ignoring");
                 $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogin");
         	}
         }
@@ -2111,7 +2111,7 @@ Uniqueid: 1429642067.241008
                 }
             } elseif ($a->hayColasDinamicasLogoneadas()) {
                 if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberRemoved({$params['Location']}) todavía quedan colas pendientes, ignorando...");
+                    $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberRemoved({$params['Location']}) todavía quedan colas pendientes, ignorando... | EN: there are still queues pending, ignoring...");
                 }
             } else {
                 $this->_ejecutarLogoffAgente($params['Location'], $a,
@@ -2612,7 +2612,7 @@ Uniqueid: 1429642067.241008
         } else {
             if ($llamada->status == 'OnHold') {
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': se ignora Hangup para llamada que se envía a HOLD.');
+                    $this->_log->output('DEBUG: '.__METHOD__.': se ignora Hangup para llamada que se envía a HOLD. | EN: ignoring Hangup for call that is being sent to HOLD.');
                 }
             } else {
                 // Llamada ha sido enlazada al menos una vez
@@ -2882,7 +2882,7 @@ Uniqueid: 1429642067.241008
             }
         }
 
-        if ($this->DEBUG) $this->_log->output("DEBUG: fin de verificación de pertenencia a colas con QueueStatus.");
+        if ($this->DEBUG) $this->_log->output("DEBUG: fin de verificación de pertenencia a colas con QueueStatus. | EN: end of queue membership verification with QueueStatus.");
         $this->_tmp_estadoAgenteCola = NULL;
 
         $this->_iniciarAgents();
@@ -2913,10 +2913,10 @@ Uniqueid: 1429642067.241008
             // Review and synchronize pause status in queues
             foreach ($estadoCola_Paused as $cola => $p) {
                 if ($bAgentePausado && !$p) {
-                    $this->_log->output('INFO: agente '.$sAgente.' debe estar pausado pero no está en pausa en cola '.$cola);
+                    $this->_log->output('INFO: agente '.$sAgente.' debe estar pausado pero no está en pausa en cola '.$cola.' | EN: agent '.$sAgente.' should be paused but is not paused in queue '.$cola);
                     $a->asyncQueuePause($this->_ami, TRUE, $cola);
                 } elseif (!$bAgentePausado && $p) {
-                    $this->_log->output('INFO: agente '.$sAgente.' debe estar despausado pero está en pausa en cola '.$cola);
+                    $this->_log->output('INFO: agente '.$sAgente.' debe estar despausado pero está en pausa en cola '.$cola.' | EN: agent '.$sAgente.' should be unpaused but is paused in queue '.$cola);
                     $a->asyncQueuePause($this->_ami, FALSE, $cola);
                 }
             }
@@ -3085,7 +3085,7 @@ Uniqueid: 1429642067.241008
         }
 
         if (!$this->_queueshadow->msg_Leave($params)) {
-            $this->_log->output('ERR: número de llamadas en espera fuera de sincronía, se intenta refrescar...');
+            $this->_log->output('ERR: número de llamadas en espera fuera de sincronía, se intenta refrescar... | EN: number of calls on hold out of sync, trying to refresh...');
             $this->_tuberia->msg_SQLWorkerProcess_requerir_nuevaListaAgentes();
         }
     }
@@ -3099,7 +3099,7 @@ Uniqueid: 1429642067.241008
             );
         }
 
-        $this->_log->output('INFO: se ha recargado configuración de Asterisk, se refresca agentes...');
+        $this->_log->output('INFO: se ha recargado configuración de Asterisk, se refresca agentes... | EN: Asterisk configuration has been reloaded, refreshing agents...');
         $this->_tuberia->msg_SQLWorkerProcess_requerir_nuevaListaAgentes();
     }
 
@@ -3400,11 +3400,11 @@ Uniqueid: 1429642067.241008
     {
         if (!is_null($a->llamada)) {
             $this->_log->output('WARN: agente '.$a->channel.' todavía tiene una '.
-                'llamada al procesar '.$evtname.', se cierra...');
+                'llamada al procesar '.$evtname.', se cierra... | EN: agent '.$a->channel.' still has a call when processing '.$evtname.', closing...');
             $r = $this->_ami->Hangup($a->llamada->agentchannel);
             if ($r['Response'] != 'Success') {
                 $this->_log->output('ERR: No se puede colgar la llamada para '.$a->channel.
-                    ' ('.$a->llamada->agentchannel.') - '.$r['Message']);
+                    ' ('.$a->llamada->agentchannel.') - '.$r['Message'].' | EN: Cannot hang up call for '.$a->channel.' ('.$a->llamada->agentchannel.') - ');
             }
         }
 
@@ -3413,33 +3413,33 @@ Uniqueid: 1429642067.241008
 
     private function _dumpstatus()
     {
-        $this->_log->output('INFO: '.__METHOD__.' volcando status de seguimiento...');
+        $this->_log->output('INFO: '.__METHOD__.' volcando status de seguimiento... | EN: dumping tracking status...');
         $this->_log->output("\n");
 
-        $this->_log->output("Versión detectada de Asterisk............".implode('.', $this->_asteriskVersion));
+        $this->_log->output("Versión detectada de Asterisk............".implode('.', $this->_asteriskVersion).' | EN: Detected Asterisk version............'.implode('.', $this->_asteriskVersion));
         $this->_log->output("Timestamp de arranque de Asterisk........".$this->_asteriskStartTime);
-        $this->_log->output("Última verificación de llamadas viejas...".date('Y-m-d H:i:s', $this->_iTimestampVerificacionLlamadasViejas));
+        $this->_log->output("Última verificación de llamadas viejas...".date('Y-m-d H:i:s', $this->_iTimestampVerificacionLlamadasViejas).' | EN: Last verification of old calls...'.date('Y-m-d H:i:s', $this->_iTimestampVerificacionLlamadasViejas));
 
-        $this->_log->output("\n\nLista de campañas salientes:\n");
+        $this->_log->output("\n\nLista de campañas salientes:\n | EN: List of outgoing campaigns:\n");
         foreach ($this->_campaniasSalientes as $c)
             $c->dump($this->_log);
 
-        $this->_log->output("\n\nLista de colas entrantes:\n");
+        $this->_log->output("\n\nLista de colas entrantes:\n | EN: List of incoming queues:\n");
         foreach ($this->_colasEntrantes as $c) {
             $this->_log->output("queue:               ".$c['queue']);
             $this->_log->output("id_queue_call_entry: ".$c['id_queue_call_entry']);
             if (is_null($c['campania']))
-                $this->_log->output("(sin campaña)\n");
+                $this->_log->output("(sin campaña)\n | EN: (no campaign)\n");
             else $c['campania']->dump($this->_log);
         }
 
-        $this->_log->output("\n\nLista de agentes:\n");
+        $this->_log->output("\n\nLista de agentes:\n | EN: List of agents:\n");
         $this->_listaAgentes->dump($this->_log);
 
-        $this->_log->output("\n\nLista de llamadas:\n");
+        $this->_log->output("\n\nLista de llamadas:\n | EN: List of calls:\n");
         $this->_listaLlamadas->dump($this->_log);
 
-        $this->_log->output("\n\nLlamadas en espera en colas:");
+        $this->_log->output("\n\nLlamadas en espera en colas: | EN: Calls waiting in queues:");
         $llamadasEspera = $this->_queueshadow->llamadasEnEspera();
         foreach ($llamadasEspera as $q => $n) {
             $this->_log->output("\t$q.....$n");

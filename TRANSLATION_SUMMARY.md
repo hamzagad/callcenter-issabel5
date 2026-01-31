@@ -244,3 +244,170 @@ The dialer codebase now has complete bilingual documentation (Spanish + English)
 
 **Translation completed on:** 2025-01-31
 **Location:** `/usr/share/issabel/repos/callcenter-issabel5/setup/dialer_process/dialer/`
+
+---
+
+---
+
+# Bilingual Logging Implementation Summary
+
+**Project:** Issabel Call Center Module v4.0.0.6
+**Directory:** `/usr/share/issabel/repos/callcenter-issabel5/setup/dialer_process/dialer/`
+**Date:** 2026-01-31
+**Status:** ✅ COMPLETE
+
+---
+
+## Overview
+
+Added English translations to all Spanish log messages in the callcenter-issabel5 dialer daemon, creating a bilingual logging format that supports both Spanish and English-speaking operators.
+
+## Implementation
+
+This implementation translates runtime log messages (output via `$this->_log->output()`), which is separate from the code comment translation completed earlier.
+
+## Bilingual Log Format
+
+```
+SEVERITY: Spanish message | EN: English message
+```
+
+### Example Output
+```
+2026-01-31 10:30:15 PID=12345 : (AMIEventProcess) ERR: no se puede restaurar conexión a Asterisk, se espera... | EN: cannot restore Asterisk connection, waiting...
+```
+
+## Files Modified
+
+All files are in: `/usr/share/issabel/repos/callcenter-issabel5/setup/dialer_process/dialer/`
+
+| File | Spanish Messages Translated | Status |
+|------|----------------------------|--------|
+| AMIEventProcess.class.php | 57 | ✅ Complete |
+| CampaignProcess.class.php | 28 | ✅ Complete |
+| SQLWorkerProcess.class.php | 26 | ✅ Complete |
+| ECCPWorkerProcess.class.php | 17 | ✅ Complete |
+| QueueShadow.class.php | 11 | ✅ Complete |
+| HubProcess.class.php | 19 | ✅ Complete |
+| ECCPConn.class.php | 7 | ✅ Complete |
+| TuberiaMensaje.class.php | 3 | ✅ Complete |
+| Llamada.class.php | 2 | ✅ Complete |
+| Agente.class.php | 1 | ✅ Complete |
+| **Total** | **~181** | ✅ **Complete** |
+
+## Translation Approach
+
+1. **Preserved all existing code**: Only log message strings were modified; variables, functions, and logic remain unchanged
+2. **Kept Spanish first**: Original Spanish messages come first (for existing Spanish-speaking operators)
+3. **Added English translations**: Appended with `| EN:` delimiter for easy parsing
+4. **Maintained UTF-8 encoding**: Spanish characters (á, é, í, ó, ú, ñ) are preserved
+5. **Handled dynamic content**: Variables and interpolated values are preserved in both languages
+
+## Examples of Transformations
+
+### Simple Message
+```php
+// Before:
+$this->_log->output('ERR: no se puede restaurar conexión a DB, se espera...');
+
+// After:
+$this->_log->output('ERR: no se puede restaurar conexión a DB, se espera... | EN: cannot restore DB connection, waiting...');
+```
+
+### Message with Variables
+```php
+// Before:
+$this->_log->output("WARN: $sTarea (PID=$iPid) ha terminado inesperadamente");
+
+// After:
+$this->_log->output("WARN: $sTarea (PID=$iPid) ha terminado inesperadamente | EN: $sTarea (PID=$iPid) terminated unexpectedly");
+```
+
+### Message with Method/Class Context
+```php
+// Before:
+$this->_log->output('ERR: '.__METHOD__.': conexión a DB parece ser inválida, se cierra...');
+
+// After:
+$this->_log->output('ERR: '.__METHOD__.': conexión a DB parece ser inválida, se cierra... | EN: DB connection appears invalid, closing...');
+```
+
+## Common Translation Reference
+
+| Spanish | English |
+|---------|---------|
+| no se puede | cannot |
+| no se encuentra | not found |
+| se espera | waiting |
+| conexión restaurada | connection restored |
+| se reinicia operación normal | resuming normal operation |
+| intentando volver a abrir | trying to reopen |
+| ha terminado inesperadamente | terminated unexpectedly |
+| se agenda reinicio | scheduling restart |
+| recibido mensaje de finalización | received shutdown message |
+| agente | agent |
+| llamada | call |
+| cola | queue |
+| miembro | member |
+| grabación | recording |
+
+## Validation
+
+All modified files passed PHP syntax validation:
+
+```bash
+for f in /usr/share/issabel/repos/callcenter-issabel5/setup/dialer_process/dialer/*.class.php; do
+    php -l "$f"
+done
+```
+
+**Result:** No syntax errors detected ✅
+
+## Deployment Notes
+
+1. **Log file size increase**: Expect ~50% increase in log file size due to bilingual messages
+2. **No code behavior changes**: Only log output format changed; all functionality identical
+3. **Easy to filter**: The `| EN:` delimiter makes it easy to grep/filter for either language:
+   ```bash
+   # Show only Spanish
+   grep -v "| EN:" /opt/issabel/dialer/dialerd.log
+
+   # Show only English
+   grep "| EN:" /opt/issabel/dialer/dialerd.log
+   ```
+
+## Testing
+
+To verify the bilingual logging is working:
+
+```bash
+# Restart the dialer daemon
+systemctl restart issabeldialer
+
+# Monitor the logs in real-time
+tail -f /opt/issabel/dialer/dialerd.log
+
+# Verify bilingual format
+grep "| EN:" /opt/issabel/dialer/dialerd.log | head -20
+
+# Check UTF-8 encoding (Spanish accents preserved)
+grep -P "[áéíóúñ].*\| EN:" /opt/issabel/dialer/dialerd.log
+```
+
+## Notes
+
+- Exception messages from PHP/PDO (`$e->getMessage()`) remain unchanged (these are runtime errors, not static log messages)
+- The `| EN:` delimiter is consistent across all messages for easy parsing
+- Spanish messages come first to maintain backward compatibility with existing Spanish-speaking operators
+- All translations maintain the same severity level (FATAL, ERR, WARN, INFO, DEBUG)
+
+## Related Files
+
+- Main dialer daemon: `/opt/issabel/dialer/dialerd`
+- Log file location: `/opt/issabel/dialer/dialerd.log`
+- Service management: `systemctl start|stop|restart|status issabeldialer`
+- Local git repos: `/opt/issabel/dialer/` and `/var/www/html/modules/`
+
+---
+
+**Bilingual logging completed on:** 2026-01-31

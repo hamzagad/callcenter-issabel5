@@ -376,7 +376,7 @@ class Llamada
                         }
                     }
                     if (count($this->_actualizacionesPendientes) > 0) {
-                        $this->_log->output('ERR: '.__METHOD__.': actualización pendiente no implementada');
+                        $this->_log->output('ERR: '.__METHOD__.': actualización pendiente no implementada | EN: pending update not implemented');
                     }
                 }
             }
@@ -780,7 +780,7 @@ class Llamada
             if ($this->uniqueid != $uniqueid) {
                 $this->_log->output("ERR: se procesó pata equivocada en evento Newchannel ".
                     "anterior, pata procesada es {$this->uniqueid}, ".
-                    "pata real es {$uniqueid}");
+                    "pata real es {$uniqueid} | EN: wrong leg processed in previous Newchannel event, processed leg is {$this->uniqueid}, real leg is {$uniqueid}");
 
                 $this->unregisterAuxChannels();
                 $this->AuxChannels = array();
@@ -794,7 +794,7 @@ class Llamada
             }
             */
             if ($this->_stillborn) {
-                $this->_log->output("WARN: ".__METHOD__." llamada recibió Hangup pero OriginateResponse indica status=$sStatus");
+                $this->_log->output("WARN: ".__METHOD__." llamada recibió Hangup pero OriginateResponse indica status=$sStatus | EN: call received Hangup but OriginateResponse indicates status=$sStatus");
                 if (!is_null($this->timestamp_originatestart)) $this->_listaLlamadas->remover($this);
             }
         }
@@ -1053,7 +1053,7 @@ class Llamada
 
         if (is_null($this->id_llamada)) {
         	$this->_log->output('ERR: '.__METHOD__.': todavía no ha llegado '.
-                'ID de llamada, no se garantiza integridad de datos para esta llamada.');
+                'ID de llamada, no se garantiza integridad de datos para esta llamada. | EN: call ID has not arrived yet, data integrity not guaranteed for this call.');
         }
 
     	$this->timestamp_hangup = $timestamp;

@@ -92,7 +92,7 @@ class SQLWorkerProcess extends TuberiaProcess
         try {
             $this->_configDB = new ConfigDB($this->_db, $this->_log);
         } catch (PDOException $e) {
-            $this->_log->output("FATAL: no se puede leer configuración DB - ".$e->getMessage());
+            $this->_log->output("FATAL: no se puede leer configuración DB - ".$e->getMessage()." | EN: cannot read DB configuration - ".$e->getMessage());
             return FALSE;
         }
 
@@ -152,11 +152,9 @@ class SQLWorkerProcess extends TuberiaProcess
         $dbPass = 'asterisk';
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbhost'])) {
             $dbHost = $infoConfig['database']['dbhost'];
-            $this->_log->output('Usando host de base de datos: '.$dbHost);
-            // Using database host:
+            $this->_log->output('Usando host de base de datos: '.$dbHost.' | EN: Using database host: '.$dbHost);
         } else {
-            $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost);
-            // Using (default) database host:
+            $this->_log->output('Usando host (por omisión) de base de datos: '.$dbHost.' | EN: Using (default) database host: '.$dbHost);
         }
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbuser']))
             $dbUser = $infoConfig['database']['dbuser'];
@@ -175,7 +173,7 @@ class SQLWorkerProcess extends TuberiaProcess
             return TRUE;
         } catch (PDOException $e) {
             $this->_db = NULL;
-            $this->_log->output("FATAL: no se puede conectar a DB - ".$e->getMessage());
+            $this->_log->output("FATAL: no se puede conectar a DB - ".$e->getMessage()." | EN: cannot connect to DB - ".$e->getMessage());
             return FALSE;
         }
     }
@@ -191,18 +189,15 @@ class SQLWorkerProcess extends TuberiaProcess
         // Verify possible database disconnection
         if (is_null($this->_db)) {
             if (count($this->_accionesPendientes) > 0) {
-                $this->_log->output('INFO: falta conexión DB y hay '.count($this->_accionesPendientes).' acciones pendientes.');
-                // INFO: DB connection missing and there are X pending actions.
+                $this->_log->output('INFO: falta conexión DB y hay '.count($this->_accionesPendientes).' acciones pendientes. | EN: DB connection missing and there are '.count($this->_accionesPendientes).' pending actions.');
                 if ($this->DEBUG) {
                     foreach ($this->_accionesPendientes as $accion)
                         $this->_volcarAccion($accion);
                 }
             }
-            $this->_log->output('INFO: intentando volver a abrir conexión a DB...');
-            // INFO: trying to reopen DB connection...
+            $this->_log->output('INFO: intentando volver a abrir conexión a DB... | EN: trying to reopen DB connection...');
             if (!$this->_iniciarConexionDB()) {
-                $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera...');
-                // ERR: cannot restore DB connection, waiting...
+                $this->_log->output('ERR: no se puede restaurar conexión a DB, se espera... | EN: cannot restore DB connection, waiting...');
 
                 $t1 = time();
                 do {
@@ -210,8 +205,7 @@ class SQLWorkerProcess extends TuberiaProcess
                     $this->_multiplex->procesarActividad(1);
                 } while (time() - $t1 < 5);
             } else {
-                $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal.');
-                // INFO: DB connection restored, normal operation restarts.
+                $this->_log->output('INFO: conexión a DB restaurada, se reinicia operación normal. | EN: DB connection restored, resuming normal operation.');
                 $this->_configDB->setDBConn($this->_db);
             }
         } else {
@@ -260,12 +254,12 @@ class SQLWorkerProcess extends TuberiaProcess
                 $this->_db->commit();
                 $t_2 = microtime(TRUE);
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__.' acción ejecutada correctamente.');
+                    $this->_log->output('DEBUG: '.__METHOD__.' acción ejecutada correctamente. | EN: action executed correctly.');
                 }
                 if ($this->DEBUG || ($t_2 - $t_1 >= 1.0)) {
                     $this->_log->output('DEBUG: '.__METHOD__.' acción '.
                         $this->_accionesPendientes[0][0][1].' tomó '.
-                        sprintf('%.2f s.', $t_2 - $t_1));
+                        sprintf('%.2f s.', $t_2 - $t_1).' | EN: action '.$this->_accionesPendientes[0][0][1].' took '.sprintf('%.2f s.', $t_2 - $t_1));
                 }
 
                 array_shift($this->_accionesPendientes);
@@ -275,16 +269,15 @@ class SQLWorkerProcess extends TuberiaProcess
             if ($this->DEBUG || !esReiniciable($e)) {
                 $this->_log->output('ERR: '.__METHOD__.
                     ': no se puede realizar operación de base de datos: '.
+                    implode(' - ', $e->errorInfo).' | EN: cannot perform database operation: '.
                     implode(' - ', $e->errorInfo));
-                $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
-                // ERR: stack trace:
+                $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString()." | EN: stack trace: \n".$e->getTraceAsString());
             }
             if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
                 // Códigos correspondientes a pérdida de conexión de base de datos
                 // Codes corresponding to database connection loss
                 $this->_log->output('WARN: '.__METHOD__.
-                    ': conexión a DB parece ser inválida, se cierra...');
-                    // : DB connection seems invalid, closing...
+                    ': conexión a DB parece ser inválida, se cierra... | EN: DB connection appears invalid, closing...');
                 $this->_db = NULL;
             } else {
                 $this->_db->rollBack();
@@ -294,7 +287,7 @@ class SQLWorkerProcess extends TuberiaProcess
 
     private function _volcarAccion(&$accion)
     {
-        $this->_log->output('DEBUG: acción pendiente '.$accion[0][1].': '.print_r($accion[1], TRUE));
+        $this->_log->output('DEBUG: acción pendiente '.$accion[0][1].': '.print_r($accion[1], TRUE).' | EN: pending action '.$accion[0][1].': ');
     }
 
     private function _lanzarEventos(&$eventos)
@@ -316,8 +309,7 @@ class SQLWorkerProcess extends TuberiaProcess
         // Se intentan evacuar acciones pendientes
         // Attempt to evacuate pending actions
         if (count($this->_accionesPendientes) > 0)
-            $this->_log->output('WARN: todavía hay '.count($this->_accionesPendientes).' acciones pendientes.');
-            // WARN: there are still X pending actions.
+            $this->_log->output('WARN: todavía hay '.count($this->_accionesPendientes).' acciones pendientes. | EN: there are still '.count($this->_accionesPendientes).' pending actions.');
         $t1 = time();
         while (time() - $t1 < 10 && !is_null($this->_db) &&
             count($this->_accionesPendientes) > 0) {
@@ -328,15 +320,14 @@ class SQLWorkerProcess extends TuberiaProcess
         }
         if (count($this->_accionesPendientes) > 0)
             $this->_log->output('ERR: no se pueden evacuar las siguientes acciones: '.
+                print_r($this->_accionesPendientes, TRUE).' | EN: cannot evacuate the following actions: '.
                 print_r($this->_accionesPendientes, TRUE));
-                // ERR: cannot evacuate the following actions:
 
         // Desconectarse de la base de datos
         // Disconnect from database
         $this->_configDB = NULL;
         if (!is_null($this->_db)) {
-            $this->_log->output('INFO: desconectando de la base de datos...');
-            // INFO: disconnecting from database...
+            $this->_log->output('INFO: desconectando de la base de datos... | EN: disconnecting from database...');
             $this->_db = NULL;
         }
     }
@@ -411,17 +402,14 @@ class SQLWorkerProcess extends TuberiaProcess
 
     public function msg_requerir_nuevaListaAgentes($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output("INFO: $sFuente requiere refresco de lista de agentes");
-        // INFO: X requires refresh of agent list
+        $this->_log->output("INFO: $sFuente requiere refresco de lista de agentes | EN: $sFuente requires refresh of agent list");
         $this->_encolarAccionPendiente('_requerir_nuevaListaAgentes', $datos);
     }
 
     public function msg_requerir_credencialesAsterisk($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output("INFO: $sFuente requiere envío de credenciales Asterisk");
-        // INFO: X requires sending of Asterisk credentials
-        $this->_informarCredencialesAsterisk(TRUE); // <-- no requiere acceso inmediato a base de datos
-                                                     // <-- does not require immediate database access
+        $this->_log->output("INFO: $sFuente requiere envío de credenciales Asterisk | EN: $sFuente requires sending Asterisk credentials");
+        $this->_informarCredencialesAsterisk(TRUE);
     }
 
     public function msg_sqlinsertcalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
@@ -547,15 +535,14 @@ class SQLWorkerProcess extends TuberiaProcess
 
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output('INFO: recibido mensaje de finalización...');
-        // INFO: received finalization message...
+        $this->_log->output('INFO: recibido mensaje de finalización... | EN: received shutdown message...');
         $this->_finalizandoPrograma = TRUE;
     }
 
     public function msg_finalsql($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if (!$this->_finalizandoPrograma) {
-            $this->_log->output('WARN: AMIEventProcess envió mensaje antes que HubProcess');
+            $this->_log->output('WARN: AMIEventProcess envió mensaje antes que HubProcess | EN: AMIEventProcess sent message before HubProcess');
         }
         $this->_finalizandoPrograma = TRUE;
         $this->_tuberia->msg_HubProcess_finalizacionTerminada();
@@ -611,8 +598,8 @@ class SQLWorkerProcess extends TuberiaProcess
                         $queueflags[$queue][$regs[1]] = in_array($regs[2], array('yes', 'true', 'y', 't', 'on', '1'));
                     } elseif ($regs[1] == 'member' && (stripos($regs[2], 'SIP/') === 0 || stripos($regs[2], 'IAX2/') === 0)) {
                         $this->_log->output('WARN: '.__METHOD__.': agente estático '.
-                            $regs[2].' encontrado en cola '.$queue.' - puede causar problemas.');
-                            // WARN: static agent X found in queue Y - may cause problems.
+                            $regs[2].' encontrado en cola '.$queue.' - puede causar problemas. | EN: static agent '.
+                            $regs[2].' found in queue '.$queue.' - may cause problems.');
                     }
                 }
             }
@@ -642,7 +629,7 @@ class SQLWorkerProcess extends TuberiaProcess
             break;
         default:
             $this->_log->output('ERR: '.__METHOD__.' no debió haberse recibido para '.
-                print_r($paramInsertar, TRUE));
+                print_r($paramInsertar, TRUE).' | EN: should not have been received for ');
             return $eventos;
         }
 
@@ -803,7 +790,7 @@ class SQLWorkerProcess extends TuberiaProcess
             break;
         default:
             $this->_log->output('ERR: '.__METHOD__.' no debió haberse recibido para '.
-                print_r($paramInsertar, TRUE));
+                print_r($paramInsertar, TRUE).' | EN: should not have been received for ');
             return $eventos;
         }
 
@@ -1038,8 +1025,9 @@ SQL_EXISTE_AUDIT;
             $idAudit = $tupla['id'];
             $this->_log->output('WARN: '.__METHOD__.": id_agente={$idAgente} ".
                     'inició sesión en '.date('Y-m-d H:i:s', $iTimestampLogin).
-                    " pero hay sesión abierta ID={$idAudit}, se reusa.");
-                    // started session at but there is open session ID=, reusing.
+                    " pero hay sesión abierta ID={$idAudit}, se reusa. | EN: agent {$idAgente} ".
+                    'started session at '.date('Y-m-d H:i:s', $iTimestampLogin).
+                    " but there is open session ID={$idAudit}, reusing.");
         } else {
             // Ingreso de sesión del agente
             // Agent session entry
@@ -1366,13 +1354,13 @@ AGENTES_AUDIT_INCOMPLETO;
             foreach ($agentesReparar as $row) {
             	$this->_log->output('INFO: se ha detectado auditoría incompleta '.
                     "para {$row['type']}/{$row['number']} - {$row['name']} ".
-                    "(id_agent={$row['id']} ".(($row['estatus'] == 'A') ? 'ACTIVO' : 'INACTIVO').")");
-                    // INFO: incomplete audit detected for X - Y (id_agent=Z ACTIVE/INACTIVE)
+                    "(id_agent={$row['id']} ".(($row['estatus'] == 'A') ? 'ACTIVO' : 'INACTIVO').") | EN: incomplete audit detected ".
+                    "for {$row['type']}/{$row['number']} - {$row['name']} ".
+                    "(id_agent={$row['id']} ".(($row['estatus'] == 'A') ? 'ACTIVE' : 'INACTIVE').")");
                 $this->_repararAuditoriaAgente($row['id']);
             }
         } catch (PDOException $e) {
-            $this->_stdManejoExcepcionDB($e, 'no se puede terminar de reparar auditorías');
-            // cannot finish repairing audits
+            $this->_stdManejoExcepcionDB($e, 'no se puede terminar de reparar auditorías | EN: cannot finish repairing audits');
         }
     }
 
@@ -1398,8 +1386,7 @@ LISTA_AUDITORIAS_AGENTE;
              * Attempt to examine the database to obtain the maximum date for
              * which there is evidence of activity between the start of this
              * record and the start of the next record. */
-            $this->_log->output("INFO:\tSesión ID={$auditIncompleto['id']} iniciada en {$auditIncompleto['datetime_init']}");
-            // INFO: Session ID=X started at
+            $this->_log->output("INFO:\tSesión ID={$auditIncompleto['id']} iniciada en {$auditIncompleto['datetime_init']} | EN:\tSession ID={$auditIncompleto['id']} started at {$auditIncompleto['datetime_init']}");
 
             $sFechaSiguienteSesion = NULL;
             $idUltimoBreak = NULL;
@@ -1417,11 +1404,9 @@ LISTA_AUDITORIAS_AGENTE;
             $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
             $recordset->closeCursor();
             if (!$tupla) {
-                $this->_log->output("INFO:\tNo hay sesiones posteriores a esta sesión incompleta.");
-                // INFO: There are no sessions after this incomplete session.
+                $this->_log->output("INFO:\tNo hay sesiones posteriores a esta sesión incompleta. | EN:\tThere are no sessions after this incomplete session.");
             } else {
-                $this->_log->output("INFO:\tSiguiente sesión iniciada en {$tupla['datetime_init']}");
-                // INFO: Next session started at
+                $this->_log->output("INFO:\tSiguiente sesión iniciada en {$tupla['datetime_init']} | EN:\tNext session started at {$tupla['datetime_init']}");
                 $sFechaSiguienteSesion = $tupla['datetime_init'];
             }
 
@@ -1439,12 +1424,11 @@ LISTA_AUDITORIAS_AGENTE;
             $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
             $recordset->closeCursor();
             if (!$tupla) {
-                $this->_log->output("INFO:\tNo hay breaks pertenecientes a esta sesión incompleta.");
-                // INFO: There are no breaks belonging to this incomplete session.
+                $this->_log->output("INFO:\tNo hay breaks pertenecientes a esta sesión incompleta. | EN:\tThere are no breaks belonging to this incomplete session.");
             } else {
                 $this->_log->output("INFO:\tÚltimo break de sesión incompleta inicia en {$tupla['datetime_init']}, ".
-                    (is_null($tupla['datetime_end']) ? 'está incompleto' : 'termina en '.$tupla['datetime_end']));
-                    // INFO: Last break of incomplete session starts at, is incomplete / ends at
+                    (is_null($tupla['datetime_end']) ? 'está incompleto' : 'termina en '.$tupla['datetime_end'])." | EN:\tLast break of incomplete session starts at {$tupla['datetime_init']}, ".
+                    (is_null($tupla['datetime_end']) ? 'is incomplete' : 'ends at '.$tupla['datetime_end']));
                 $idUltimoBreak = $tupla['id'];
                 $sFechaInicioBreak = $tupla['datetime_init'];
                 $sFechaFinalBreak = $tupla['datetime_end'];
@@ -1465,12 +1449,11 @@ LISTA_AUDITORIAS_AGENTE;
             $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
             $recordset->closeCursor();
             if (!$tupla) {
-                $this->_log->output("INFO:\tNo hay llamadas salientes pertenecientes a esta sesión incompleta.");
-                // INFO: There are no outgoing calls belonging to this incomplete session.
+                $this->_log->output("INFO:\tNo hay llamadas salientes pertenecientes a esta sesión incompleta. | EN:\tThere are no outgoing calls belonging to this incomplete session.");
             } else {
                 $this->_log->output("INFO:\tÚltima llamada saliente de sesión incompleta inicia en {$tupla['start_time']}, ".
-                    (is_null($tupla['end_time']) ? 'está incompleta' : 'termina en '.$tupla['end_time']));
-                    // INFO: Last outgoing call of incomplete session starts at, is incomplete / ends at
+                    (is_null($tupla['end_time']) ? 'está incompleta' : 'termina en '.$tupla['end_time'])." | EN:\tLast outgoing call of incomplete session starts at {$tupla['start_time']}, ".
+                    (is_null($tupla['end_time']) ? 'is incomplete' : 'ends at '.$tupla['end_time']));
                 $sFechaInicioLlamada = $tupla['start_time'];
                 $sFechaFinalLlamada = $tupla['end_time'];
             }
@@ -1483,12 +1466,11 @@ LISTA_AUDITORIAS_AGENTE;
             $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
             $recordset->closeCursor();
             if (!$tupla) {
-                $this->_log->output("INFO:\tNo hay llamadas entrantes pertenecientes a esta sesión incompleta.");
-                // INFO: There are no incoming calls belonging to this incomplete session.
+                $this->_log->output("INFO:\tNo hay llamadas entrantes pertenecientes a esta sesión incompleta. | EN:\tThere are no incoming calls belonging to this incomplete session.");
             } else {
                 $this->_log->output("INFO:\tÚltima llamada entrante de sesión incompleta inicia en {$tupla['datetime_init']}, ".
-                    (is_null($tupla['datetime_end']) ? 'está incompleta' : 'termina en '.$tupla['datetime_end']));
-                    // INFO: Last incoming call of incomplete session starts at, is incomplete / ends at
+                    (is_null($tupla['datetime_end']) ? 'está incompleta' : 'termina en '.$tupla['datetime_end'])." | EN:\tLast incoming call of incomplete session starts at {$tupla['datetime_init']}, ".
+                    (is_null($tupla['datetime_end']) ? 'is incomplete' : 'ends at '.$tupla['datetime_end']));
                 if (is_null($sFechaInicioLlamada) || $sFechaInicioLlamada < $tupla['datetime_init'])
                     $sFechaInicioLlamada = $tupla['datetime_init'];
                 if (is_null($sFechaFinalLlamada) || $sFechaFinalLlamada < $tupla['datetime_end'])
@@ -1513,8 +1495,7 @@ LISTA_AUDITORIAS_AGENTE;
             if (!is_null($sFechaFinalLlamada) && $sFechaFinalLlamada > $sFechaFinal)
                 $sFechaFinal = $sFechaFinalLlamada;
 
-            $this->_log->output("INFO:\t\\--> Fecha estimada de final de sesión es $sFechaFinal, se actualiza...");
-            // INFO: --> Estimated session end date is, updating...
+            $this->_log->output("INFO:\t--> Fecha estimada de final de sesión es $sFechaFinal, se actualiza... | EN:\t--> Estimated session end date is $sFechaFinal, updating...");
             $sth = $this->_db->prepare(
                 'UPDATE audit SET datetime_end = ?, duration = TIMEDIFF(?, datetime_init) WHERE id = ?');
             if (!is_null($idUltimoBreak) && is_null($sFechaFinalBreak)) {
@@ -1526,15 +1507,13 @@ LISTA_AUDITORIAS_AGENTE;
 
     private function _stdManejoExcepcionDB($e, $s)
     {
-        $this->_log->output('ERR: '.__METHOD__. ": $s: ".implode(' - ', $e->errorInfo));
-        $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
-        // ERR: stack trace:
+        $this->_log->output('ERR: '.__METHOD__. ": $s: ".implode(' - ', $e->errorInfo)." | EN: $s: ".implode(' - ', $e->errorInfo));
+        $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString()." | EN: stack trace: \n".$e->getTraceAsString());
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
             // Codes corresponding to database connection loss
             $this->_log->output('WARN: '.__METHOD__.
-                ': conexión a DB parece ser inválida, se cierra...');
-                // : DB connection seems invalid, closing...
+                ': conexión a DB parece ser inválida, se cierra... | EN: DB connection appears invalid, closing...');
             $this->_db = NULL;
         }
     }
