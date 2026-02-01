@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -28,6 +29,7 @@ class ECCPServer extends MultiplexServer
     private $_tuberia = NULL;
 
     // Constructor con objeto adicional de tubería
+    // Constructor with additional pipe object
     function __construct($sUrlSocket, &$oLog, $tuberia)
     {
     	parent::__construct($sUrlSocket, $oLog);
@@ -35,6 +37,7 @@ class ECCPServer extends MultiplexServer
     }
 
     /* Para una nueva conexión, siempre se instancia un ECCPConn */
+    /* For a new connection, an ECCPConn is always instantiated */
     function procesarInicial($sKey)
     {
         $oNuevaConn = new ECCPProxyConn($this->_oLog, $this->_tuberia);
@@ -67,10 +70,14 @@ class ECCPServer extends MultiplexServer
      * Definición para propagar la notificación a todas las conexiones activas.
      * Todas las notificaciones a propagar son métodos que empiezan con la
      * cadena "notificarEvento_".
+     * Definition to propagate notification to all active connections.
+     * All notifications to propagate are methods that start with the
+     * string "notificarEvento_".
      */
     function __call($sMetodo, $args)
     {
         if (strpos($sMetodo, 'notificarEvento_') !== 0) {
+            // ERR: method not recognized as a notification
             $this->_oLog->output("ERR: no se reconoce método $sMetodo como una notificación");
             return;
         }

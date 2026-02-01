@@ -17,6 +17,12 @@
         <td>{$queue.LABEL}:</td>
         <td>{$queue.INPUT}</td>
     </tr>
+    <tr>
+        <td>{$status.LABEL}:</td>
+        <td>{$status.INPUT}</td>
+        <td>{$transfer.LABEL}:</td>
+        <td>{$transfer.INPUT}</td>
+    </tr>
 {if $INCOMING_CAMPAIGN or $OUTGOING_CAMPAIGN}
     <tr>
         <td colspan="2">&nbsp;</td>

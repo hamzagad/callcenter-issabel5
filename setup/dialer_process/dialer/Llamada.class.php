@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -24,22 +25,28 @@
 class Llamada
 {
     // Relaciones con otros objetos conocidos
+    // Relationships with other known objects
     private $_log;
     private $_tuberia;
 
     // Referencia a contenedor de llamadas e índice dentro del contenedor
+    // Reference to call container and index within container
     private $_listaLlamadas;
 
     // Agente que está atendiendo la llamada, o NULL para llamada sin atender
+    // Agent that is attending the call, or NULL for unattended call
     var $agente = NULL;
 
     // Campaña a la que pertenece la llamada, o NULL para llamada entrante sin campaña
+    // Campaign to which the call belongs, or NULL for incoming call without campaign
     var $campania = NULL;
 
 
     // Propiedades específicas de la llamada
+    // Specific properties of the call
 
     // Tipo de llamada, 'incoming', 'outgoing'
+    // Call type, 'incoming', 'outgoing'
     private $_tipo_llamada;
 
     /* ID en la base de datos de la llamada, o NULL para llamada entrante sin
@@ -70,7 +77,9 @@ class Llamada
     private $_actionid = NULL;
 
     /* Estimación de troncal de la llamada, obtenida a partir de Channel de
-     * OriginateResponse o Join. Se usa para llamadas entrantes. */
+     * OriginateResponse o Join. Se usa para llamadas entrantes.
+     * Estimation of the call trunk, obtained from the Channel of
+     * OriginateResponse or Join. Used for incoming calls. */
     private $_trunk = NULL;
 
     /* Estado de la llamada. Para llamadas salientes, el estado puede ser:
@@ -126,23 +135,41 @@ class Llamada
      * para realizar la transferencia asistida. */
     private $_agentchannel = NULL;
 
+    /* Real Asterisk channel for the agent. For callback agents (SIP/IAX2/PJSIP),
+     * this equals _agentchannel. For Agent type with app_agent_pool, this is
+     * Local/XXXX@agents-nnnn;N which is the real channel for AMI commands. */
+    private $_actualAgentChannel = NULL;
+
     var $phone;     // Número marcado para llamada saliente o Caller-ID para llamada entrante
+                    // Number dialed for outgoing call or Caller-ID for incoming call
     private $_id_current_call;   // ID del registro correspondiente en current_call[_entry]
+                                // ID of the corresponding record in current_call[_entry]
     private $_waiting_id_current_call = FALSE;  // Se pone a VERDADERO cuando se espera el id_current_call
+                                                // Set to TRUE when waiting for id_current_call
     var $request_hold = FALSE;  // Se asigna a VERDADERO al invocar requerimiento hold, y se verifica en Unlink
+                                // Set to TRUE when invoking hold request, and verified in Unlink
     private $_park_exten = NULL;// Extensión de lote de parqueo de llamada enviada a hold
+                                // Extension of parking lot for call sent to hold
 
     // Timestamps correspondientes a diversos eventos de la llamada
+    // Timestamps corresponding to various call events
     private $_timestamp_originatestart = NULL;   // Inicio de Originate en CampaignProcess
+                                                    // Start of Originate in CampaignProcess
     private $_timestamp_originateend = NULL;     // Recepción de OriginateResponse
+                                                    // Reception of OriginateResponse
     var $timestamp_enterqueue = NULL;       // Recepción de Join
+                                            // Reception of Join
     var $timestamp_link = NULL;             // Recepción de primer Link
+                                            // Reception of first Link
     var $timestamp_hangup = NULL;           // Recepción de Hangup
+                                            // Reception of Hangup
 
     // Lista de canales auxiliares asociados a la llamada.
+    // List of auxiliary channels associated with the call.
     var $AuxChannels = array();
 
     // ID de la cola de campaña entrante. Sólo para llamadas entrantes
+    // ID of the incoming campaign queue. Only for incoming calls
     var $id_queue_call_entry = NULL;
 
     private $_queuenumber = NULL;
@@ -155,12 +182,18 @@ class Llamada
 
     /* Esta bandera indica si se ha señalado final de procesamiento de la
      * llamada, y por lo tanto, candidata a ser quitada del seguimiento, cuando
-     * todavía no ha llegado el aviso del inicio de Originate. */
+     * todavía no ha llegado el aviso del inicio de Originate.
+     * This flag indicates if the end of call processing has been signaled,
+     * and therefore, candidate to be removed from tracking, when
+     * the notice of the start of Originate has not yet arrived. */
     private $_stillborn = FALSE;
 
     /* Código y texto de causa de fallo al marcar llamada. Una llamada fallida
      * sólo puede quitarse de la lista de llamadas cuando se tiene un valor de
-     * fallo válido. */
+     * fallo válido.
+     * Code and text of failure cause when dialing call. A failed call
+     * can only be removed from the call list when a valid
+     * failure value is available. */
     private $_failure_cause = NULL;
     private $_failure_cause_txt = NULL;
 
@@ -168,6 +201,7 @@ class Llamada
     private $_mutedchannels = array();
 
     // Este constructor sólo debe invocarse desde ListaLlamadas::nuevaLlamada()
+    // This constructor should only be invoked from ListaLlamadas::nuevaLlamada()
     function __construct(ListaLlamadas $lista, $tipo_llamada, $tuberia, $log)
     {
     	$this->_listaLlamadas = $lista;
@@ -243,6 +277,7 @@ class Llamada
         case 'channel':         return $this->_channel;
         case 'actualchannel':   return $this->_actualchannel;
         case 'agentchannel':    return $this->_agentchannel;
+        case 'actualAgentChannel': return isset($this->_actualAgentChannel) ? $this->_actualAgentChannel : $this->_agentchannel;
         case 'trunk':           return $this->_trunk;
         case 'status':          return $this->_status;
         case 'actionid':        return $this->_actionid;
@@ -289,6 +324,10 @@ class Llamada
                 /* El índice id_llamada_* se usa únicamente para manejar
                  * actualización a la tabla obsoleta current_call[_entry]
                  * y no se usa para otros tipos de llamadas, como por ejemplo
+                 * manualdialing
+                 * The id_llamada_* index is only used to handle
+                 * update to the obsolete table current_call[_entry]
+                 * and is not used for other call types, such as
                  * manualdialing */
                 if (in_array($this->_tipo_llamada, array('incoming', 'outgoing'))) {
                     $sIndice = ($this->_tipo_llamada == 'incoming') ? 'id_llamada_entrante' : 'id_llamada_saliente';
@@ -337,7 +376,7 @@ class Llamada
                         }
                     }
                     if (count($this->_actualizacionesPendientes) > 0) {
-                        $this->_log->output('ERR: '.__METHOD__.': actualización pendiente no implementada');
+                        $this->_log->output('ERR: '.__METHOD__.': actualización pendiente no implementada | EN: pending update not implemented');
                     }
                 }
             }
@@ -434,7 +473,10 @@ class Llamada
             if ($this->_stillborn && !is_null($this->timestamp_originateend)) {
                 /* Esta asignación se hace al ejecutar el callback _cb_Originate.
                  * Por lo tanto, si la llamada ya recibió el Hangup, se la debe
-                 * quitar de la lista de seguimiento. */
+                 * quitar de la lista de seguimiento.
+                 * This assignment is made when executing the callback _cb_Originate.
+                 * Therefore, if the call already received the Hangup, it must be
+                 * removed from the tracking list. */
                 if (!($this->_status == 'Failure' && is_null($this->_failure_cause))) {
                     $this->_listaLlamadas->remover($this);
                 }
@@ -472,6 +514,7 @@ class Llamada
             'currentcallid'         =>  $this->id_current_call,
             'queuenumber'           =>  $this->_queuenumber,
             'agentchannel'          =>  $this->_agentchannel,
+            'actualAgentChannel'    =>  isset($this->_actualAgentChannel) ? $this->_actualAgentChannel : $this->_agentchannel,
             'status'                =>  $this->_status,
             'channel'               =>  $this->channel,
             'actualchannel'         =>  $this->actualchannel,
@@ -525,6 +568,7 @@ class Llamada
             );
 
             // Actualizar asíncronamente las propiedades de la llamada
+            // Asynchronously update call properties
             $this->_tuberia->msg_SQLWorkerProcess_sqlupdatecalls($paramActualizar);
 
             if (!is_null($this->timestamp_hangup) &&
@@ -614,7 +658,11 @@ class Llamada
                 /* Se debe quitar la reservación únicamente si no hay más
                  * llamadas agendadas para este agente. Si se cumple esto,
                  * CampaignProcess lanzará el evento quitarReservaAgente
-                 * el cual quita asíncronamente la pausa del agente. */
+                 * el cual quita asíncronamente la pausa del agente.
+                 * The reservation must be removed only if there are no more
+                 * scheduled calls for this agent. If this is met,
+                 * CampaignProcess will launch the event quitarReservaAgente
+                 * which asynchronously removes the agent pause. */
                 $this->_tuberia->msg_CampaignProcess_verificarFinLlamadasAgendables(
                     $a->channel, $this->campania->id);
             }
@@ -625,8 +673,13 @@ class Llamada
              * de eso se recibió OriginateResponse(Failure) entonces se seteó
              * a Failure el estado. No se debe sobreescribir este Failure
              * para que se pueda limpiar la llamada en caso de que no se
-             * reciba nunca un Hangup. */
-            if (!is_null($this->status)) $this->status = 'Placing';
+             * reciba nunca un Hangup.
+             * A newly created call starts with status == NULL. If before
+             * that an OriginateResponse(Failure) was received then the
+             * status was set to Failure. This Failure should not be overwritten
+             * so that the call can be cleaned up in case a Hangup is never
+             * received. */
+            if (is_null($this->status)) $this->status = 'Placing';
         }
     }
 
@@ -713,7 +766,9 @@ class Llamada
             }
 
             /* Remover llamada que no se pudo colocar si ya se ejecutó callback
-             * _cb_Originate, y si se tiene una causa de fallo válida. */
+             * _cb_Originate, y si se tiene una causa de fallo válida.
+             * Remove call that could not be placed if callback
+             * _cb_Originate has already been executed, and a valid failure cause is available. */
             if (!($this->_stillborn && is_null($this->timestamp_originatestart))) {
                 if (!is_null($this->failure_cause)) {
                     $this->_listaLlamadas->remover($this);
@@ -721,10 +776,11 @@ class Llamada
             }
         } else {
             // Verificar si Onnewchannel procesó pata equivocada
+            // Check if Onnewchannel processed wrong leg
             if ($this->uniqueid != $uniqueid) {
                 $this->_log->output("ERR: se procesó pata equivocada en evento Newchannel ".
                     "anterior, pata procesada es {$this->uniqueid}, ".
-                    "pata real es {$uniqueid}");
+                    "pata real es {$uniqueid} | EN: wrong leg processed in previous Newchannel event, processed leg is {$this->uniqueid}, real leg is {$uniqueid}");
 
                 $this->unregisterAuxChannels();
                 $this->AuxChannels = array();
@@ -738,7 +794,7 @@ class Llamada
             }
             */
             if ($this->_stillborn) {
-                $this->_log->output("WARN: ".__METHOD__." llamada recibió Hangup pero OriginateResponse indica status=$sStatus");
+                $this->_log->output("WARN: ".__METHOD__." llamada recibió Hangup pero OriginateResponse indica status=$sStatus | EN: call received Hangup but OriginateResponse indicates status=$sStatus");
                 if (!is_null($this->timestamp_originatestart)) $this->_listaLlamadas->remover($this);
             }
         }
@@ -807,13 +863,15 @@ class Llamada
             $this->_tuberia->msg_SQLWorkerProcess_sqlinsertcalls($paramInsertar);
             // La notificación de progreso se realiza en CampaignProcess ANTES
             // de devolver el ID de inserción.
+            // Progress notification is done in CampaignProcess BEFORE
+            // returning the insertion ID.
         }
 
 
     }
 
     public function llamadaEnlazadaAgente($timestamp, $agent, $sRemChannel,
-        $uniqueid_agente, $sAgentChannel)
+        $uniqueid_agente, $sAgentChannel, $sActualAgentChannel = NULL)
     {
         $this->agente = $agent;
         $this->agente->asignarLlamadaAtendida($this, $uniqueid_agente);
@@ -821,6 +879,7 @@ class Llamada
         $this->agente->llamada_agendada = NULL;
 
         $this->_agentchannel = $sAgentChannel;
+        $this->_actualAgentChannel = isset($sActualAgentChannel) ? $sActualAgentChannel : $sAgentChannel;
         $this->status = 'Success';
         $this->timestamp_link = $timestamp;
         if (!is_null($this->campania) && $this->campania->tipo_campania == 'outgoing')
@@ -839,6 +898,7 @@ class Llamada
         if (is_null($this->channel)) $this->channel = $sRemChannel;
 
         // El canal verdadero es más util que Local/XXX para las operaciones
+        // The real channel is more useful than Local/XXX for operations
         if (strpos($sRemChannel, 'Local/') === 0 && !is_null($this->channel)
             && $sRemChannel != $this->channel) {
             $sRemChannel = $this->channel;
@@ -905,6 +965,7 @@ class Llamada
         }
 
         // Verificación de consistencia
+        // Consistency check
         if ($this->agente->estado_consola != 'logged-in') {
             $this->_log->output("WARN: llamada ha sido asignada a agente en estado ".
                 $this->agente->estado_consola.'. Esto no debería haber pasado: ');
@@ -924,6 +985,7 @@ class Llamada
         if (!is_null($this->agente)) $this->agente->UniqueidAgente = NULL;
 
         // Esta asignación manda a escribir a la base de datos
+        // This assignment triggers writing to the database
         $this->uniqueid = $uniqueid_nuevo;
     }
 
@@ -931,7 +993,10 @@ class Llamada
     {
         /* Para agentes dinámicos, el Originate de recuperación de la llamada
          * ocasiona que se asigne un nuevo canal de agente SIP/xxxx-abcde que
-         * debe de ser recogido y asignado. */
+         * debe de ser recogido y asignado.
+         * For dynamic agents, the call recovery Originate causes
+         * a new SIP/xxxx-abcde agent channel to be assigned that
+         * must be captured and assigned. */
         if (!is_null($sAgentChannel)) $this->_agentchannel = $sAgentChannel;
 
         if (!is_null($this->agente)) {
@@ -988,11 +1053,12 @@ class Llamada
 
         if (is_null($this->id_llamada)) {
         	$this->_log->output('ERR: '.__METHOD__.': todavía no ha llegado '.
-                'ID de llamada, no se garantiza integridad de datos para esta llamada.');
+                'ID de llamada, no se garantiza integridad de datos para esta llamada. | EN: call ID has not arrived yet, data integrity not guaranteed for this call.');
         }
 
     	$this->timestamp_hangup = $timestamp;
         $this->_agentchannel = NULL;
+        $this->_actualAgentChannel = NULL;
         if ($this->tipo_llamada == 'outgoing' && is_null($this->timestamp_originatestart))
             $this->_stillborn = TRUE;
 
@@ -1038,6 +1104,7 @@ class Llamada
                 $paramProgreso['new_status'] = 'NoAnswer';
             } else {
             	// Llamada entró a cola pero fue abandonada antes de enlazarse
+                // Call entered queue but was abandoned before being linked
                 if ($this->tipo_llamada == 'incoming') {
                 	$paramActualizar['status'] = 'abandonada';
                     $paramActualizar['datetime_end'] = date('Y-m-d H:i:s', $this->timestamp_hangup);
@@ -1093,6 +1160,7 @@ class Llamada
             }
         } else {
             // Esto no debería ocurrir en condiciones normales
+            // This should not happen under normal conditions
             $paramProgreso = NULL;
         }
 
@@ -1164,6 +1232,8 @@ class Llamada
         } else {
             // No se tiene id_llamada, se guarda en reserva.
             // Esto sólo puede ocurrir para incoming
+            // id_llamada not available, save in reserve.
+            // This can only happen for incoming
             $this->_actualizacionesPendientes['recording'][] = array(
                 'uniqueid'      =>  $uniqueid,
                 'channel'       =>  $channel,
@@ -1202,10 +1272,10 @@ class Llamada
         $callable = array($this, '_cb_Park');
         $call_params = array($sFuente, $ami, $timestamp);
         //$this->_log->output('DEBUG: '.__METHOD__.": asyncPark({$this->actualchannel}, {$this->agentchannel})");
+        // Don't pass AnnounceChannel to suppress parking slot announcement to customer
         $ami->asyncPark(
             $callable, $call_params,
-            $this->actualchannel,
-            $this->agentchannel);
+            $this->actualchannel);
     }
 
     public function _cb_Park($r, $sFuente, $ami, $timestamp)

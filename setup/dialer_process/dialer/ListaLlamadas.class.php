@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -89,7 +90,10 @@ class ListaLlamadas implements IteratorAggregate
 
     		    /* Se almacena el ID de llamada (si está disponible) para toda
     		     * llamada que esté todavía esperando un ID de current_call al
-    		     * momento de ser removida. */
+    		     * momento de ser removida.
+    		     * The call ID (if available) is stored for every
+    		     * call that is still waiting for a current_call ID at the
+    		     * time of being removed. */
     		    if ($obj->waiting_id_current_call) {
     		        $this->_idcurrentcall_retrasado[$obj->tipo_llamada][] = $obj->id_llamada;
     		    }

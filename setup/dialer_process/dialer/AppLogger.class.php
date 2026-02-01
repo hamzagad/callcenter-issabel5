@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -28,6 +29,7 @@ class AppLogger
     private $sNombreArchivo;
 
     // Crear una nueva instancia de AppLogger
+    // Create a new instance of AppLogger
     function __construct()
     {
         $this->LOGHANDLE = NULL;
@@ -35,9 +37,11 @@ class AppLogger
     }
 
     // Abrir una bitácora, dado el nombre de archivo
+    // Open a log file, given the filename
     function open($sNombreArchivo)
     {
         // Intentar la apertura del archivo de bitácora
+        // Try to open the log file
         if (is_null($this->LOGHANDLE)) {
             $hLogHandle = fopen($sNombreArchivo, 'at');
             if (!$hLogHandle) {
@@ -54,6 +58,8 @@ class AppLogger
 
     // Cerrar y volver a abrir el archivo de bitácora bajo el mismo nombre.
     // Pensado para usar en rotación de logs con logrotate.
+    // Close and reopen the log file under the same name.
+    // Intended for use in log rotation with logrotate.
     function reopen()
     {
         if (!is_null($this->LOGHANDLE)) {
@@ -64,6 +70,7 @@ class AppLogger
     }
 
     // Definir el prefijo a mostrar en cada mensaje
+    // Define the prefix to display in each message
     function prefijo($sNuevoPrefijo = false)
     {
         if ($sNuevoPrefijo !== false) $this->PREFIJO = "$sNuevoPrefijo";
@@ -72,6 +79,8 @@ class AppLogger
 
     // Escribir una cadena en la bitácora, precedida por la fecha del sistema en
     // formato YYYY-MM-DD hh:mm
+    // Write a string to the log, preceded by the system date in
+    // YYYY-MM-DD hh:mm format
     function output($sCadena)
     {
         fprintf($this->LOGHANDLE, "%s PID=%6d : %s%s\n",
@@ -81,9 +90,11 @@ class AppLogger
     }
 
     // Cerrar la bitácora del programa
+    // Close the program log
     function close()
     {
         // Mandar a cerrar el archivo de bitácora
+        // Close the log file
         if (!is_null($this->LOGHANDLE)) {
             fclose ($this->LOGHANDLE);
             $this->LOGHANDLE = NULL;

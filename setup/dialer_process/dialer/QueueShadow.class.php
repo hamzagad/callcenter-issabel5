@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 4.0                                                  |
   | http://www.issabel.org                                               |
@@ -24,6 +25,7 @@
 */
 
 // Para obtener los estados de miembros definidos en Agente.class.php
+// To get the member statuses defined in Agente.class.php
 require_once 'Agente.class.php';
 
 class QueueShadow
@@ -43,6 +45,8 @@ class QueueShadow
      * Método para iniciar el modo de enumeración de la información de las
      * colas. Se invalidan todos los elementos esperando que los eventos
      * recibidos los vuelvan a validar.
+     * Method to start the enumeration mode of queue information.
+     * All elements are invalidated waiting for received events to re-validate them.
      */
     function QueueStatus_start($queueflags)
     {
@@ -70,6 +74,7 @@ class QueueShadow
             $this->_queues[$params['Queue']]['callers'] = 0;
 
             // ¿Cómo puedo saber si es seguro heredar event* ?
+            // How can I know if it's safe to inherit event*?
             $this->_queues[$params['Queue']]['eventmemberstatus'] = FALSE;
             $this->_queues[$params['Queue']]['eventwhencalled'] = FALSE;
         }
@@ -94,6 +99,7 @@ class QueueShadow
             $this->_queues[$params['Queue']]['members'][$params['Location']]['Status'] = $params['Status'];
             $this->_queues[$params['Queue']]['members'][$params['Location']]['Paused'] = ($params['Paused'] != 0);
             // Voy a asumir que puedo conservar el valor de LinkStart
+            // I'm going to assume I can keep the LinkStart value
         }
     }
 
@@ -104,6 +110,7 @@ class QueueShadow
 
     /**
      * Quitar todo elemento que no haya sido re-validado en enumeración.
+     * Remove all elements that haven't been re-validated in enumeration.
      */
     function msg_QueueStatusComplete($params)
     {
@@ -114,6 +121,7 @@ class QueueShadow
                 unset($this->_queues[$q]);
             } else {
                 // Acumular colas sin banderas activas
+                // Accumulate queues without active flags
                 if (!($this->_queues[$q]['eventwhencalled'] && $this->_queues[$q]['eventmemberstatus'])) {
                     if ($q != 'default') $colasSinEventos[] = $q;
                 }
@@ -134,6 +142,9 @@ class QueueShadow
             $this->_log->output('WARN: '.__METHOD__.': para mejorar el desempeño de '.
                 'campañas salientes, se recomienda activar eventwhencalled y '.
                 'eventmemberstatus en las siguientes colas: ['.
+                implode(' ', $colasSinEventos).'] | EN: to improve outbound campaign performance, '.
+                'it is recommended to activate eventwhencalled and '.
+                'eventmemberstatus in the following queues: ['.
                 implode(' ', $colasSinEventos).']');
         }
     }
@@ -143,7 +154,7 @@ class QueueShadow
     function msg_QueueMemberAdded($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -159,7 +170,7 @@ class QueueShadow
     function msg_QueueMemberRemoved($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -170,7 +181,7 @@ class QueueShadow
     function msg_QueueMemberPaused($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -179,18 +190,20 @@ class QueueShadow
             $this->_queues[$params['Queue']]['members'][$params['Location']]['Paused'] = ($params['Paused'] != 0);
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Location'].
-                    ' en cola '.$params['Queue']);
+                    ' en cola '.$params['Queue'].' | EN: member '.$params['Location'].
+                    ' not found in queue '.$params['Queue']);
         }
     }
 
     function msg_QueueMemberStatus($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
         // Cola validada que tiene eventmemberstatus activo
+        // Queue validated that has eventmemberstatus active
         $this->_queues[$params['Queue']]['eventmemberstatus'] = TRUE;
 
         $params['Location'] = isset($params['Location'])?$params['Location']:$params['Interface'];
@@ -198,9 +211,11 @@ class QueueShadow
             $this->_queues[$params['Queue']]['members'][$params['Location']]['Status'] = $params['Status'];
             $this->_queues[$params['Queue']]['members'][$params['Location']]['Paused'] = ($params['Paused'] != 0);
             // Voy a asumir que puedo conservar el valor de LinkStart
+            // I'm going to assume I can keep the LinkStart value
         } else {
            $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Location'].
-               ' en cola '.$params['Queue'].', se agrega');
+               ' en cola '.$params['Queue'].', se agrega | EN: member '.$params['Location'].
+               ' not found in queue '.$params['Queue'].', adding');
             $this->_queues[$params['Queue']]['members'][$params['Location']] = array(
                 'removed'   => FALSE,
                 'Status'    => $params['Status'],
@@ -212,7 +227,7 @@ class QueueShadow
     function msg_Join($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
@@ -222,7 +237,7 @@ class QueueShadow
     function msg_Leave($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return FALSE;
         }
 
@@ -238,24 +253,27 @@ class QueueShadow
     function msg_AgentCalled($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
         // Cola validada que tiene eventwhencalled activo
+        // Queue validated that has eventwhencalled active
         $this->_queues[$params['Queue']]['eventwhencalled'] = TRUE;
 
         // TODO: qué se puede hacer aquí?
+        // TODO: what can be done here?
     }
 
     function msg_AgentComplete($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
         // Cola validada que tiene eventwhencalled activo
+        // Queue validated that has eventwhencalled active
         $this->_queues[$params['Queue']]['eventwhencalled'] = TRUE;
 
         $params['Member'] = isset($params['Member'])?$params['Member']:$params['Interface'];
@@ -263,6 +281,7 @@ class QueueShadow
             $this->_queues[$params['Queue']]['members'][$params['Member']]['LinkStart'] = NULL;
 
             // La actualización de Status debería hacerse en un QueueMemberStatus próximo
+            // The Status update should be done in a next QueueMemberStatus
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Member'].
                 ' en cola '.$params['Queue']);
@@ -272,11 +291,12 @@ class QueueShadow
     function msg_AgentConnect($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
         // Cola validada que tiene eventwhencalled activo
+        // Queue validated that has eventwhencalled active
         $this->_queues[$params['Queue']]['eventwhencalled'] = TRUE;
 
         $params['Member'] = isset($params['Member'])?$params['Member']:$params['Interface'];
@@ -284,6 +304,7 @@ class QueueShadow
             $this->_queues[$params['Queue']]['members'][$params['Member']]['LinkStart'] = $params['local_timestamp_received'];
 
             // La actualización de Status debería hacerse en un QueueMemberStatus próximo
+            // The Status update should be done in a next QueueMemberStatus
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Member'].
                 ' en cola '.$params['Queue']);
@@ -293,14 +314,16 @@ class QueueShadow
     function msg_AgentDump($params)
     {
         if (!isset($this->_queues[$params['Queue']])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue']);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$params['Queue'].' | EN: queue '.$params['Queue'].' not found');
             return;
         }
 
         // Cola validada que tiene eventwhencalled activo
+        // Queue validated that has eventwhencalled active
         $this->_queues[$params['Queue']]['eventwhencalled'] = TRUE;
 
         // TODO: qué se puede hacer aquí?
+        // TODO: what can be done here?
     }
 
     /**************************************************************************/
@@ -318,7 +341,7 @@ class QueueShadow
     function infoPrediccionCola($queue)
     {
         if (!isset($this->_queues[$queue])) {
-            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$queue);
+            $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$queue.' | EN: queue '.$queue.' not found');
             return NULL;
         }
 
@@ -338,13 +361,16 @@ class QueueShadow
         foreach ($this->_queues[$queue]['members'] as $miembro) {
 
             // Se ignora miembro en pausa
+            // Paused member is ignored
             if ($miembro['Paused']) continue;
 
             // Miembro definitivamente libre
+            // Member definitely free
             if (in_array($miembro['Status'], array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING)))
                 $iNumLlamadasColocar['AGENTES_LIBRES']++;
 
             // Miembro ocupado, se verifica si se desocupará
+            // Busy member, verify if it will become free
             if (in_array($miembro['Status'], array(AST_DEVICE_INUSE, AST_DEVICE_BUSY, AST_DEVICE_RINGINUSE)) &&
                 !is_null($miembro['LinkStart'])) {
                 $iNumLlamadasColocar['AGENTES_POR_DESOCUPAR'][] = microtime(TRUE) - $miembro['LinkStart'];

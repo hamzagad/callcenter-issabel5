@@ -137,24 +137,12 @@ function formatoMilisegundo(selector, msec)
 
 function do_checkstatus()
 {
-/*
-  var clientstate = {};
-  for (var k in estadoCliente) {
-    clientstate[k] = {
-      status:      estadoCliente[k]['status'],
-      oncallupdate:  estadoCliente[k]['oncallupdate']
-    };
-  }
-*/
   var params = {
       menu:    module_name,
       rawmode:  'yes',
       action:    'checkStatus',
-      //clientstate: clientstate
       clientstatehash: estadoClienteHash
     };
-  // Antes utilizabamos EventSource, ahora solo dejaremos el poling
-  /*
   if (window.EventSource) {
     params['serverevents'] = true;
     evtSource = new EventSource('index.php?' + $.param(params));
@@ -175,18 +163,6 @@ function do_checkstatus()
       setTimeout(do_checkstatus, 1);
     }, 'json');
   }
-  */
-  
-  $.post('index.php?menu=' + module_name + '&rawmode=yes', params,
-  function (respuesta) {
-    verificar_error_session(respuesta);
-    manejarRespuestaStatus(respuesta);
-
-    // Lanzar el método de inmediato
-    setTimeout(do_checkstatus, 1);
-  }, 'json');
-  
-  
 }
 
 function manejarRespuestaStatus(respuesta)
@@ -222,6 +198,9 @@ function manejarRespuestaStatus(respuesta)
 					break;
 				case 'online':
 					statuslabel.append('<img src="modules/'+module_name+'/images/ready.png" border="0" alt="'+'READY'+'"/>');
+					break;
+				case 'ringing':
+					statuslabel.append('<img src="modules/'+module_name+'/images/agent-ringing.gif" border="0" alt="'+'RINGING'+'"/>');
 					break;
 				case 'oncall':
 					statuslabel.append('<img src="modules/'+module_name+'/images/call.png" border="0" alt="'+'CALL'+'"/>');

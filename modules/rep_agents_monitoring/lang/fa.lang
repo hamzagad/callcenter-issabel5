@@ -34,5 +34,9 @@ $arrLangModule = array(
     "Agents" => "اپراتورها",
     "Total" => "کل",
     "Number" => "شماره",
+    "READY" => "آماده",
+    "RINGING" => "زنگ می‌زند",
+    "CALL" => "در تماس",
+    "BREAK" => "در استراحت",
 );
 ?>

@@ -60,6 +60,7 @@ $arrLangModule = array(
     "Form data successfully saved" => "Datos de formulario guardados correctamente",
     "Hangup" => "Colgar",
     "Invalid agent number" => "Número de agente incorrecto",
+    "Invalid agent password" => "Contraseña de agente incorrecta",
     "Invalid extension number" => "Número de extensión incorrecto",
     "Invalid or incomplete form data" => "Datos de formulario incorrectos o incompletos",
     "Invalid or incomplete schedule" => "Horario incorrecto o incompleto",

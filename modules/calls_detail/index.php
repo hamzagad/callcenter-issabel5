@@ -49,6 +49,8 @@ function _moduleContent(&$smarty, $module_name)
     switch (getParameter('action')) {
     case 'download':
         return downloadRecording($smarty, $module_name, $pDB);
+    case 'play':
+        return playRecording($smarty, $module_name, $pDB);
     default:
         return reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir);
     }
@@ -112,15 +114,36 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
     $campaignIn = $oCallsDetail->getCampaigns('incoming');
     $campaignOut = $oCallsDetail->getCampaigns('outgoing');
 
+    // Status combo options
+    $callStatus = array(
+        ''          =>  '('._tr('All Status').')',
+        'Success'   =>  _tr('Success'),
+        'Abandoned' =>  _tr('Abandoned'),
+        'Failure'   =>  _tr('Failure'),
+        'NoAnswer'  =>  _tr('NoAnswer'),
+        'OnQueue'   =>  _tr('OnQueue'),
+        'Placing'   =>  _tr('Placing'),
+        'Ringing'   =>  _tr('Ringing'),
+        'ShortCall' =>  _tr('ShortCall'),
+        'fin-monitoreo' => _tr('End Monitor'),
+    );
+
+    // Transfer combo options
+    $transferFilter = array(
+        ''  =>  '('._tr('All Transfers').')',
+        'yes'=>  _tr('Transferred'),
+        'no' =>  _tr('Not Transferred'),
+    );
+
     $urlVars = array('menu' => $module_name);
-    $arrFormElements = createFieldFilter($comboAgentes, $comboColas, $callType, $campaignIn, $campaignOut);
+    $arrFormElements = createFieldFilter($comboAgentes, $comboColas, $callType, $campaignIn, $campaignOut, $callStatus, $transferFilter);
     $oFilterForm = new paloForm($smarty, $arrFormElements);
 
     // Validar y aplicar las variables de filtro
     $paramLista = NULL;
     $paramFiltro = array();
     foreach (array('date_start', 'date_end', 'calltype', 'agent', 'queue',
-        'phone', 'id_campaign_out', 'id_campaign_in') as $k)
+        'phone', 'id_campaign_out', 'id_campaign_in', 'status', 'transfer') as $k)
         $paramFiltro[$k] = getParameter($k);
     if (!isset($paramFiltro['date_start'])) $paramFiltro['date_start'] = date("d M Y");
     if (!isset($paramFiltro['date_end'])) $paramFiltro['date_end'] = date("d M Y");
@@ -230,9 +253,11 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
                     if (!$bExportando) {
                         $downloadlinks = array();
                         foreach ($cdr[12] as $rec) {
-                            $downloadlinks[] = '<a href="?menu='.$module_name.
-                                '&amp;action=download&amp;id='.$rec['id'].'&amp;rawmode=yes">'.
-                                ((count($downloadlinks) > 0 ? $rec['datetime_entry'] : _tr('Download'))).'</a>';
+                            $playUrl = '?menu='.$module_name.'&amp;action=play&amp;id='.$rec['id'].'&amp;rawmode=yes';
+                            $downloadUrl = '?menu='.$module_name.'&amp;action=download&amp;id='.$rec['id'].'&amp;rawmode=yes';
+                            $listenLink = '<a href="javascript:void(0);" onclick="playaudio(\''.$playUrl.'\')">'._tr('Listen').'</a>';
+                            $downloadLink = '<a href="'.$downloadUrl.'">'._tr('Download').'</a>';
+                            $downloadlinks[] = $listenLink.' | '.$downloadLink;
                         }
                         if (count($downloadlinks) == 0) {
                             $s = '';
@@ -282,6 +307,14 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
         $_POST['agent'] = $paramLista['agent'];
         $oGrid->addFilterControl(_tr("Filter applied ")._tr("Agent")." = ".$comboAgentes[$paramLista['agent']], $_POST, array("agent" => ''),true);
 
+        $paramLista['status'] = isset($callStatus[$paramLista['status']]) ? $paramLista['status'] : '';
+        $_POST['status'] = $paramLista['status'];
+        $oGrid->addFilterControl(_tr("Filter applied ")._tr("Status")." = ".$callStatus[$paramLista['status']], $_POST, array("status" => ''),true);
+
+        $paramLista['transfer'] = isset($transferFilter[$paramLista['transfer']]) ? $paramLista['transfer'] : '';
+        $_POST['transfer'] = $paramLista['transfer'];
+        $oGrid->addFilterControl(_tr("Filter applied ")._tr("Transfer")." = ".$transferFilter[$paramLista['transfer']], $_POST, array("transfer" => ''),true);
+
         $oGrid->setURL(construirURL($urlVars, array("nav", "start")));
         $oGrid->setData($arrData);
         $oGrid->setColumns($arrColumnas);
@@ -289,7 +322,62 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
         $oGrid->pagingShow(true);
         $oGrid->setNameFile_Export(_tr("Calls Detail"));
 
-        return $oGrid->fetchGrid();
+        $gridContent = $oGrid->fetchGrid();
+        // Insert extra header row with counter
+        $counterHtml = '<tr><th colspan="'.count($arrColumnas).'" style="text-align:center; border-bottom:2px solid #ccc; padding:8px 0; border-radius:6px 6px 0 0;"><span style="font-size:13px; color:white;"><span style="font-weight:bold;">'._tr('Total: ').'</span>'.$total.' '._tr('Calls').'</span></th></tr>';
+        $gridContent = preg_replace('/(<thead>)/', '<thead>$1'.$counterHtml, $gridContent);
+
+        // Add CSS and JavaScript for audio player, and modal
+        $cssUrl = "modules/$module_name/themes/default/css/styles.css";
+        $jsUrl = "modules/$module_name/themes/default/js/javascript.js";
+
+        $modalHtml = <<<MODAL
+<link rel="stylesheet" type="text/css" href="$cssUrl">
+<script type="text/javascript" src="$jsUrl"></script>
+<!-- The Modal -->
+<div id="myModal" class="modal">
+  <div id="single-song-player">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <div class="bottom-container">
+      <div class="slider-wrapper">
+        <input type="range" class="amplitude-song-slider" data-amplitude-song-index="0"/>
+      </div>
+      <div class="time-container">
+        <span class="current-time">
+          <span class="amplitude-current-minutes">00</span>:<span class="amplitude-current-seconds">00</span>
+        </span>
+        <span class="duration">
+          <span class="amplitude-duration-minutes">00</span>:<span class="amplitude-duration-seconds">00</span>
+        </span>
+      </div>
+      <div class="control-container">
+        <div class="amplitude-play-pause" id="play-pause"></div>
+        <div class="meta-container">
+          <span data-amplitude-song-info="name" class="song-name"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="text/javascript">
+function closeModal() {
+    var modal = document.getElementById("myModal");
+    if (modal) {
+        modal.style.display = "none";
+        // Stop HTML5 audio player
+        var audio = document.getElementById('call-audio-player');
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.src = '';
+        }
+    }
+}
+</script>
+MODAL;
+        // Append modal to the end
+        $gridContent .= $modalHtml;
+        return $gridContent;
      } else {
         global $arrLang;
 
@@ -317,6 +405,60 @@ function reportCallsDetail($smarty, $module_name, $pDB, $local_templates_dir)
         if ($bExportando)
             return $oGrid->fetchGridCSV($arrGrid, $arrData);
         $sContenido = $oGrid->fetchGrid($arrGrid, $arrData, $arrLang);
+        // Insert extra header row with counter
+        $counterHtml = '<tr><th colspan="'.count($arrColumnas).'" style="text-align:center; border-bottom:2px solid #ccc; padding:8px 0; border-radius:6px 6px 0 0;"><span style="font-size:13px; color:white;"><span style="font-weight:bold;">'._tr('Total: ').'</span>'.$total.' '._tr('Calls').'</span></th></tr>';
+        $sContenido = preg_replace('/(<thead>)/', '<thead>$1'.$counterHtml, $sContenido);
+
+        // Add CSS and JavaScript for audio player, and modal
+        $cssUrl = "modules/$module_name/themes/default/css/styles.css";
+        $jsUrl = "modules/$module_name/themes/default/js/javascript.js";
+
+        $modalHtml = <<<MODAL
+<link rel="stylesheet" type="text/css" href="$cssUrl">
+<script type="text/javascript" src="$jsUrl"></script>
+<!-- The Modal -->
+<div id="myModal" class="modal">
+  <div id="single-song-player">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <div class="bottom-container">
+      <div class="slider-wrapper">
+        <input type="range" class="amplitude-song-slider" data-amplitude-song-index="0"/>
+      </div>
+      <div class="time-container">
+        <span class="current-time">
+          <span class="amplitude-current-minutes">00</span>:<span class="amplitude-current-seconds">00</span>
+        </span>
+        <span class="duration">
+          <span class="amplitude-duration-minutes">00</span>:<span class="amplitude-duration-seconds">00</span>
+        </span>
+      </div>
+      <div class="control-container">
+        <div class="amplitude-play-pause" id="play-pause"></div>
+        <div class="meta-container">
+          <span data-amplitude-song-info="name" class="song-name"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="text/javascript">
+function closeModal() {
+    var modal = document.getElementById("myModal");
+    if (modal) {
+        modal.style.display = "none";
+        // Stop HTML5 audio player
+        var audio = document.getElementById('call-audio-player');
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.src = '';
+        }
+    }
+}
+</script>
+MODAL;
+        // Append modal to the end
+        $sContenido .= $modalHtml;
         if (strpos($sContenido, '<form') === FALSE)
             $sContenido = "<form  method=\"POST\" style=\"margin-bottom:0;\" action=\"$url\">$sContenido</form>";
         return $sContenido;
@@ -368,26 +510,121 @@ function downloadRecording($smarty, $module_name, $pDB)
         $content_type = $contentTypes[$extension];
     }
 
-    // Mandar el archivo
+    // Mandar el archivo con soporte para Range requests (para HTML5 audio seeking)
+    $filesize = filesize($path[0]);
     $fp = fopen($path[0], 'rb');
     if (!$fp) {
         Header('HTTP/1.1 503 Internal Server Error');
         return 'Failed to open file';
     }
+
+    // Check if this is a range request
+    $range = isset($_SERVER['HTTP_RANGE']) ? $_SERVER['HTTP_RANGE'] : null;
+
+    if ($range) {
+        // Parse Range header (e.g., "bytes=500-999")
+        list($unit, $range) = explode('=', $range, 2);
+        if ($unit == 'bytes') {
+            list($start, $end) = explode('-', $range, 2);
+            $start = intval($start);
+            $end = $end === '' ? $filesize - 1 : intval($end);
+
+            // Validate range
+            if ($start < 0 || $end >= $filesize || $start > $end) {
+                header("HTTP/1.1 416 Requested Range Not Satisfiable");
+                header("Content-Range: bytes */$filesize");
+                fclose($fp);
+                return;
+            }
+
+            $content_length = $end - $start + 1;
+
+            // Send partial content
+            header("HTTP/1.1 206 Partial Content");
+            header("Content-Range: bytes $start-$end/$filesize");
+            header("Content-Length: $content_length");
+            header("Content-Type: $content_type");
+            header("Accept-Ranges: bytes");
+            header("Pragma: public");
+            header("Expires: 0");
+            header("Cache-Control: must-revalidate, post-check=0, pre-check=0");
+            header("Cache-Control: public");
+
+            // Seek to start position and send partial content
+            fseek($fp, $start);
+            $bytes_read = 0;
+            $chunk_size = 8192;
+            while (!feof($fp) && $bytes_read < $content_length) {
+                $buffer = fread($fp, min($chunk_size, $content_length - $bytes_read));
+                echo $buffer;
+                $bytes_read += strlen($buffer);
+            }
+            fclose($fp);
+            return;
+        }
+    }
+
+    // Send complete file
     header("Pragma: public");
     header("Expires: 0");
     header("Cache-Control: must-revalidate, post-check=0, pre-check=0");
     header("Cache-Control: public");
     header("Content-Description: wav file");
     header("Content-Type: $content_type");
+    header("Accept-Ranges: bytes");
     header("Content-Disposition: attachment; filename={$path[1]}");
     header("Content-Transfer-Encoding: binary");
-    header("Content-length: " . filesize($path[0]));
+    header("Content-length: $filesize");
     fpassthru($fp);
     fclose($fp);
 }
 
-function createFieldFilter($comboAgentes, $comboColas, $arrCallType, $campaignIn, $campaignOut)
+function playRecording($smarty, $module_name, $pDB)
+{
+    if (!isset($_GET['id'])) {
+        Header('Location: ?menu='.$module_name);
+        return;
+    }
+
+    $oCallsDetail = new paloSantoCallsDetail($pDB);
+    $path = $oCallsDetail->getRecordingFilePath($_GET['id']);
+    if (is_null($path)) {
+        if ($oCallsDetail->errMsg != '') {
+            Header('HTTP/1.1 503 Internal Server Error');
+            return $oCallsDetail->errMsg;
+        } else {
+            Header('HTTP/1.1 404 Not Found');
+            return 'Not Found';
+        }
+    } elseif (!file_exists($path[0])) {
+        if (substr($path[0], -6) == '.wav49') {
+            $path[0] = substr($path[0], 0, strlen($path[0]) - 6).'.WAV';
+            $path[1] = substr($path[1], 0, strlen($path[1]) - 6).'.WAV';
+            if (!file_exists($path[0])) {
+                Header('HTTP/1.1 404 Not Found');
+                return 'Not Found';
+            }
+        } else {
+            Header('HTTP/1.1 404 Not Found');
+            return 'Not Found';
+        }
+    }
+
+    // Return the URL for the audio player with filename parameter
+    $filename = $path[1];
+    $audiourl = construirURL(array(
+        'menu'       => $module_name,
+        'action'     => 'download',
+        'id'         => $_GET['id'],
+        'namefile'   => $filename,
+        'rawmode'    => 'yes',
+    ));
+
+    $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http");
+    return $protocol.'://'.$_SERVER["HTTP_HOST"].'/index.php'.$audiourl;
+}
+
+function createFieldFilter($comboAgentes, $comboColas, $arrCallType, $campaignIn, $campaignOut, $callStatus, $transferFilter)
 {
     // Combo de campañas entrantes
     $comboCampaignIn = array('' => '('._tr('All Incoming Campaigns').')');
@@ -471,6 +708,24 @@ function createFieldFilter($comboAgentes, $comboColas, $arrCallType, $campaignIn
             'INPUT_EXTRA_PARAM'         =>  $comboCampaignOut,
             'VALIDATION_TYPE'           =>  'ereg',
             'VALIDATION_EXTRA_PARAM'    =>  '^[[:digit:]]+$',
+            'ONCHANGE'                  =>  'submit();',
+        ),
+        'status'     =>  array(
+            'LABEL'                     =>  _tr('Status'),
+            'REQUIRED'                  =>  'no',
+            'INPUT_TYPE'                =>  'SELECT',
+            'INPUT_EXTRA_PARAM'         =>  $callStatus,
+            'VALIDATION_TYPE'           =>  'ereg',
+            'VALIDATION_EXTRA_PARAM'    =>  '^(|Success|Abandoned|Failure|NoAnswer|OnQueue|Placing|Ringing|ShortCall|fin-monitoreo)$',
+            'ONCHANGE'                  =>  'submit();',
+        ),
+        'transfer'     =>  array(
+            'LABEL'                     =>  _tr('Transfer'),
+            'REQUIRED'                  =>  'no',
+            'INPUT_TYPE'                =>  'SELECT',
+            'INPUT_EXTRA_PARAM'         =>  $transferFilter,
+            'VALIDATION_TYPE'           =>  'ereg',
+            'VALIDATION_EXTRA_PARAM'    =>  '^(|yes|no)$',
             'ONCHANGE'                  =>  'submit();',
         ),
     );

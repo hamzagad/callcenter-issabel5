@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -35,7 +36,10 @@ class ECCPConn
 
     /* Lista de atributos de funciones (decorator). Actualmente se usa para
      * abstraer la autenticación sin tener que repetirla para cada función
-     * que la requiera */
+     * que la requiera
+     * List of function attributes (decorator). Currently used to abstract
+     * authentication without having to repeat it for each function that
+     * requires it */
     private $_peticionesAttr = array();
 
     function __construct($oMainLog, $tuberia)
@@ -44,6 +48,7 @@ class ECCPConn
         $this->_tuberia = $tuberia;
 
         // Recolectar atributos de los requerimientos
+        // Collect attributes of requirements
         foreach (get_class_methods(get_class($this)) as $sMetodo) {
         	$regs = NULL;
             if (preg_match('/^Request_(.+)$/i', $sMetodo, $regs)) {
@@ -51,7 +56,9 @@ class ECCPConn
                 $atributos = array(
                     'method'    => $sMetodo,
                     'eccpauth'  =>  FALSE,  // Método requiere autenticación ECCP
+                                            // Method requires ECCP authentication
                     'agentauth' =>  FALSE,  // Método requiere auth ECCP y de agente
+                                            // Method requires ECCP and agent authentication
                 );
                 foreach (array('eccpauth', 'agentauth') as $decorator) {
                     if (preg_match("/^(.*){$decorator}_(.+)$/", $sRequerimiento, $regs)) {
@@ -87,15 +94,19 @@ class ECCPConn
         $eventos = NULL;
 
         // Petición es un request, procesar
+        // Request is a request, process it
         if (count($request) != 1) {
             // La petición debe tener al menos un elemento hijo
+            // The request must have at least one child element
             $response = $this->_generarRespuestaFallo(400, 'Bad request');
         } elseif (!isset($request['id'])) {
             // La petición debe tener un identificador
+            // The request must have an identifier
             $response = $this->_generarRespuestaFallo(400, 'Bad request');
         } else {
             if (is_null($this->_db)) {
                 // Todavía no se ha restaurado la conexión a la base de datos
+                // Database connection has not been restored yet
                 $response = $this->_generarRespuestaFallo(500, 'Server error - database failure');
             } else {
                 if ($this->DEBUG) {
@@ -106,10 +117,12 @@ class ECCPConn
                 }
 
                 // Se procede normalmente...
+                // Proceed normally...
                 $comando = NULL;
                 foreach ($request->children() as $c) $comando = $c;
 
                 // Hack para no agregar parámetro a todas las peticiones
+                // Hack to avoid adding parameter to all requests
                 if (!is_null($connvars['appcookie']))
                     $comando->addAttribute('appcookie', $connvars['appcookie']);
 
@@ -120,14 +133,16 @@ class ECCPConn
                         $sRequerimiento.' params: '.print_r($comando, TRUE));
                 }
                 if (!isset($this->_peticionesAttr[$sRequerimiento])) {
-                    $this->_log->output('ERR: (interno) no existe implementación para método: '.$sRequerimiento);
+                    $this->_log->output('ERR: (interno) no existe implementación para método: '.$sRequerimiento.' | EN: no implementation exists for method: '.$sRequerimiento);
                     $response = $this->_generarRespuestaFallo(501, 'Not Implemented');
                 } else {
                     $sMetodoImplementacion = $this->_peticionesAttr[$sRequerimiento]['method'];
 
                     // Autenticación según las decoraciones de la petición
+                    // Authentication according to request decorations
 
                     // Verificación de usuario ECCP válido
+                    // Valid ECCP user verification
                     if (is_null($response) &&
                         ($this->_peticionesAttr[$sRequerimiento]['eccpauth'] ||
                             $this->_peticionesAttr[$sRequerimiento]['agentauth'])) {
@@ -136,8 +151,10 @@ class ECCPConn
                     }
                     try {
                         // Verificación de que agente existe y tiene contraseña válida
+                        // Verification that agent exists and has valid password
                         if (is_null($response) && $this->_peticionesAttr[$sRequerimiento]['agentauth']) {
                             // Verificar que agente está presente
+                            // Verify that agent is present
                             if (!isset($comando->agent_number)) {
                                 $response = $this->_generarRespuestaFallo(400, 'Bad request');
                             } else {
@@ -147,11 +164,13 @@ class ECCPConn
                                 $xml_reqresponse = $xml_response->addChild($sRequerimiento.'_response');
 
                                 // El siguiente código asume formato Agent/9000
+                                // The following code assumes format Agent/9000
                                 if (is_null($this->_parseAgent($sAgente))) {
                                     $this->_agregarRespuestaFallo($xml_reqresponse, 417, 'Invalid agent number');
                                     $response = $xml_response;
                                 } else {
                                     // Verificar que el agente sea válido en el sistema
+                                    // Verify that the agent is valid in the system
                                     if (!$this->_existeAgente($sAgente)) {
                                         $this->_agregarRespuestaFallo($xml_reqresponse, 404, 'Specified agent not found');
                                         $response = $xml_response;
@@ -164,6 +183,7 @@ class ECCPConn
                         }
 
                         // Verificaciones realizadas, ejecutar método
+                        // Verifications completed, execute method
                         if (is_null($response)) {
                             $response = $this->$sMetodoImplementacion($comando);
                             if (is_array($response)) {
@@ -201,13 +221,15 @@ class ECCPConn
         $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
+            // Codes corresponding to database connection loss
             $this->_log->output('WARN: '.__METHOD__.
-                ': conexión a DB parece ser inválida, se cierra...');
+                ': conexión a DB parece ser inválida, se cierra...'.' DB connection appears to be invalid, closing...');
             $this->multiplexSrv->setDBConn(NULL);
         }
     }
 
     // Función que construye una respuesta de petición incorrecta
+    // Function that builds an incorrect request response
     private function _generarRespuestaFallo($iCodigo, $sMensaje, $idPeticion = NULL)
     {
         $x = new SimpleXMLElement("<response />");
@@ -218,6 +240,7 @@ class ECCPConn
     }
 
     // Agregar etiqueta failure a la respuesta indicada
+    // Add failure tag to the indicated response
     private function _agregarRespuestaFallo($x, $iCodigo, $sMensaje)
     {
         $failureTag = $x->addChild("failure");
@@ -228,6 +251,7 @@ class ECCPConn
     private function _parseAgent($sAgente)
     {
         // Se puede expandir para acomodar más tecnologías
+        // Can be expanded to accommodate more technologies
         $regexp = '#^(\w+)/(\w+)$#';
         $regs = NULL;
         return preg_match($regexp, $sAgente, $regs)
@@ -248,6 +272,7 @@ class ECCPConn
     private function Request_eccpauth_filterbyagent($comando)
     {
         // Verificar que agente está presente
+        // Verify that agent is present
         if (!isset($comando->agent_number))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $sAgente = (string)$comando->agent_number;
@@ -256,6 +281,7 @@ class ECCPConn
         $xml_filterbyagentResponse = $xml_response->addChild('filterbyagent_response');
 
         // El siguiente código asume formato Agent/9000
+        // The following code assumes format Agent/9000
         if ($sAgente == 'any') {
             $sAgente = NULL;
         } elseif (is_null($this->_parseAgent($sAgente))) {
@@ -277,14 +303,19 @@ class ECCPConn
      * Procedimiento que implementa el login del cliente del protocolo. No se
      * debe mandar ningún evento ni obedecer ningún otro requerimiento hasta que
      * se haya usado este comando para logonearse exitosamente
+     * Procedure that implements the protocol client login. No events must be
+     * sent nor any other request obeyed until this command has been used to
+     * successfully log in
      *
      * @param   object   $comando    Comando de login
      *      <login>
      *          <username>alice</username>
      *          <password>[md5hash]</password> <!-- md5hash es hash md5 de passwd -->
+     *                                         <!-- md5hash is md5 hash of password -->
      *      </login>
      *
      * @return  object  Respuesta codificada como un SimpleXMLObject
+     *                  Response encoded as a SimpleXMLObject
      *      <login_response>
      *          <success /> | <failure>mensaje</failure>
      *      </login_response>
@@ -292,6 +323,7 @@ class ECCPConn
     private function Request_login($comando)
     {
         // Verificar que usuario y clave están presentes
+        // Verify that username and password are present
         if (!isset($comando->username) || !isset($comando->password))
             return $this->_generarRespuestaFallo(400, 'Bad request');
 
@@ -301,9 +333,15 @@ class ECCPConn
         /* FIXME: No me queda claro de qué manera es más seguro mandar el hash
          * del password, que el password en texto plano, en una conexión sin
          * encriptar, ya que en ambos casos se puede recoger con un sniffer.
-         * Por ahora se acepta el password con o sin hash. */
+         * Por ahora se acepta el password con o sin hash.
+         * FIXME: It's not clear to me in what way it's more secure to send the
+         * password hash than the plaintext password on an unencrypted connection,
+         * since in both cases it can be captured with a sniffer. For now,
+         * password is accepted with or without hash. */
         /* TODO: se puede almacenar cuál agente(s) está autorizado a atender en
-         * la tabla eccp_authorized_clients */
+         * la tabla eccp_authorized_clients
+         * TODO: can store which agent(s) is authorized to attend in the
+         * eccp_authorized_clients table */
         $sPeticionSQL =
             'SELECT COUNT(*) AS N FROM eccp_authorized_clients '.
             'WHERE username = ? AND (md5_password = ? OR md5_password = md5(?))';
@@ -313,9 +351,11 @@ class ECCPConn
         $tupla = $recordset->fetch(); $recordset->closeCursor();
         if ($tupla['N'] > 0) {
             // Usuario autorizado
+            // Authorized user
             $xml_status = $xml_loginResponse->addChild('success');
 
             // Generar una cadena de hash para cookie de aplicación
+            // Generate a hash string for application cookie
             $sAppCookie = md5(posix_getpid().time().mt_rand());
             $xml_loginResponse->addChild('app_cookie', $sAppCookie);
             return array(
@@ -327,6 +367,7 @@ class ECCPConn
             );
         } else {
             // Usuario no existe, o clave incorrecta
+            // User does not exist, or incorrect password
             $this->_agregarRespuestaFallo($xml_loginResponse, 401, 'Invalid username or password');
             return $xml_response;
         }
@@ -335,11 +376,14 @@ class ECCPConn
     /**
      * Procedimiento que implementa el logout del cliente del protocolo. Luego
      * de este requerimiento, se espera que se cierre la conexión.
+     * Procedure that implements the protocol client logout. After this
+     * request, the connection is expected to be closed.
      *
      * @param   object   $comando    Comando de logout
      *      <logout />
      *
      * @return  object  Respuesta codificada como un SimpleXMLObject
+     *                  Response encoded as a SimpleXMLObject
      *      <logout_response />
      */
     private function Request_logout($comando)
@@ -359,6 +403,8 @@ class ECCPConn
 
     // Revisar si el comando indicado tiene un hash válido. El comando debe de
     // tener los campos agent_number y agent_hash
+    // Check if the indicated command has a valid hash. The command must have
+    // the agent_number and agent_hash fields
     private function _hashValidoAgenteECCP($comando, $appcookie)
     {
         if (!isset($comando->agent_number) || !isset($comando->agent_hash))
@@ -373,14 +419,17 @@ class ECCPConn
         $tuplaAgente = $recordset->fetch(); $recordset->closeCursor();
         if (!$tuplaAgente) {
             // Agente no se ha encontrado en la base de datos
+            // Agent not found in database
             return FALSE;
         }
         $sClaveECCPAgente = $tuplaAgente['eccp_password'];
 
         // Para pruebas, se acepta a agente sin password
+        // For testing, agent without password is accepted
         if (is_null($sClaveECCPAgente)) return TRUE;
 
         // Calcular el hash que debió haber enviado el cliente
+        // Calculate the hash that the client should have sent
         $sHashEsperado = md5($appcookie.$sAgente.$sClaveECCPAgente);
         return ($sHashEsperado == $sHashCliente);
     }
@@ -388,6 +437,7 @@ class ECCPConn
     private function Request_eccpauth_getqueuescript($comando)
     {
         // Verificar que queue está presente
+        // Verify that queue is present
         if (!isset($comando->queue))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $queue = (int)$comando->queue;
@@ -397,6 +447,7 @@ class ECCPConn
 
         // Leer la información del script de la cola. El ORDER BY estatus hace
         // que se devuelva A y luego I.
+        // Read the queue script information. ORDER BY status makes it return A then I.
         $recordset = $this->_db->prepare(
             'SELECT script FROM queue_call_entry '.
             'WHERE queue = ? ORDER BY estatus LIMIT 0,1');
@@ -413,6 +464,7 @@ class ECCPConn
     private function Request_eccpauth_getcampaignlist($comando)
     {
         // Tipo de campaña
+        // Campaign type
         $sTipoCampania = NULL;
         if (isset($comando->campaign_type)) {
             $sTipoCampania = (string)$comando->campaign_type;
@@ -425,12 +477,14 @@ class ECCPConn
         else $listaTipos = $listaTiposConocidos;
 
         // Filtro por nombre
+        // Filter by name
         $sNombreContiene = NULL;
         if (isset($comando->filtername)) {
             $sNombreContiene = (string)$comando->filtername;
         }
 
         // Filtro por status
+        // Filter by status
         $sEstado = NULL;
         if (isset($comando->status)) {
             $sEstado = (string)$comando->status;
@@ -444,6 +498,7 @@ class ECCPConn
         }
 
         // Fechas de inicio y fin
+        // Start and end dates
         $sFechaInicio = $sFechaFin = NULL;
         if (isset($comando->datetime_start)) {
             $sFechaInicio = (string)$comando->datetime_start;
@@ -462,6 +517,7 @@ class ECCPConn
         }
 
         // Offset y límite
+        // Offset and limit
         $iOffset = NULL; $iLimite = NULL;
         if (isset($comando->limit)) {
             $iLimite = (int)$comando->limit;
@@ -549,6 +605,7 @@ class ECCPConn
     private function Request_eccpauth_getincomingqueuelist($comando)
     {
         // Offset y límite
+        // Offset and limit
         $iOffset = NULL; $iLimite = NULL;
         if (isset($comando->limit)) {
             $iLimite = (int)$comando->limit;
@@ -591,6 +648,7 @@ class ECCPConn
     private function Request_eccpauth_getcampaignqueuewait($comando)
     {
         // Verificar que id y tipo está presente
+        // Verify that id and type are present
         if (!isset($comando->campaign_id))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         if (!isset($comando->campaign_type))
@@ -599,6 +657,7 @@ class ECCPConn
         $sTipoCampania = (string)$comando->campaign_type;
 
         // Elegir SQL a partir del tipo de campaña requerida
+        // Choose SQL based on the required campaign type
         if ($sTipoCampania == 'incoming') {
             $sqlLlamadasExito = 'SELECT COUNT(*) AS N, duration_wait FROM call_entry WHERE id_campaign = ? AND (status = "activa" OR status = "terminada") GROUP BY duration_wait';
             $sqlLlamadasAbandonadas = 'SELECT COUNT(*) AS N FROM call_entry WHERE id_campaign = ? AND status = "abandonada"';
@@ -616,6 +675,7 @@ class ECCPConn
         $recordset->execute(array($idCampania));
 
         // División del histograma: tamaño de intervalos y límite máximo
+        // Histogram division: interval size and maximum limit
         $iValorIntervalo = 5; $iMaxValor = 30;
         $histograma = array();
         for ($i = 0; $i <= $iMaxValor; $i += $iValorIntervalo) {
@@ -633,6 +693,7 @@ class ECCPConn
         $tuplaAbandonadas = $recordset->fetch(); $recordset->closeCursor();
 
         // Construcción de la respuesta
+        // Building the response
         $xml_histograma = $xml_GetCampaignQueueWaitResponse->addChild('histogram');
         foreach ($histograma as $iPosHistograma => $iCuentaHistograma) {
             $iValorInferior = $iPosHistograma * $iValorIntervalo;
@@ -653,14 +714,19 @@ class ECCPConn
      * una campaña entrante o saliente. Por información estática se entiende la
      * información que no cambia a medida que se progresa con las llamadas
      * asociadas a la campaña.
+     * Procedure that implements reading the static information of an incoming
+     * or outgoing campaign. Static information is understood as the information
+     * that does not change as calls associated with the campaign progress.
      *
      * @param   object  $comando    Comando
      *      <getcampaigninfo>
      *          <campaign_type>outgoing|incoming</campaign_type> <!-- Opcional, por omisión es outgoing -->
+     *                                                                <!-- Optional, defaults to outgoing -->
      *          <campaign_id>123</campaign_id>
      *      </getcampaigninfo>
      *
      * @return  object  Respuesta codificada como un SimpleXMLObject
+     *                  Response encoded as a SimpleXMLObject
      *      <getcampaigninfo_response>
      *          <name>Nombre de la campaña</name>
      *          <type>incoming|outgoing</type>
@@ -670,9 +736,13 @@ class ECCPConn
      *          <working_time_endtime>hh:mm:ss</working_time_endtime>
      *          <queue>8000</queue>
      *          <retries>5</retries>                <!-- Sólo saliente -->
+     *                                                <!-- Outgoing only -->
      *          <trunk>SIP/saliente</trunk>         <!-- Sólo saliente. Si no presente, se asume Local/xxx@from-internal -->
+     *                                                <!-- Outgoing only. If not present, Local/xxx@from-internal is assumed -->
      *          <context>from-internal</context>    <!-- Sólo saliente -->
+     *                                                <!-- Outgoing only -->
      *          <maxchan>32</maxchan>               <!-- Sólo saliente -->
+     *                                                <!-- Outgoing only -->
      *          <status>active|inactive|complete</status>
      *          <script>Texto a usar como script de la campaña</script>
      *          <form id="2">...</form>
@@ -682,6 +752,7 @@ class ECCPConn
     private function Request_eccpauth_getcampaigninfo($comando)
     {
         // Verificar que id y tipo está presente
+        // Verify that id and type are present
         if (!isset($comando->campaign_id))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $idCampania = (int)$comando->campaign_id;
@@ -775,6 +846,7 @@ class ECCPConn
         }
 
         // Leer la información de la campaña
+        // Read the campaign information
         $recordset = $this->_db->prepare($sql_campania);
         $recordset->execute(array($idCampania));
         $tuplaCampania = $recordset->fetch(PDO::FETCH_ASSOC);
@@ -785,11 +857,13 @@ class ECCPConn
         }
 
         // Leer la lista de formularios asociados a esta campaña
+        // Read the list of forms associated with this campaign
         $recordset = $this->_db->prepare($sql_forms);
         $recordset->execute(array($idCampania));
         $idxForm = $recordset->fetchAll(PDO::FETCH_COLUMN, 0);
 
         // Se agrega posible formulario asociado en tabla campaign_entry
+        // Possible associated form is added in campaign_entry table
         if (isset($tuplaCampania['id_form']) &&
             !is_null($tuplaCampania['id_form']) &&
             !in_array($tuplaCampania['id_form'], $idxForm))
@@ -797,6 +871,7 @@ class ECCPConn
         unset($tuplaCampania['id_form']);
 
         // Leer los campos asociados a cada formulario
+        // Read the fields associated with each form
         $listaForm = $this->_leerCamposFormulario($idxForm);
         if (is_null($listaForm)) {
             $this->_agregarRespuestaFallo($xml_GetCampaignInfoResponse, 500, 'Cannot read campaign info (formfields)');
@@ -809,6 +884,7 @@ class ECCPConn
         }
 
         // Construir la respuesta con la información del campo
+        // Build the response with the field information
         $descEstados = array(
             'A' =>  'active',
             'I' =>  'inactive',
@@ -820,7 +896,10 @@ class ECCPConn
                 /* El control de edición en la creación/modificación del script
                  * manda a guardar texto con entidades de HTML a la base de
                  * datos. Para compatibilidad con campañas antiguas, se deshace
-                 * la codificación de HTML aquí. */
+                 * la codificación de HTML aquí.
+                 * The edit control in script creation/modification sends text
+                 * with HTML entities to the database. For compatibility with
+                 * old campaigns, HTML encoding is undone here. */
                 $sValor = html_entity_decode($sValor, ENT_COMPAT, 'UTF-8');
                 $xml_GetCampaignInfoResponse->addChild($sKey, str_replace('&', '&amp;', $sValor));
                 break;
@@ -829,7 +908,9 @@ class ECCPConn
                 $xml_GetCampaignInfoResponse->addChild($sKey, str_replace('&', '&amp;', $sValor));
                 break;
             case 'trunk':   // Sólo para campañas salientes
+                                // Only for outgoing campaigns
                 // Pasar al caso default si el valor no es nulo
+                // Pass to default case if value is not null
                 if (is_null($sValor)) break;
             default:
                 $xml_GetCampaignInfoResponse->addChild($sKey, str_replace('&', '&amp;', $sValor));
@@ -838,6 +919,7 @@ class ECCPConn
         }
 
         // Construir la información de los formularios
+        // Build the forms information
         $xml_Forms = $xml_GetCampaignInfoResponse->addChild('forms');
         foreach ($listaForm as $idForm => $listaCampos) {
             $this->_agregarCamposFormulario($xml_Forms, $idForm, $listaCampos, $listaNombresForm[$idForm]);
@@ -902,6 +984,7 @@ class ECCPConn
             $xml_Field->addChild('type', str_replace('&', '&amp;', $tuplaCampo['type']));
 
             // TODO: permitir especificar longitud de la entrada
+            // TODO: allow specifying input length
             if (!in_array($tuplaCampo['type'], array('LABEL', 'DATE')))
                 $xml_Field->addChild('maxsize', 250);
 
@@ -909,6 +992,9 @@ class ECCPConn
                 // OJO: PRIMERA FORMA ANORMAL!!!
                 // La implementación actual del código de formulario
                 // agrega una coma de más al final de la lista
+                // CAUTION: FIRST ABNORMAL FORM!!!
+                // The current form code implementation adds an extra comma
+                // at the end of the list
                 if (strlen($tuplaCampo['value']) > 0 &&
                     substr($tuplaCampo['value'], strlen($tuplaCampo['value']) - 1, 1) == ',') {
                     $tuplaCampo['value'] = substr($tuplaCampo['value'], 0, strlen($tuplaCampo['value']) - 1);
@@ -922,6 +1008,9 @@ class ECCPConn
                 // TODO: (2011-02-02) soporte de formulario para valor por
                 // omisión todavía no está implementado en agent_console o en
                 // definición de formulario en interfaz web
+                // Use 'value' value as default value.
+                // TODO: (2011-02-02) form support for default value is not yet
+                // implemented in agent_console or in web interface form definition
                 $sDefVal = trim($tuplaCampo['value']);
                 if ($sDefVal != '')
                     $xml_Field->addChild('default_value', str_replace('&', '&amp;', $sDefVal));
@@ -932,6 +1021,7 @@ class ECCPConn
     private function Request_eccpauth_getcallinfo($comando)
     {
         // Si no hay un tipo de campaña, se asume saliente
+        // If no campaign type is present, outgoing is assumed
         $sTipoCampania = 'outgoing';
         if (isset($comando->campaign_type)) {
             $sTipoCampania = (string)$comando->campaign_type;
@@ -940,16 +1030,19 @@ class ECCPConn
             return $this->_generarRespuestaFallo(400, 'Bad request');
 
         // El ID de campaña es opcional para campañas entrantes
+        // Campaign ID is optional for incoming campaigns
         if (!isset($comando->campaign_id) && $sTipoCampania != 'incoming')
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $idCampania = isset($comando->campaign_id) ? (int)$comando->campaign_id : NULL;
 
         // Verificar que id de llamada está presente
+        // Verify that call ID is present
         if (!isset($comando->call_id))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $idLlamada = (int)$comando->call_id;
 
         // Ejecutar la llamada y verificar la respuesta...
+        // Execute the call and verify the response...
         $infoLlamada = leerInfoLlamada($this->_db, $sTipoCampania, $idCampania, $idLlamada);
 
         $xml_response = new SimpleXMLElement('<response />');
@@ -964,11 +1057,13 @@ class ECCPConn
         }
 
         // Armar la respuesta XML
+        // Build the XML response
         self::construirRespuestaCallInfo($infoLlamada, $xml_GetCallInfoResponse);
         return $xml_response;
     }
 
     // Compartido entre getcallinfo y evento agentlinked
+    // Shared between getcallinfo and agentlinked event
     static function construirRespuestaCallInfo($infoLlamada, $xml_GetCallInfoResponse)
     {
         foreach ($infoLlamada as $sKey => $valor) {
@@ -1040,11 +1135,13 @@ class ECCPConn
     private function Request_agentauth_setcontact($comando)
     {
         // Verificar que id de llamada está presente
+        // Verify that call ID is present
         if (!isset($comando->call_id))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $idLlamada = (int)$comando->call_id;
 
         // Verificar que id de contacto está presente
+        // Verify that contact ID is present
         if (!isset($comando->contact_id))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $idContacto = (int)$comando->contact_id;
@@ -1055,6 +1152,7 @@ class ECCPConn
         $bExito = TRUE;
 
         // Verificar que existe realmente la llamada entrante
+        // Verify that the incoming call actually exists
         if ($bExito) {
             $recordset = $this->_db->prepare(
                 'SELECT COUNT(*) AS N FROM call_entry WHERE id = ?');
@@ -1067,6 +1165,7 @@ class ECCPConn
         }
 
         // Verificar que el agente declarado realmente atendió esta llamada
+        // Verify that the declared agent actually attended this call
         if ($bExito) {
             $sAgenteLlamada = $this->_leerAgenteLlamada('incoming', $idLlamada);
             if (is_null($sAgenteLlamada) || $sAgenteLlamada != (string)$comando->agent_number) {
@@ -1076,6 +1175,7 @@ class ECCPConn
         }
 
         // Verificar que existe realmente el contacto indicado
+        // Verify that the indicated contact actually exists
         if ($bExito) {
             $recordset = $this->_db->prepare(
                 'SELECT COUNT(*) AS N FROM contact WHERE id = ?');
@@ -1109,6 +1209,7 @@ class ECCPConn
     private function Request_agentauth_saveformdata($comando)
     {
         // Si no hay un tipo de campaña, se asume saliente
+        // If no campaign type is present, outgoing is assumed
         $sTipoCampania = 'outgoing';
         if (isset($comando->campaign_type)) {
             $sTipoCampania = (string)$comando->campaign_type;
@@ -1117,11 +1218,13 @@ class ECCPConn
             return $this->_generarRespuestaFallo(400, 'Bad request');
 
         // Verificar que id de llamada está presente
+        // Verify that call ID is present
         if (!isset($comando->call_id))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $idLlamada = (int)$comando->call_id;
 
         // Verificar que elemento forms está presente
+        // Verify that forms element is present
         if (!isset($comando->forms))
             return $this->_generarRespuestaFallo(400, 'Bad request');
         $infoDatos = array();
@@ -1143,6 +1246,7 @@ class ECCPConn
         $xml_saveFormDataResponse = $xml_response->addChild('saveformdata_response');
 
         // Verificar que el agente declarado realmente atendió esta llamada
+        // Verify that the declared agent actually attended this call
         $sAgenteLlamada = $this->_leerAgenteLlamada($sTipoCampania, $idLlamada);
         if (is_null($sAgenteLlamada) || $sAgenteLlamada != (string)$comando->agent_number) {
             $this->_agregarRespuestaFallo($xml_saveFormDataResponse, 401, 'Unauthorized agent');
@@ -1150,6 +1254,7 @@ class ECCPConn
         }
 
         // Leer la información del formulario, para validación
+        // Read the form information for validation
         $infoFormulario = $this->_leerCamposFormulario(array_keys($infoDatos));
         if (is_null($infoFormulario)) {
             $this->_agregarRespuestaFallo($xml_saveFormDataResponse, 500, 'Cannot read form information');
@@ -1179,11 +1284,13 @@ class ECCPConn
                     if ($infoCampo['type'] == 'LABEL') continue;
 
                     // TODO: extraer máxima longitud de base de datos
+                    // TODO: extract maximum length from database
                     if (strlen($sValor) > 250) {
                         $bDatosValidos = FALSE;
                         $this->_agregarRespuestaFallo($xml_saveFormDataResponse, 413, 'Form value too large: '.$idForm.' - '.$idField);
 
                     // Validar que el campo de fecha tenga valor correcto
+                    // Validate that date field has correct value
                     } elseif ($infoCampo['type'] == 'DATE' &&
                         $sValor != '' && !(preg_match('/^\d{4}-\d{2}-\d{2}$/', $sValor) || preg_match('/^\d{4}-\d{2}-\d{2} d{2}:\d{2}:\d{2}$/', $sValor))) {
                         $bDatosValidos = FALSE;
@@ -1388,7 +1495,7 @@ class ECCPConn
         $dbParams = array();
         $hConfig = fopen($sNombreConfig, 'r');
         if (!$hConfig) {
-            $this->_log->output('ERR: no se puede abrir archivo '.$sNombreConfig.' para lectura de parámetros FreePBX.');
+            $this->_log->output('ERR: no se puede abrir archivo '.$sNombreConfig.' para lectura de parámetros FreePBX. | EN: cannot open file '.$sNombreConfig.' for FreePBX parameter reading.');
             return NULL;
         }
         while (!feof($hConfig)) {
@@ -1503,16 +1610,20 @@ class ECCPConn
         $r = NULL;
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
+            // app_agent_pool (Asterisk 12+): Originate call to agent-login context
+            // The agent-login context runs AgentLogin() application
             $this->_tuberia->AMIEventProcess_agregarIntentoLoginAgente($sAgente, $sExtension, $iTimeout);
             $r = $this->_ami->Originate(
-                $sExtension,        // channel
-                NULL, NULL, NULL,   // extension, context, priority
-                'AgentLogin',       // application
-                $agentFields['number'],        // data
-                NULL,
-                $sAgente.' Login', // CallerID
+                $sExtension,                    // channel (SIP/1064)
+                $agentFields['number'],         // exten (agent number)
+                'agent-login',                  // context (runs AgentLogin app)
+                1,                              // priority
+                NULL,                           // application (use context instead)
+                NULL,                           // data
+                30000,                          // timeout in ms
+                $sAgente.' Login',              // CallerID
                 NULL, NULL,
-                TRUE,               // async
+                TRUE,                           // async
                 'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente     // action-id
                 );
             if ($r['Response'] != 'Success') {
@@ -1529,7 +1640,7 @@ class ECCPConn
             $listaColas = $this->_tuberia->AMIEventProcess_listarTotalColasTrabajoAgente(array($sAgente));
             if (count($listaColas[$sAgente][1]) <= 0) {
                 // Este agente no tiene colas asociadas
-                $this->_log->output('WARN: agente dinámico '.$sAgente.' no es miembro dinámico de ninguna cola, no se puede realizar login.');
+                $this->_log->output('WARN: agente dinámico '.$sAgente.' no es miembro dinámico de ninguna cola, no se puede realizar login. | EN: dynamic agent '.$sAgente.' is not dynamic member of any queue, cannot login.');
                 $r = array(
                     'Response'  =>  'Error',
                     'Message'   =>  'Extension not a dynamic member of any queue.',
@@ -1619,29 +1730,29 @@ class ECCPConn
         // Canal que hizo el logoneo hacia la cola
         $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
 
-        /* Ejecutar Agentlogoff. Esto asume que el agente está de la forma
-         * Agent/9000. La actualización de las bases de datos de auditoría y
-         * breaks se delega a los manejadores de eventos */
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
-            $r = $this->_ami->Agentlogoff($agentFields['number']);
-
-            /* Si el agente todavía no ha introducido la clave, el Agentlogoff
-             * anterior no tiene efecto, así que se manda a colgar el canal
-             * directamente.
-             */
-            if (!is_null($infoAgente) && $infoAgente['estado_consola'] == 'logging') {
-                $sCanalExt = $infoAgente['login_channel'];
-                if (is_null($sCanalExt)) $sCanalExt = $infoAgente['extension'];
-                if (!is_null($sCanalExt)) $this->_ami->Hangup($sCanalExt);
+            // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
+            // There is no Agentlogoff AMI command in app_agent_pool
+            $sCanalLogin = NULL;
+            if (!is_null($infoAgente)) {
+                $sCanalLogin = $infoAgente['login_channel'];
+                if (is_null($sCanalLogin)) {
+                    $sCanalLogin = $infoAgente['extension'];
+                }
+            }
+            if (!is_null($sCanalLogin)) {
+                $this->_ami->Hangup($sCanalLogin);
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
             }
         } else {
-            // Si hay cliente conectado, le cierro el canal.
-            if (!is_null($infoAgente['clientchannel'])) {
+            // SIP/IAX2/PJSIP: Close client channel if connected
+            if (!is_null($infoAgente) && !is_null($infoAgente['clientchannel'])) {
                 $this->_ami->Hangup($infoAgente['clientchannel']);
             }
 
-            // AMIEventProcess sabe de qué colas hay que quitar al agente
+            // Remove from all queues
             $listaColas = $this->_tuberia->AMIEventProcess_listarTotalColasTrabajoAgente(array($sAgente));
             foreach ($listaColas[$sAgente][0] as $cola) {
                 $r = $this->_ami->QueueRemove($cola, $sAgente);
@@ -2088,7 +2199,139 @@ class ECCPConn
         }
 
         $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
-        if (!is_null($infoLlamada)) $hangchannel = $infoLlamada['agentchannel'];
+        if (!is_null($infoLlamada)) {
+            $hangchannel = $infoLlamada['agentchannel'];
+            // For app_agent_pool (Agent type), Agent/XXXX is not a real channel.
+            // Use actualchannel (caller's channel) to end the call.
+            // Agent stays in AgentLogin session.
+            if ($agentFields['type'] == 'Agent' && preg_match('|^Agent/\d+$|', $hangchannel)) {
+                // Check if attended transfer is in progress
+                $isAttendedTransfer = false;
+                if (!is_null($infoLlamada['callid'])) {
+                    $dbTable = ($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls';
+                    $sth = $this->_db->prepare("SELECT transfer FROM {$dbTable} WHERE id = ?");
+                    $sth->execute(array($infoLlamada['callid']));
+                    $transferDest = $sth->fetchColumn(0);
+                    $sth->closeCursor();
+                    $isAttendedTransfer = !empty($transferDest);
+                }
+
+                if ($isAttendedTransfer) {
+                    // ========================================================================
+                    // ATTENDED TRANSFER COMPLETION
+                    // Redirect agent's login_channel to atxfer-complete context.
+                    // This causes agent to leave consultation bridge (Atxfer completes),
+                    // then re-enter AgentLogin to stay logged in.
+                    // ========================================================================
+                    $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+
+                    // Get agent's login_channel
+                    $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+                    if (is_null($infoAgente) || empty($infoAgente['login_channel'])) {
+                        $this->_log->output('WARN: No login_channel found for agent, falling back to normal hangup');
+                        $hangchannel = $infoLlamada['actualchannel'];
+                        $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                    } else {
+                        $loginChannel = $infoAgente['login_channel'];
+                        // Extract agent number (e.g., "1001" from "Agent/1001")
+                        $agentNumber = substr($sAgente, strpos($sAgente, '/') + 1);
+
+                        $this->_log->output('DEBUG: Agent login_channel: '.$loginChannel);
+                        $this->_log->output('DEBUG: Agent number: '.$agentNumber);
+
+                        // Signal AMIEventProcess to suppress the upcoming Agentlogoff event
+                        // The agent will re-enter AgentLogin via the atxfer-complete context
+                        $this->_log->output('DEBUG: Signaling AMIEventProcess to suppress Agentlogoff for '.$sAgente);
+                        $this->_tuberia->msg_AMIEventProcess_prepararAtxferComplete($sAgente);
+
+                        // Redirect agent's channel to atxfer-complete context
+                        // This causes agent to leave consultation bridge (Atxfer completes),
+                        // then the context runs AgentLogin to keep agent logged in
+                        $this->_log->output('DEBUG: Redirecting '.$loginChannel.' to atxfer-complete/'.$agentNumber);
+                        $r = $this->_ami->Redirect(
+                            $loginChannel,        // Channel: agent's login_channel
+                            '',                   // ExtraChannel: not used
+                            $agentNumber,         // Exten: agent number (e.g., 1001)
+                            'atxfer-complete',    // Context: atxfer-complete context
+                            1                     // Priority
+                        );
+                        $this->_log->output('DEBUG: Redirect result: '.print_r($r, true));
+
+                        if ($r['Response'] == 'Success') {
+                            $this->_log->output('INFO: Attended transfer completion initiated - agent redirected to atxfer-complete');
+                            // Release agent from call tracking
+                            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+
+                            $xml_hangupResponse->addChild('success');
+                            return $xml_response;
+                        } else {
+                            $this->_log->output('WARN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
+                            $hangchannel = $infoLlamada['actualchannel'];
+                            $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                        }
+                    }
+                } else {
+                    // Normal call: Hang up caller's channel, agent stays in AgentLogin
+                    $hangchannel = $infoLlamada['actualchannel'];
+                }
+            }
+            // For callback agents (SIP/IAX2/PJSIP type), agentchannel may be just the device name
+            // (e.g., SIP/101) without unique call ID. Check if it has a hyphen, if not use actualchannel.
+            elseif ($agentFields['type'] != 'Agent') {
+                // Check if attended transfer is in progress for callback agents
+                $isAttendedTransfer = false;
+                if (!is_null($infoLlamada['callid'])) {
+                    $dbTable = ($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls';
+                    $sth = $this->_db->prepare("SELECT transfer FROM {$dbTable} WHERE id = ?");
+                    $sth->execute(array($infoLlamada['callid']));
+                    $transferDest = $sth->fetchColumn(0);
+                    $sth->closeCursor();
+                    $isAttendedTransfer = !empty($transferDest);
+                }
+
+                if ($isAttendedTransfer) {
+                    // ========================================================================
+                    // CALLBACK AGENT ATTENDED TRANSFER COMPLETION
+                    // For callback agents, during attended transfer hangup we need to
+                    // hang up the agent's channel (not the customer's) to complete
+                    // the transfer and connect customer to colleague.
+                    // ========================================================================
+                    $this->_log->output('DEBUG: ========== CALLBACK AGENT ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+
+                    // Use agentchannel for callback agents to complete the transfer
+                    // If agentchannel doesn't have unique ID (no hyphen), get the actual agent channel
+                    if (strpos($hangchannel, '-') === false) {
+                        // agentchannel is just "SIP/101" - need to find the actual channel with unique ID
+                        // Try using actualAgentChannel if available
+                        if (isset($infoLlamada['actualAgentChannel']) && !empty($infoLlamada['actualAgentChannel'])) {
+                            $hangchannel = $infoLlamada['actualAgentChannel'];
+                            $this->_log->output('DEBUG: Using actualAgentChannel: '.$hangchannel);
+                        } else {
+                            // Fallback: try to construct the channel from current agent info
+                            $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+                            if (!is_null($infoAgente) && !empty($infoAgente['channel']) && strpos($infoAgente['channel'], '-') !== false) {
+                                $hangchannel = $infoAgente['channel'];
+                                $this->_log->output('DEBUG: Using agent channel from infoSeguimiento: '.$hangchannel);
+                            } else {
+                                // Last resort: use the agentchannel as-is and hope Asterisk can match it
+                                $this->_log->output('DEBUG: Using agentchannel without unique ID: '.$hangchannel);
+                            }
+                        }
+                    }
+                    $this->_log->output('DEBUG: Callback agent attended transfer - hanging up channel: '.$hangchannel);
+
+                    // Release agent from call tracking
+                    $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+
+                    $this->_log->output('INFO: Callback agent attended transfer completion - will hangup agent channel');
+                } elseif (strpos($hangchannel, '-') === false) {
+                    // No attended transfer - normal hangup, use actualchannel
+                    $hangchannel = $infoLlamada['actualchannel'];
+                }
+            }
+        }
         if (is_null($hangchannel)) {
             // Verificar si la llamada manual está en proceso de marcado
             $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAgendada($sAgente);
@@ -2096,7 +2339,7 @@ class ECCPConn
                 /* Para agentes estáticos, el canal de agente se puede usar
                  * directamente para abortar. Los agentes dinámicos requieren
                  * el canal. */
-                $hangchannel = ($agentFields['type'] == 'Agent') ? $sAgente : $infoLlamada['channel'];
+                $hangchannel = ($agentFields['type'] == 'Agent') ? $infoLlamada['actualchannel'] : $infoLlamada['channel'];
             }
         }
 
@@ -2105,7 +2348,7 @@ class ECCPConn
             return $xml_response;
         }
 
-        // Mandar a colgar la llamada usando el canal Agent/9000
+        // Mandar a colgar la llamada
         $r = $this->_ami->Hangup($hangchannel);
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: No se puede colgar la llamada para '.$sAgente.
@@ -2269,7 +2512,12 @@ class ECCPConn
         } elseif ($infoAgente['num_pausas'] > 0) {
             $sAgentStatus = 'paused';
         } elseif ($infoAgente['estado_consola'] == 'logged-in') {
-            $sAgentStatus = 'online';
+            // Check if agent is ringing (queue status = 6 = AST_DEVICE_RINGING)
+            if (isset($infoAgente['queue_status']) && $infoAgente['queue_status'] == 6) {
+                $sAgentStatus = 'ringing';
+            } else {
+                $sAgentStatus = 'online';
+            }
         } else {
             $sAgentStatus = 'offline';
         }
@@ -2640,19 +2888,19 @@ LEER_STATS_CAMPANIA;
         if (is_array($horario)) {
             // Formatos correctos de fecha
             if (!isset($horario['date_init']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $horario['date_init'])) {
-                $this->_log->output('ERR: al agendar llamada: fecha de inicio inválida, se espera YYYY-MM-DD');
+                $this->_log->output('ERR: al agendar llamada: fecha de inicio inválida, se espera YYYY-MM-DD | EN: when scheduling call: invalid start date, expected YYYY-MM-DD');
                 $errcode = 400; $errdesc = 'Bad request: invalid date_init';
                 return FALSE;
             } elseif (!isset($horario['date_end']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $horario['date_end'])) {
-                $this->_log->output('ERR: al agendar llamada: fecha de fin inválida, se espera YYYY-MM-DD');
+                $this->_log->output('ERR: al agendar llamada: fecha de fin inválida, se espera YYYY-MM-DD | EN: when scheduling call: invalid end date, expected YYYY-MM-DD');
                 $errcode = 400; $errdesc = 'Bad request: invalid date_end';
                 return FALSE;
             } elseif (!isset($horario['time_init']) || !preg_match('/^\d{2}:\d{2}:\d{2}$/', $horario['time_init'])) {
-                $this->_log->output('ERR: al agendar llamada: hora de inicio inválida, se espera HH:MM:SS');
+                $this->_log->output('ERR: al agendar llamada: hora de inicio inválida, se espera HH:MM:SS | EN: when scheduling call: invalid start time, expected HH:MM:SS');
                 $errcode = 400; $errdesc = 'Bad request: invalid time_init';
                 return FALSE;
             } elseif (!isset($horario['time_end']) || !preg_match('/^\d{2}:\d{2}:\d{2}$/', $horario['time_end'])) {
-                $this->_log->output('ERR: al agendar llamada: hora de fin inválida, se espera HH:MM:SS');
+                $this->_log->output('ERR: al agendar llamada: hora de fin inválida, se espera HH:MM:SS | EN: when scheduling call: invalid end time, expected HH:MM:SS');
                 $errcode = 400; $errdesc = 'Bad request: invalid time_end';
                 return FALSE;
             }
@@ -2901,6 +3149,8 @@ SQL_INSERTAR_AGENDAMIENTO;
             return $xml_response;
         } else {
             $this->_registrarTransferencia($infoLlamada, $sExtension);
+            // Notify AMIEventProcess to release the agent after blind transfer
+            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
         }
 
         $xml_transferResponse->addChild('success');
@@ -2935,15 +3185,31 @@ SQL_INSERTAR_AGENDAMIENTO;
             return $xml_response;
         }
 
-        // Mandar a transferir la llamada usando el canal Agent/9000
+        // Get agent info to determine agent type and login_channel
+        $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+
+        // DEBUG: log agent info
+        $this->_log->output('DEBUG: '.__METHOD__.': infoAgente = '.print_r($infoAgente, true));
+
+        // For Agent type (app_agent_pool), use login_channel which is the actual SIP/PJSIP phone
+        // login_channel exists for Agent type agents who are logged in via AgentLogin
+        if (!is_null($infoAgente) && !empty($infoAgente['login_channel'])) {
+            $transferChannel = $infoAgente['login_channel'];
+            $this->_log->output('DEBUG: '.__METHOD__.': Using login_channel: '.$transferChannel);
+        } else {
+            $transferChannel = isset($infoLlamada['actualAgentChannel'])
+                ? $infoLlamada['actualAgentChannel']
+                : $infoLlamada['agentchannel'];
+            $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel: '.$transferChannel);
+        }
         $r = $this->_ami->Atxfer(
-            $infoLlamada['agentchannel'],
+            $transferChannel,
             $sExtension.'#',    // exten
             'from-internal',    // context
             1);                 // priority
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.': al transferir llamada: no se puede transferir '.
-                $infoLlamada['agentchannel'].' a '.$sExtension.' - '.$r['Message']);
+                $transferChannel.' a '.$sExtension.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call');
             return $xml_response;
         } else {
@@ -3071,6 +3337,9 @@ SQL_INSERTAR_AGENDAMIENTO;
 
         // Obtener la información de la llamada atendida por el agente
         $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
+        if ($this->DEBUG) {
+            $this->_log->output("DEBUG: unhold - infoLlamada: ".print_r($infoLlamada, 1));
+        }
         if (is_null($infoLlamada) || is_null($infoLlamada['callid'])) {
             $this->_agregarRespuestaFallo($xml_unholdResponse, 417, 'Agent not in call');
             return $xml_response;
@@ -3078,27 +3347,50 @@ SQL_INSERTAR_AGENDAMIENTO;
 
         // Si el agente no estaba en hold, se devuelve éxito sin hacer nada más
         if (is_null($infoSeguimiento['id_audit_hold'])) {
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: unhold - agent not on hold, id_audit_hold is NULL");
+            }
             $xml_unholdResponse->addChild('success');
             return $xml_response;
         }
 
-        if (!is_null($infoLlamada['park_exten'])) {
+        // Check if call is on hold and park_exten is available
+        if ($this->DEBUG) {
+            $this->_log->output("DEBUG: unhold - checking park_exten, isset: ".isset($infoLlamada['park_exten']));
+        }
+        if (isset($infoLlamada['park_exten']) && !is_null($infoLlamada['park_exten'])) {
             $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
+
+            // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
+            // because Agent/XXXX is not a valid channel for Originate
+            $sCanalOrigen = $sAgente;
+            if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
+                $sCanalOrigen = 'Local/'.$regs[1].'@agents';
+            }
+
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: intentando recuperar llamada:\n".
-                    "\tChannel      =>  $sAgente\n".
+                    "\tChannel      =>  $sCanalOrigen\n".
                     "\tExten        =>  {$infoLlamada['park_exten']}\n".
                     "\tContext      =>  from-internal\n".
                     "\tActionID     =>  $sActionID");
             }
 
             // Sacar la llamada del parqueo y redirigirla al agente pausado
+            // Set CallerID to show original caller info when retrieving from hold
+            $sCallerID = NULL;
+            if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
+                $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
+            }
+
             $r = $this->_ami->Originate(
-                $sAgente,               // channel
+                $sCanalOrigen,               // channel
                 $infoLlamada['park_exten'],  // extension
                 'from-internal',        // context
                 '1',                    // priority
-                NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL,       // Application, Data, Timeout
+                $sCallerID,             // CallerID
+                NULL, NULL,             // Variable, Account
                 TRUE,                   // async
                 $sActionID
                 );
