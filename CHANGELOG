@@ -1,16 +1,20 @@
-4.0.0-6
+5.0.0-1
+* ADDED: Documentation: Added ECCP_Protocol.md (English compact translation of protocol spec).
+* ADDED: Translation: All dialer comments, logs, docblocks are translated to English.
 * CHANGED: Dialer: Migrated from chan_agent to app_agent_pool (Asterisk 12+).
   Agent template format in agents.conf now uses [XXXX](agent-defaults).
   Queue member interface changed to Local/XXXX@agents with StateInterface=Agent:XXXX.
-* ADDED: Dialer: New dialplan contexts for app_agent_pool: agents, agent-connect,
-  agent-logout.
+* ISSUE: Agent type incoming campaign attended transfer initiation - doesn't work due to 
+  Asterisk app_agent_pool bridge swap optimization. This is a fundamental Asterisk limitation.
+* ADDED: Dialer: New dialplan contexts for app_agent_pool: agents, agent-login,
+  atxfer-complete.
 * ADDED: Installer: Added instalarAgentDefaultsTemplate() function to create
   agent-defaults template in agents.conf during installation.
 * FIXED: Dialer: Fixed agent logout on service stop (SIGTERM handling).
 * FIXED: Dialer: Fixed QueuePause "Interface not found" error in Agente.class.php
   by using correct Local/XXXX@agents interface for Agent type.
 * FIXED: Dialer: Fixed TalkingToChan undefined index notice in AMIEventProcess.class.php.
-* CHANGED: Agent Console: Password-based login only, removed extension/callback fields.
+* CHANGED: Agent Console: Password-based login only, added password field for agents.
 * CHANGED: Campaign Monitoring: Agent sorting now shows online agents first
   (alphabetical), then offline agents last.
 * FIXED: Campaign Monitoring: Fixed agent status colorizing in JavaScript.
@@ -23,9 +27,27 @@
 * FIXED: PHP 8: Replaced old-style constructors with __construct() in 22 module
   library files.
 * ADDED: Database: Added PJSIP to agent type enum in schema files.
-* ADDED: Documentation: Added ECCP_Protocol.md (English compact translation of protocol spec).
 * REMOVED: Removed reactivateAgent.php workaround (no longer needed after QueuePause fix).
 * MAINTAINED Backward Compatibility with PHP v5.4
+* MAINTAINED Installation script and removal to match new requirements and modules.
+* FIXED: SSE based monitoring modules by adding issabel-sse.conf to Apache and Maintaining
+  The realtime monitoring modules code.
+* MAINTAINED DB Schema, unified the database while maintaining the updates in installer.php.
+* ADDED DB removal option in the remove script.
+* ADDED Hold/End Hold option in the agent console.
+* ADDED Rining/On Hold Status in the monitoring.
+* ADDED Calls counter in the calls detail module.
+* ADDED Listen option with modern HTML5 playback player to calls detail module.
+* ADDED Extra filters (Status, Transfer) to calls detail module.
+* ADDED new monitoring report: Incoming Campaigns Panel: Realtime monitoring for incoming campaigns
+  All agents combined and All campaigns present with shift based filter support for overnight.
+* ADDED New monitoring report: Outgoing Campaigns Panel: Realtime monitoring for outgoing campaigns
+  All agents combined and All campaigns present with shift based filter support for overnight
+  Counts per attempt not per record (ShortCall and Abandoned both retries are counted as Abandoned).
+* ADDED New report: Agent Journey: list report with all agent activities timebased sorted with
+  option to filter with agent and to filter with in-call Hold not included.
+* ADDED New report: Agent Breaks: list report with all agent breaks (Since - Till) with 
+  duration and type, Filter as Detailed or General, and filter to exclude in-call Hold.
 
 2.2.0-17 (SVN Revision 7678)
 * CHANGED: Dialer: remove unused attribute "channel" from sqlinsertcalls message
