@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -27,6 +28,7 @@ abstract class MultiplexConn
     public $sKey = NULL;
 
     // Todas las implementaciones asumen que $multiplexSrv y $sKey son válidos
+    // All implementations assume that $multiplexSrv and $sKey are valid
     abstract public function procesarInicial();
     abstract public function procesarCierre();
     abstract public function parsearPaquetes($sDatos);

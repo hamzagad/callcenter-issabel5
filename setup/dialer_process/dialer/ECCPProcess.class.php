@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -24,12 +25,17 @@
 class ECCPProcess extends TuberiaProcess
 {
     private $DEBUG = FALSE; // VERDADERO si se activa la depuración
+                            // TRUE if debugging is enabled
 
     private $_log;      // Log abierto por framework de demonio
+                        // Log opened by daemon framework
 
     /* Si se pone a VERDADERO, el programa intenta finalizar y no deben
      * aceptarse conexiones nuevas. Todas las conexiones existentes serán
      * desconectadas. */
+    /* If set to TRUE, the program attempts to finish and no new
+     * connections should be accepted. All existing connections will be
+     * disconnected. */
     private $_finalizandoPrograma = FALSE;
 
     public function inicioPostDemonio($infoConfig, &$oMainLog)
@@ -40,6 +46,7 @@ class ECCPProcess extends TuberiaProcess
         $this->_tuberia->setLog($this->_log);
 
         // Registro de manejadores de eventos
+        // Registration of event handlers
         foreach (array('actualizarConfig', 'emitirEventos',) as $k)
             $this->_tuberia->registrarManejador('SQLWorkerProcess', $k, array($this, "msg_$k"));
         foreach (array('recordingMute', 'recordingUnmute') as $k)
@@ -48,15 +55,18 @@ class ECCPProcess extends TuberiaProcess
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
+        // Registration of event handlers from HubProcess
         $this->_tuberia->registrarManejador('HubProcess', 'finalizando', array($this, "msg_finalizando"));
 
         // Se ha tenido éxito si se están escuchando conexiones
+        // Success if connections are being listened to
         return $this->_multiplex->escuchaActiva();
     }
 
     public function procedimientoDemonio()
     {
         // Rutear todos los mensajes pendientes entre tareas y agentes
+        // Route all pending messages between tasks and agents
         if ($this->_multiplex->procesarPaquetes())
             $this->_multiplex->procesarActividad(0);
         else $this->_multiplex->procesarActividad(1);
@@ -67,6 +77,7 @@ class ECCPProcess extends TuberiaProcess
     public function limpiezaDemonio($signum)
     {
         // Mandar a cerrar todas las conexiones activas
+        // Order to close all active connections
         $this->_multiplex->finalizarServidor();
     }
 
@@ -95,6 +106,7 @@ class ECCPProcess extends TuberiaProcess
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         $this->_log->output('INFO: recibido mensaje de finalización, se desconectan conexiones...');
+        // INFO: received termination message, disconnecting connections...
         $this->_finalizandoPrograma = TRUE;
         $this->_multiplex->finalizarConexionesECCP();
         $this->_tuberia->msg_HubProcess_finalizacionTerminada();
@@ -154,10 +166,12 @@ class ECCPProcess extends TuberiaProcess
         switch ($k) {
         case 'dialer_debug':
             $this->_log->output('INFO: actualizando DEBUG...');
+            // INFO: updating DEBUG...
             $this->DEBUG = $v;
             break;
         default:
             $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k);
+            // WARN: unimplemented config key is ignored: '.$k
             break;
         }
     }

@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                                |
   | http://www.issabel.org                                               |
@@ -34,14 +35,20 @@ class AMIClientConn extends MultiplexConn
     private $server;
     private $port;
     private $_listaEventos = array();   // Eventos pendientes por procesar
+                                        // Pending events to be processed
     private $_response = NULL;          // Respuesta recibida del último comando
+                                        // Response received from the last command
 
     public $cuentaEventos = array();    // Cuenta de eventos recibidos
+                                        // Count of received events
 
     /* El siguiente miembro sólo se usa por los comandos database_* que evaluan
      * response[data] como una respuesta. En caso de error se devuelve NULL o
      * FALSE como corresponda, y el cliente debe examinar raw_response para
-     * obtener más detalles. */
+     * obtener más detalles.
+     * The following member is only used by database_* commands that evaluate
+     * response[data] as a response. In case of error, NULL or FALSE is returned
+     * as appropriate, and the client must examine raw_response to get more details. */
     public $raw_response = NULL;
 
    /**
@@ -53,10 +60,12 @@ class AMIClientConn extends MultiplexConn
     private $event_handlers;
 
     // Lista de peticiones AMI encoladas con su respectivo callback.
+    // List of queued AMI requests with their respective callbacks
     private $_queue_requests = array();
     private $_sync_wait = FALSE;
 
     // Definiciones de los comandos AMI conocidos
+    // Definitions of known AMI commands
     private $_ami_cmds = array(
         'AbsoluteTimeout' =>
             array('Channel' => TRUE, 'Timeout' => TRUE),
@@ -65,12 +74,16 @@ class AMIClientConn extends MultiplexConn
                 'AckCall' => array('required' => FALSE, 'default' => 'true')),
         'AgentLogin' =>
             array('Agent'=> TRUE, 'Channel' => TRUE),
-        'Agentlogoff' =>
-            array('Agent' => TRUE),
+        // Deprecated: Agentlogoff not available in app_agent_pool (Asterisk 12+)
+        // Use Hangup on the AgentLogin channel instead
+        // 'Agentlogoff' =>
+        //     array('Agent' => TRUE),
         'Agents' =>
             array('ActionID' => FALSE),
         'Atxfer' =>
             array('Channel' => TRUE, 'Exten' => TRUE, 'Context' => TRUE, 'Priority' => TRUE),
+        'Bridge' =>
+            array('Channel1' => TRUE, 'Channel2' => TRUE, 'Tone' => FALSE),
         'ChangeMonitor' =>
             array('Channel' => TRUE, 'File' => TRUE),
         'Command' =>
@@ -131,9 +144,10 @@ class AMIClientConn extends MultiplexConn
         'ParkedCalls' =>
             array('ActionID' => FALSE),
         'Parkinglots' =>
-            array(), /* ActionID no está soportado para Parkinglots en 11.21.0 */
+            array(), /* ActionID no está soportado para Parkinglots en 11.21.0
+                      ActionID is not supported for Parkinglots in 11.21.0 */
         'Park' =>
-            array('Channel' => TRUE, 'Channel2' => TRUE,
+            array('Channel' => TRUE, 'AnnounceChannel' => FALSE,
                 'Timeout' => array('required' => FALSE, 'cast' => 'int'),
                 'Parkinglot' => FALSE),
         'Ping' =>
@@ -142,6 +156,7 @@ class AMIClientConn extends MultiplexConn
             array('Queue' => TRUE, 'Interface' => TRUE,
                 'Penalty' => array('required' => FALSE, 'default' => 0, 'cast' => 'int'),
                 'MemberName' => FALSE,
+                'StateInterface' => FALSE,  // For app_agent_pool: Agent:XXXX device state
                 'Paused' => array('required' => FALSE, 'default' => FALSE, 'cast' => 'bool')),
         'QueueRemove' =>
             array('Queue' => TRUE, 'Interface' => TRUE),
@@ -193,19 +208,24 @@ class AMIClientConn extends MultiplexConn
     }
 
     // Datos a mandar a escribir apenas se inicia la conexión
+    // Data to write as soon as the connection is established
     function procesarInicial() {}
 
     // Separar flujo de datos en paquetes, devuelve número de bytes de paquetes aceptados
+    // Separate data stream into packets, returns number of bytes of accepted packets
     function parsearPaquetes($sDatos)
     {
         $iLongInicial = strlen($sDatos);
 
         // Encontrar los paquetes y determinar longitud de búfer procesado
+        // Find the packets and determine processed buffer length
         $listaPaquetes =& $this->encontrarPaquetes($sDatos);
         $iLongFinal = strlen($sDatos);
 
         /* Paquetes Event se van a la lista de eventos. El paquete Response se
-         * guarda individualmente. */
+         * guarda individualmente.
+         * Event packets go to the event list. The Response packet is stored
+         * individually. */
         $local_timestamp_received = NULL;
         foreach ($listaPaquetes as $paquete) {
             if (isset($paquete['Event'])) {
@@ -240,17 +260,28 @@ class AMIClientConn extends MultiplexConn
      * modifica para eliminar los datos que fueron ya procesados como parte de los
      * paquetes. Esta función sólo devuelve paquetes completos, y deja cualquier
      * fracción de paquetes incompletos en el búfer.
+     * Procedure that attempts to decompose the read buffer indicated by $sDatos
+     * into a sequence of AMI (Asterisk Manager Interface) packets. The list of
+     * obtained packets is returned as a list. Additionally, the read buffer is
+     * modified to remove data that has already been processed as part of the
+     * packets. This function only returns complete packets, and leaves any
+     * fraction of incomplete packets in the buffer.
      *
      * @param   string  $sDatos     Cadena de datos a procesar
+     *                              Data string to process
      *
      * @return  array   Lista de paquetes que fueron extraídos del texto.
+     *                  List of packets that were extracted from the text.
      */
     private function & encontrarPaquetes(&$sDatos)
     {
         $len = strlen($sDatos);
         $p_paquetes = 0;// offset de paquetes válidos
+                        // valid packets offset
         $p1 = 0;        // offset de línea actual a procesar
+                        // current line offset to process
         $p2 = FALSE;    // posición de siguiente \n o FALSE
+                        // position of next \n or FALSE
         $bEsperando_END_COMMAND = FALSE;
 
         $listaPaquetes = array();
@@ -262,6 +293,7 @@ class AMIClientConn extends MultiplexConn
             if (!$bIncompleto) {
                 $s = substr($sDatos, $p1, $p2 - $p1);
                 $p2 += 2; // saltar el \r\n
+                          // skip the \r\n
                 $a = strpos($s, ': ');
                 $sClave = $sValor = NULL;
                 $bProcesando_END_COMMAND = FALSE;
@@ -273,7 +305,7 @@ class AMIClientConn extends MultiplexConn
                     } elseif ($sClave == 'Output') {
                         // Asterisk 16
 			#$paquete['data'].=$sValor."\n";
-                        $paquete['data'] = ($paquete['data'] ?? '') . $sValor . "\n";
+                        $paquete['data'] = (isset($paquete['data']) ? $paquete['data'] : '') . $sValor . "\n";
                     } elseif ($bEsperando_END_COMMAND && !in_array($sClave, array('Privilege', 'ActionID'))) {
                         $sClave = $sValor = NULL;
                         $bProcesando_END_COMMAND = TRUE;
@@ -299,12 +331,14 @@ class AMIClientConn extends MultiplexConn
                     $p1 = $p2;
                 } elseif ($s == '') {
                     // Se ha encontrado el final de un paquete
+                    // End of a packet has been found
                     if (count($paquete)) $listaPaquetes[] = $paquete;
                     $p1 = $p2;
                     $p_paquetes = $p1;
                     $paquete = array();
                 } else {
                     // Se ignora error de protocolo
+                    // Protocol error is ignored
                     $p1 = $p2;
                 }
             }
@@ -315,6 +349,7 @@ class AMIClientConn extends MultiplexConn
     }
 
     // Procesar cierre de la conexión
+    // Process connection closure
     function procesarCierre()
     {
         $this->oLogger->output("INFO: detectado cierre de conexión Asterisk.");
@@ -322,12 +357,15 @@ class AMIClientConn extends MultiplexConn
     }
 
     // Preguntar si hay paquetes pendientes de procesar
+    // Check if there are pending packets to process
     function hayPaquetes() { return (count($this->_listaEventos) > 0); }
 
     // Procesar un solo paquete de la cola de paquetes
+    // Process a single packet from the packet queue
     function procesarPaquete()
     {
         // Intentar manejar paquetes hasta que uno sea aceptado
+        // Try to handle packets until one is accepted
         $manejado = FALSE;
         while (count($this->_listaEventos) > 0 && !$manejado) {
             $paquete = array_shift($this->_listaEventos);
@@ -336,6 +374,7 @@ class AMIClientConn extends MultiplexConn
     }
 
     // Implementación de wait_response para compatibilidad con phpagi-asmanager
+    // Implementation of wait_response for compatibility with phpagi-asmanager
     private function wait_response()
     {
         while (!is_null($this->sKey) && is_null($this->_response)) {
@@ -343,7 +382,10 @@ class AMIClientConn extends MultiplexConn
 
             /* Se requiere recorrer la lista de eventos recogiendo los
              * paquetes Response en el orden que fueron insertados, para
-             * mantener el orden de procesamiento. */
+             * mantener el orden de procesamiento.
+             * It is required to traverse the event list collecting the
+             * Response packets in the order they were inserted, to
+             * maintain the processing order. */
             $t = array();
             foreach ($this->_listaEventos as $paquete) {
                 if (isset($paquete['Event'])) {
@@ -368,6 +410,7 @@ class AMIClientConn extends MultiplexConn
     function connect($server, $username, $secret)
     {
         // Determinar servidor y puerto a usar
+        // Determine server and port to use
         $iPuerto = AMI_PORT;
         if(strpos($server, ':') !== false) {
             $c = explode(':', $server);
@@ -378,6 +421,7 @@ class AMIClientConn extends MultiplexConn
         $this->port = $iPuerto;
 
         // Iniciar la conexión
+        // Start the connection
         $errno = $errstr = NULL;
         $sUrlConexion = "tcp://$server:$iPuerto";
         $hConn = @stream_socket_client($sUrlConexion, $errno, $errstr);
@@ -387,6 +431,7 @@ class AMIClientConn extends MultiplexConn
         }
 
         // Leer la cabecera de Asterisk
+        // Read the Asterisk header
         $str = fgets($hConn);
         if ($str == false) {
             $this->oLogger->output("ERR: No se ha recibido la cabecera de Asterisk Manager");
@@ -394,9 +439,11 @@ class AMIClientConn extends MultiplexConn
         }
 
         // Registrar el socket con el objeto de conexiones
+        // Register the socket with the connection object
         $this->multiplexSrv->agregarNuevaConexion($this, $hConn);
 
         // Iniciar login con Asterisk
+        // Start login with Asterisk
         $res = $this->Login($username, $secret);
         if($res['Response'] != 'Success') {
             $this->oLogger->output("ERR: Fallo en login de AMI.");
@@ -517,6 +564,7 @@ class AMIClientConn extends MultiplexConn
         }
 
         // Cadena de petición
+        // Request string
         $req = "Action: $name\r\n";
         foreach($parameters as $var => $val) $req .= "$var: $val\r\n";
         $req .= "\r\n";
@@ -526,9 +574,11 @@ class AMIClientConn extends MultiplexConn
         if (!$async) $this->_sync_wait++;
         if ($async) {
             // Poner la petición asíncrona al final de la cola
+            // Put the asynchronous request at the end of the queue
             array_push($this->_queue_requests, $request_info);
         } else {
             // Poner la petición síncrona como primera de las NO enviadas
+            // Put the synchronous request as first among the NOT sent
             $head_req = NULL;
             if (count($this->_queue_requests) > 0 && is_null($this->_queue_requests[0][0]))
                 $head_req = array_shift($this->_queue_requests);
@@ -555,7 +605,9 @@ class AMIClientConn extends MultiplexConn
     private function _send_next_request()
     {
         if (count($this->_queue_requests) <= 0) return TRUE;    // no hay más peticiones
+                                                                // no more requests
         if (is_null($this->_queue_requests[0][0])) return TRUE; // petición en progreso
+                                                                // request in progress
         if (is_null($this->sKey)) {
             if (!is_null($this->oLogger))
                 $this->oLogger->output('ERR: '.__METHOD__.' conexión AMI cerrada mientras se enviaba petición.');

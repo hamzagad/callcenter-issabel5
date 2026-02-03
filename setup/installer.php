@@ -40,6 +40,13 @@ if (file_exists($path_script_db))
     $return=0;
     $return=$oInstaller->createNewDatabaseMySQL($path_script_db,"call_center",$datos_conexion);
 
+    // STEP 1.1: Ensure asterisk user has permissions on call_center database
+    $pDBRoot = new paloDB('mysql://root:'.MYSQL_ROOT_PASSWORD.'@localhost/mysql');
+    $pDBRoot->genQuery("GRANT ALL ON call_center.* TO asterisk@localhost IDENTIFIED BY 'asterisk'");
+    $pDBRoot->genQuery("FLUSH PRIVILEGES");
+    $pDBRoot->disconnect();
+    fputs(STDERR, "INFO: Granted permissions to asterisk@localhost on call_center database\n");
+
     $pDB = new paloDB ('mysql://root:'.MYSQL_ROOT_PASSWORD.'@localhost/call_center');
     quitarColumnaSiExiste($pDB, 'call_center', 'agent', 'queue');
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
@@ -56,7 +63,7 @@ if (file_exists($path_script_db))
         "ADD COLUMN agent varchar(32)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'call_entry',
         'trunk',
-        "ADD COLUMN trunk varchar(20) NOT NULL");
+        "ADD COLUMN trunk varchar(50) NOT NULL");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'failure_cause',
         "ADD COLUMN failure_cause int(10) unsigned default null, ADD COLUMN failure_cause_txt varchar(32) default null");
@@ -74,10 +81,12 @@ if (file_exists($path_script_db))
         "ADD COLUMN id_url int unsigned, ADD FOREIGN KEY (id_url) REFERENCES campaign_external_url (id)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'trunk',
-        "ADD COLUMN trunk varchar(20) NOT NULL");
+        "ADD COLUMN trunk varchar(50)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'agent',
         'type',
-        "ADD COLUMN type enum('Agent','SIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id");
+        "ADD COLUMN type enum('Agent','SIP','PJSIP','IAX2') DEFAULT 'Agent' NOT NULL AFTER id");
+    // Ensure PJSIP is in the enum for existing installations
+    $pDB->genQuery("ALTER TABLE agent MODIFY type enum('Agent','SIP','PJSIP','IAX2') DEFAULT 'Agent' NOT NULL");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'scheduled',
         "ALTER TABLE calls ADD COLUMN scheduled BOOLEAN NOT NULL DEFAULT 0");
@@ -107,6 +116,14 @@ if (file_exists($path_script_db))
         'campaign_date_schedule',
         "ADD KEY `campaign_date_schedule` (`id_campaign`, `date_init`, `date_end`, `time_init`, `time_end`)");
 
+    // Actualizar longitud de campos trunk y ChannelClient a 50 caracteres
+    actualizarLongitudCampo($pDB, 'call_center', 'call_entry', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'call_progress_log', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'calls', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'campaign', 'trunk', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'current_call_entry', 'ChannelClient', 50);
+    actualizarLongitudCampo($pDB, 'call_center', 'current_calls', 'ChannelClient', 50);
+
     // Asegurarse de que todo agente tiene una contraseña de ECCP
     $pDB->genQuery('UPDATE agent SET eccp_password = SHA1(CONCAT(NOW(), RAND(), number)) WHERE eccp_password IS NULL');
 
@@ -114,6 +131,7 @@ if (file_exists($path_script_db))
 }
 
 instalarContextosEspeciales();
+instalarAgentDefaultsTemplate();
 
 exit($return);
 
@@ -186,6 +204,41 @@ EXISTE_INDICE;
     }
 }
 
+function actualizarLongitudCampo($pDB, $sDatabase, $sTabla, $sColumna, $iNuevaLongitud)
+{
+    // Verificar longitud actual de la columna
+    $sPeticionSQL = <<<VERIFICAR_LONGITUD
+SELECT CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
+VERIFICAR_LONGITUD;
+    $r = $pDB->getFirstRowQuery($sPeticionSQL, FALSE, array($sDatabase, $sTabla, $sColumna));
+    if (!is_array($r)) {
+        fputs(STDERR, "ERR: al verificar longitud de $sTabla.$sColumna - ".$pDB->errMsg."\n");
+        return;
+    }
+    if (isset($r[0]) && $r[0] < $iNuevaLongitud) {
+        $tipo = $pDB->getFirstRowQuery(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+            FALSE,
+            array($sDatabase, $sTabla, $sColumna)
+        );
+        $nulo = $pDB->getFirstRowQuery(
+            "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+            FALSE,
+            array($sDatabase, $sTabla, $sColumna)
+        );
+        $nullClause = (is_array($nulo) && strtoupper($nulo[0]) == 'YES') ? 'NULL' : 'NOT NULL';
+        $sql = "ALTER TABLE $sTabla MODIFY COLUMN $sColumna " . $tipo[0] . "($iNuevaLongitud) $nullClause";
+        fputs(STDERR, "INFO: Actualizando longitud de $sTabla.$sColumna a $iNuevaLongitud caracteres\n");
+        fputs(STDERR, "\t$sql\n");
+        $r = $pDB->genQuery($sql);
+        if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
+    } else {
+        fputs(STDERR, "INFO: La longitud de $sTabla.$sColumna ya es adecuada o no existe.\n");
+    }
+}
+
 /**
  * Procedimiento que instala algunos contextos especiales requeridos para algunas
  * funcionalidades del CallCenter.
@@ -226,10 +279,57 @@ exten => _X.,n,Set(CDR(userfield)=audio:${CALLFILENAME}.${MIXMON_FORMAT})
 exten => _X.,n(skiprecord),Dial(${AGENTCHANNEL},300,tw)
 exten => h,1,Macro(hangupcall,)
 
+; app_agent_pool contexts (Asterisk 12+)
+[agent-login]
+exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
+ same => n,AgentLogin(${EXTEN})
+ same => n,Macro(hangupcall,)
+
+[atxfer-complete]
+exten => _X.,1,NoOp(Issabel CallCenter: Attended transfer completion - agent ${EXTEN} re-entering AgentLogin)
+ same => n,AgentLogin(${EXTEN},s)
+ same => n,Macro(hangupcall,)
+
+[agents]
+exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
+ same => n,AgentRequest(${EXTEN})
+ same => n,Macro(hangupcall,)
+
 ';
         $contenido[] = $sFinalContenido;
         file_put_contents($sArchivo, $contenido);
         chown($sArchivo, 'asterisk'); chgrp($sArchivo, 'asterisk');
     }
+}
+
+/**
+ * Create the [agent-defaults] template in agents.conf for app_agent_pool (Asterisk 12+).
+ * This template is inherited by all agent definitions.
+ */
+function instalarAgentDefaultsTemplate()
+{
+    $sArchivo = '/etc/asterisk/agents.conf';
+    $sTemplate = "[agent-defaults](!)\n" .
+                 "musiconhold=Silence\n" .
+                 "ackcall=no\n" .
+                 "autologoff=0\n" .
+                 "wrapuptime=0\n\n";
+
+    // Check if file exists and if template already exists
+    if (file_exists($sArchivo)) {
+        $contenido = file_get_contents($sArchivo);
+        if (strpos($contenido, '[agent-defaults](!)') !== false) {
+            fputs(STDERR, "INFO: [agent-defaults] template already exists in agents.conf\n");
+            return;
+        }
+        // Append template at the end
+        file_put_contents($sArchivo, $contenido . $sTemplate);
+    } else {
+        // Create new file with template
+        file_put_contents($sArchivo, $sTemplate);
+    }
+    chown($sArchivo, 'asterisk');
+    chgrp($sArchivo, 'asterisk');
+    fputs(STDERR, "INFO: Created [agent-defaults] template in agents.conf\n");
 }
 ?>

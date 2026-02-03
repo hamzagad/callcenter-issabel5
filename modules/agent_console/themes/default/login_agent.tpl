@@ -92,6 +92,14 @@
 		<input type="password" name="input_password_callback" id="input_password_callback">
           </td>
         </tr>
+        <tr id="row_agent_password">
+          <td width="40%">
+              <div align="right" id="label_agent_password">{$PASSWORD}:</div>
+          </td>
+          <td width="60%">
+                <input type="password" name="input_agent_password" id="input_agent_password">
+          </td>
+        </tr>
 <!-- Begin: CallbackLogin checkbox -->
 	<tr id='callbackcheck'>
           <td width="40%">

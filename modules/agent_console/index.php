@@ -85,10 +85,9 @@ function _moduleContent(&$smarty, $module_name)
         }
     }
 
+    // Agent login is now supported on Asterisk 12+ via app_agent_pool
+    // No longer need to force callback-only mode
     $onlyCallback=0;
-    if($asteriskVersion[0]>11) {
-        $onlyCallback=1;
-    }
     $smarty->assign('ONLY_CALLBACK', $onlyCallback);
 
     _debug("module entry: ".
@@ -320,10 +319,12 @@ function manejarLogin_doLogin()
         $sPasswordCallback = getParameter('pass_callback');
         $regs = NULL;
         $sExtension = (preg_match('|^(\w+)/(\d+)$|', $sAgente, $regs)) ? $regs[2]: NULL;
+        $sAgentPassword = NULL;
     } else {
         $sAgente = getParameter('agent');
         $sExtension = getParameter('ext');
         $sPasswordCallback = NULL;
+        $sAgentPassword = getParameter('pass_agent');
     }
 
     $respuesta = array(
@@ -347,14 +348,31 @@ function manejarLogin_doLogin()
         }
     }
 
+    // Verify agent password for non-callback login
+    if ($bContinuar && !$bCallback) {
+        // Extract agent number from "Agent/XXXX" format
+        $sAgentNumber = preg_match('|^Agent/(\d+)$|', $sAgente, $regs) ? $regs[1] : $sAgente;
+        if (!$oPaloConsola->autenticarAgente($sAgentNumber, $sAgentPassword)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Invalid agent password');
+        }
+    }
+
     // Verificar si el número de agente no está ya ocupado por otra extensión
     if ($bContinuar) {
         $oPaloConsola->desconectarTodo();
         $oPaloConsola = new PaloSantoConsola($sAgente);
 
-        $estado = (!$bCallback || $oPaloConsola->autenticar($sAgente, $sPasswordCallback))
-            ? $oPaloConsola->estadoAgenteLogoneado($sExtension)
-            : array('estadofinal' => 'error');
+        // For Agent login, skip the callback authentication (already verified above)
+        if ($bCallback) {
+            $estado = $oPaloConsola->autenticar($sAgente, $sPasswordCallback)
+                ? $oPaloConsola->estadoAgenteLogoneado($sExtension)
+                : array('estadofinal' => 'error');
+        } else {
+            // Agent login - password already verified, proceed directly
+            $estado = $oPaloConsola->estadoAgenteLogoneado($sExtension);
+        }
         switch ($estado['estadofinal']) {
         case 'error':
         case 'mismatch':
@@ -873,6 +891,10 @@ function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantil
 {
     $atributos = array();
     foreach ($infoLlamada['call_attributes'] as $iOrden => $atributo) {
+        // Skip index 1 (2nd column) for outgoing calls - it's shown in the hardcoded "Name:" field
+        if ($infoLlamada['calltype'] == 'outgoing' && $iOrden == 1) {
+            continue;
+        }
         if (preg_match('|^http(s)?://|', $atributo['value'])) {
         	$atributo['value'] = '<a target="_blank" href="'.$atributo['value'].'">'.$atributo['value'].'</a>';
         } else {
@@ -1056,6 +1078,35 @@ function manejarSesionActiva_hangup($module_name, $smarty, $sDirLocalPlantillas,
     return $json->encode($respuesta);
 }
 
+function manejarSesionActiva_hold($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola, $estado)
+{
+    $respuesta = array(
+        'action'    =>  'hold',
+        'message'   =>  '(no message)',
+    );
+
+    // Check if currently on hold and toggle action
+    if ($estado['onhold']) {
+        // Resume call from hold
+        $bExito = $oPaloConsola->reanudarDeHold();
+        if (!$bExito) {
+            $respuesta['action'] = 'error';
+            $respuesta['message'] = _tr('Error while resuming call from hold').' - '.$oPaloConsola->errMsg;
+        }
+    } else {
+        // Put call on hold
+        $bExito = $oPaloConsola->ponerEnHold();
+        if (!$bExito) {
+            $respuesta['action'] = 'error';
+            $respuesta['message'] = _tr('Error while placing call on hold').' - '.$oPaloConsola->errMsg;
+        }
+    }
+
+    $json = new Services_JSON();
+    Header('Content-Type: application/json');
+    return $json->encode($respuesta);
+}
+
 function manejarSesionActiva_break($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola, $estado)
 {
     $respuesta = array(
@@ -1090,14 +1141,6 @@ function manejarSesionActiva_unbreak($module_name, $smarty, $sDirLocalPlantillas
         $respuesta['action'] = 'error';
         $respuesta['message'] = _tr('Error while stopping break').' - '.$oPaloConsola->errMsg;
     }
-
-    $agent = $_SESSION['callcenter']['agente'];
-    $number = $_SESSION['callcenter']['extension'];
-
-    // Construye el comando
-    $command = "php modules/$module_name/libs/reactivateAgent.php $agent $number";
-
-    exec($command);
 
     $json = new Services_JSON();
     Header('Content-Type: application/json');
@@ -1261,9 +1304,7 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     _debug(__FUNCTION__.' start');
 
     $respuesta = array();
-
-    ignore_user_abort(true);
-    set_time_limit(0);
+    setupSSESession();
 
     $sNombrePausa = NULL;
     $iDuracionLlamada = NULL;
@@ -1295,14 +1336,8 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     _debug(__FUNCTION__.' after sanitizing clientstate='.print_r($estadoCliente, TRUE));
 
     // Modo a funcionar: Long-Polling, o Server-sent Events
-    $sModoEventos = getParameter('serverevents');
-    $bSSE = (!is_null($sModoEventos) && $sModoEventos);
-    if ($bSSE) {
-        Header('Content-Type: text/event-stream');
-        printflush("retry: 5000\n");
-    } else {
-    	Header('Content-Type: application/json');
-    }
+    $bSSE = detectSSEMode();
+    initSSE($bSSE);
 
     _debug(__FUNCTION__.' using Server-sent Events: '.($bSSE ? 'YES' : 'NO'));
     _debug(__FUNCTION__.' server state for agent='.print_r($estado, TRUE));
@@ -1645,23 +1680,6 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
 
     } while($bSSE && !$bReinicioSesion && connection_status() == CONNECTION_NORMAL);
     $oPaloConsola->desconectarTodo();
-}
-
-function jsonflush($bSSE, $respuesta)
-{
-    $json = new Services_JSON();
-    $r = $json->encode($respuesta);
-    if ($bSSE)
-        printflush("data: $r\n\n");
-    else printflush($r);
-}
-
-function printflush($s)
-{
-    print $s;
-    ob_flush();
-    flush();
-    _debug('json: '.$s);
 }
 
 /*

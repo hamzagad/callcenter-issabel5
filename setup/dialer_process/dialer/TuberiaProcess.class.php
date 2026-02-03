@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -25,7 +26,9 @@
 class TuberiaProcess extends AbstractProcess
 {
     protected $_tuberia;    // Tubería con la que se comunica con otros procesos
+                            // Pipe through which it communicates with other processes
     protected $_multiplex;  // Multiplex con que se realiza comunicación
+                            // Multiplex with which communication is performed
 
     function __construct($tuberia)
     {

@@ -1,6 +1,7 @@
 <?php
 /* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
   Codificación: UTF-8
+  Encoding: UTF-8
   +----------------------------------------------------------------------+
   | Issabel version 1.2-2                                               |
   | http://www.issabel.org                                               |
@@ -35,8 +36,11 @@ define('AST_DEVICE_ONHOLD',     8);
 class Predictor
 {
     private $_astConn;  // Conexión al Asterisk
+                         // Connection to Asterisk
     private $_agentesAppQueue = array();    // Agentes ocupados por llamadas de cola
+                                            // Agents busy with queue calls
     private $_infoColas = array();          // Información de colas examinadas
+                                            // Information of examined queues
     private $_tmp_actionid = NULL;
     private $_enum_complete = TRUE;
     var $timestamp_examen = 0;
@@ -49,6 +53,7 @@ class Predictor
     function examinarColas($colas)
     {
         // Manejadores de eventos de interés
+        // Event handlers of interest
         $this->_tmp_actionid = posix_getpid().'-'.time();
         $evlist = array('CoreShowChannel', 'CoreShowChannelsComplete',
             'QueueParams', 'QueueMember', 'QueueEntry', 'QueueStatusComplete');
@@ -57,12 +62,14 @@ class Predictor
         foreach ($evlist as $k)
             if (!$this->_astConn->add_event_handler($k, array($this, "msg_$k"))) {
                 // Quitar manejadores de eventos si alguno no se puede agregar
+                // Remove event handlers if any cannot be added
                 foreach ($evlist as $k)
                     $this->_astConn->remove_event_handler($k);
                 return FALSE;
             }
 
         // Anular resultados previos
+        // Clear previous results
         $this->_agentesAppQueue = array();
         $this->_infoColas = array();
 
@@ -76,6 +83,7 @@ class Predictor
             }
         } catch (Exception $e) {
             // Quitar manejadores de eventos antes de relanzar excepción
+            // Remove event handlers before rethrowing exception
             foreach ($evlist as $k)
                 $this->_astConn->remove_event_handler($k);
 
@@ -83,6 +91,7 @@ class Predictor
         }
 
         // Quitar manejadores de eventos
+        // Remove event handlers
         foreach ($evlist as $k)
             $this->_astConn->remove_event_handler($k);
         $this->_tmp_actionid = NULL;
@@ -207,13 +216,16 @@ BridgedUniqueID: 1441991139.3
         foreach ($this->_infoColas[$cola]['members'] as $interface => $miembro) {
 
             // Se ignora miembro en pausa
+            // Paused member is ignored
             if ($miembro['Paused']) continue;
 
             // Miembro definitivamente libre
+            // Member definitely free
             if (in_array($miembro['Status'], array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING)))
                 $iNumLlamadasColocar['AGENTES_LIBRES']++;
 
             // Miembro ocupado, se verifica si se desocupará
+            // Busy member, verify if it will become free
             if (in_array($miembro['Status'], array(AST_DEVICE_INUSE, AST_DEVICE_BUSY, AST_DEVICE_RINGINUSE)) &&
                 isset($this->_agentesAppQueue[$interface])) {
                 $iNumLlamadasColocar['AGENTES_POR_DESOCUPAR'][] = $this->_agentesAppQueue[$interface];
@@ -226,10 +238,12 @@ BridgedUniqueID: 1441991139.3
     {
         $n = 0;
         // Miembro ocupado, se verifica si se desocupará
+        // Busy member, verify if it will become free
         if (!is_null($prob_atencion)) foreach ($infoCola['AGENTES_POR_DESOCUPAR'] as $t) {
             $iTiempoTotal = $avg_contestar + $t;
 
             // Probabilidad de que 1 llamada haya terminado al cabo de $iTiempoTotal s.
+            // Probability that 1 call has finished after $iTiempoTotal seconds
             $iProbabilidad = $this->_probabilidadErlangAcumulada(
                 $iTiempoTotal,
                 1,
