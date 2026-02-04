@@ -48,9 +48,11 @@ function _moduleContent(&$smarty, $module_name)
     $local_templates_dir = "$base_dir/modules/$module_name/".$templates_dir.'/'.$arrConf['theme'];
 
     // Conexión a la base de datos CallCenter
+    // EN: CallCenter database connection
     $pDB = new paloDB($arrConf['cadena_dsn']);
 
     // Mostrar pantalla correspondiente
+    // EN: Show corresponding screen
     $contenidoModulo = '';
     $sAction = 'list_urls';
     if (isset($_GET['action'])) $sAction = $_GET['action'];

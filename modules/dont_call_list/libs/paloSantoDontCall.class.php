@@ -111,8 +111,10 @@ class paloSantoDontCall
 
         if (is_array($tupla) && count($tupla) > 0) {
             // Número ya ha sido insertado
+            // EN: Number has already been inserted
             if ($tupla['status'] != 'A') {
                 // Activar número, si estaba inactivo
+                // EN: Activate number if it was inactive
                 if (!$this->_stmt['UPDATE']->execute(array($tupla['id']))) {
                     $this->errMsg = print_r($this->_stmt['UPDATE']->errorInfo(), TRUE);
                     return FALSE;
@@ -120,6 +122,7 @@ class paloSantoDontCall
             }
         } else {
             // Número debe de insertarse
+            // EN: Number must be inserted
             if (!$this->_stmt['INSERT']->execute(array($dnc))) {
                 $this->errMsg = print_r($this->_stmt['INSERT']->errorInfo(), TRUE);
                 return FALSE;
@@ -144,9 +147,9 @@ class paloSantoDontCall
         }
 
         $loadReport = array(
-            'total'     =>  0,  // Total de líneas procesadas
-            'inserted'  =>  0,  // Total de registros nuevos (no existentes)
-            'rejected'  =>  0,  // Total de registros rechazados
+            'total'     =>  0,  // Total de líneas procesadas // EN: Total processed lines
+            'inserted'  =>  0,  // Total de registros nuevos (no existentes) // EN: Total new records (non-existent)
+            'rejected'  =>  0,  // Total de registros rechazados // EN: Total rejected records
         );
 
         while (!feof($hArchivo)) {

@@ -23,6 +23,8 @@
 
 /**
  * Clase que contiene la funcionalidad principal de la consola de agente.
+ *
+ * EN: Class that contains the main functionality of the agent console.
  */
 
 require_once 'libs/paloSantoDB.class.php';
@@ -30,13 +32,13 @@ require_once 'ECCP.class.php';
 
 class PaloSantoConsola
 {
-    var $errMsg = '';    // Mensajes de error
-    private $_oDB_asterisk = NULL;     // Conexión a base de datos asterisk (FreePBX)
-    private $_oDB_call_center = NULL;  // Conexión a base de datos call_center
+    var $errMsg = '';    // Mensajes de error // EN: Error messages
+    private $_oDB_asterisk = NULL;     // Conexión a base de datos asterisk (FreePBX) // EN: Connection to asterisk database (FreePBX)
+    private $_oDB_call_center = NULL;  // Conexión a base de datos call_center // EN: Connection to call_center database
     private $_astman = NULL;
     private $_eccp = NULL;
 
-    private $_agent = NULL;     // Si se ha elegido un agente, es de forma Agent/9000
+    private $_agent = NULL;     // Si se ha elegido un agente, es de forma Agent/9000 // EN: If an agent is chosen, it's in the form Agent/9000
 
     function __construct($sAgent = NULL)
     {
@@ -44,6 +46,7 @@ class PaloSantoConsola
     }
 
     // Obtener la conexión requerida, iniciándola si es necesario
+    // EN: Get the required connection, initializing it if necessary
     private function _obtenerConexion($sConn)
     {
         global $arrConf;
@@ -78,6 +81,7 @@ class PaloSantoConsola
             $sPasswordECCP = 'agentconsole';
 
             // Verificar si existe la contraseña de ECCP, e insertar si necesario
+            // EN: Verify if ECCP password exists, and insert if necessary
             $dbConnCC = $this->_obtenerConexion('call_center');
             $md5_passwd = $dbConnCC->getFirstRowQuery(
                 'SELECT md5_password FROM eccp_authorized_clients WHERE username = ?',
@@ -95,6 +99,7 @@ class PaloSantoConsola
             $oECCP = new ECCP();
 
             // TODO: configurar credenciales
+            // EN: TODO: configure credentials
             $cr = $oECCP->connect("localhost", $sUsernameECCP, $sPasswordECCP);
             if (isset($cr->failure)) {
                 throw new ECCPUnauthorizedException(_tr('Failed to authenticate to ECCP').': '.((string)$cr->failure->message));
@@ -103,7 +108,9 @@ class PaloSantoConsola
                 $oECCP->setAgentNumber($this->_agent);
 
                 /* Privilegio de localhost - se puede recuperar la clave del
-                 * agente sin tener que pedirla explícitamente */
+                 * agente sin tener que pedirla explícitamente
+                 * EN: Localhost privilege - agent password can be retrieved
+                 * without explicitly requesting it */
                 $tupla = $dbConnCC->getFirstRowQuery(
                         "SELECT eccp_password FROM agent WHERE CONCAT(type,'/',number) = ? AND estatus='A'",
                     FALSE, array($this->_agent));
@@ -116,6 +123,7 @@ class PaloSantoConsola
                 $oECCP->setAgentPass($tupla[0]);
 
                 // Filtrar los eventos sólo para el agente actual
+                // EN: Filter events only for the current agent
                 $oECCP->filterbyagent();
             }
 
@@ -129,6 +137,9 @@ class PaloSantoConsola
     // Leer el estado de /etc/asterisk/manager.conf y obtener el primer usuario
     // que puede usar el dialer. Devuelve NULL en caso de error, o tupla
     // user,password para conexión en localhost.
+    // EN: Read the state of /etc/asterisk/manager.conf and get the first user
+    // that can use the dialer. Returns NULL on error, or tuple user,password
+    // for localhost connection.
     private function _leerConfigManager()
     {
         $sNombreArchivo = '/etc/asterisk/manager.conf';
@@ -160,6 +171,9 @@ class PaloSantoConsola
      * Método que desconecta todas las conexiones a base de datos y Asterisk que
      * mantenga conectado el objeto.
      *
+     * EN: Method that disconnects all database and Asterisk connections
+     * maintained by the object.
+     *
      * @return  null
      */
     function desconectarTodo()
@@ -178,6 +192,11 @@ class PaloSantoConsola
      * pero mantiene la conexión activa a ECCP. El uso esperado es
      * inmediatamente antes de la espera larga de la interfaz web, donde no
      * se esperan futuras consultas a la base de datos.
+     *
+     * EN: Method that disconnects all database and Asterisk connections,
+     * but maintains the active ECCP connection. Expected use is immediately
+     * before the long wait of the web interface, where no future database
+     * queries are expected.
      *
      * @return  null
      */
@@ -212,11 +231,16 @@ class PaloSantoConsola
      * logonearse en el sistema. La lista se devuelve de la forma
      * (1000 => 'SIP/1000'), ...
      *
-     * @return  mixed   La lista de extensiones.
+     * EN: Method that lists all SIP and IAX extensions defined in the system.
+     * These extensions can be used by the agent to log into the system.
+     * The list is returned in the form (1000 => 'SIP/1000'), ...
+     *
+     * @return  mixed   La lista de extensiones. // EN: The list of extensions.
      */
     function listarExtensiones()
     {
         // TODO: esto duplica a ECCPConn::_listarExtensiones en dialer
+        // EN: TODO: this duplicates ECCPConn::_listarExtensiones in dialer
         $oDB = $this->_obtenerConexion('asterisk');
         $sPeticion = 'SELECT user AS extension, dial from devices ORDER BY user';
         $recordset = $oDB->fetchTable($sPeticion, TRUE);
@@ -233,12 +257,15 @@ class PaloSantoConsola
      * Método que lista todos los agentes registrados en la base de datos. La
      * lista se devuelve de la forma ('Agent/9000' => 'Over 9000!!!'), ...
      *
-     * @param   string  $agenttype  Tipo de agente a listar
-     *      NULL    todos los agentes
-     *      'static'    Sólo los agentes Agent/XXXX (estáticos)
-     *      'dynamic'   Sólo los agentes SIP/xxxx o IAX2/xxxx (dinámicos)
+     * EN: Method that lists all agents registered in the database. The list
+     * is returned in the form ('Agent/9000' => 'Over 9000!!!'), ...
      *
-     * @return  mixed   La lista de agentes activos
+     * @param   string  $agenttype  Tipo de agente a listar
+     *      NULL    todos los agentes // EN: all agents
+     *      'static'    Sólo los agentes Agent/XXXX (estáticos) // EN: Only Agent/XXXX agents (static)
+     *      'dynamic'   Sólo los agentes SIP/xxxx o IAX2/xxxx (dinámicos) // EN: Only SIP/xxxx or IAX2/xxxx agents (dynamic)
+     *
+     * @return  mixed   La lista de agentes activos // EN: The list of active agents
      */
     function listarAgentes($agenttype = NULL)
     {
@@ -261,10 +288,15 @@ class PaloSantoConsola
 
     /** Método para autenticar la extensión callback con su respectiva contraseña en la tabla agent.
       *
+      * EN: Method to authenticate the callback extension with its respective password in the agent table.
+      *
       * @param string  $sExtensionCallback: Extensión que está usando el agente, como "SIP/250"
+      *                                  EN: Extension being used by the agent, like "SIP/250"
       * @param string  $sPassword: Contraseña de la extensión para hacer login al Callcenter en el modo Callback.
+      *                        EN: Extension password to login to Callcenter in Callback mode.
       *
       * @return VERDADERO en éxito, FALSE en error
+      *         EN: TRUE on success, FALSE on error
       */
     function autenticar($sExtensionCallback, $sPassword)
     {
@@ -320,14 +352,21 @@ class PaloSantoConsola
      * Método para iniciar el login del agente con la extensión y el número de
      * agente que se indican.
      *
+     * EN: Method to start the agent login with the extension and agent number
+     * indicated.
+     *
      * @param   string  Extensión que está usando el agente, como "SIP/1064"
+     *                  EN: Extension being used by the agent, like "SIP/1064"
      * @param   string  Número del agente que se está logoneando: "9000"
+     *                  EN: Agent number being logged in: "9000"
      *
      * @return  VERDADERO en éxito, FALSE en error
+     *          EN: TRUE on success, FALSE on error
      */
     function loginAgente($sExtension)
     {
         // Leer el valor del timeout del agente por inactividad
+        // EN: Read the agent timeout value for inactivity
         $oDB = $this->_obtenerConexion('call_center');
         $tupla = $oDB->getFirstRowQuery(
             'SELECT config_value FROM valor_config WHERE config_key = ?',
@@ -357,7 +396,12 @@ class PaloSantoConsola
      * asociado con esta consola de agente. Se asume que previamente se ha
      * iniciado un login de agente con la función loginAgente().
      *
+     * EN: Method to wait 1 second for the result of the agent login associated
+     * with this agent console. It is assumed that an agent login has been
+     * previously started with the loginAgente() function.
+     *
      * @return  string  Uno de logged-in logging logged-out mismatch error
+     *                  EN: One of logged-in logging logged-out mismatch error
      */
     function esperarResultadoLogin()
     {
@@ -373,8 +417,9 @@ class PaloSantoConsola
                 if ($evt->getName() == 'agentfailedlogin' && $evt->agent == $this->_agent)
                     return 'logged-out';
                 // TODO: devolver mismatch si logoneo con éxito a consola equivocada.
+                // EN: TODO: return mismatch if logged in successfully to wrong console.
             }
-            return 'logging';   // No se recibieron eventos relevantes
+            return 'logging';   // No se recibieron eventos relevantes // EN: No relevant events received
         } catch (Exception $e) {
             $this->errMsg = '(internal) esperarResultadoLogin: '.$e->getMessage();
             return 'error';
@@ -386,9 +431,14 @@ class PaloSantoConsola
      * operación también termina cualquier pausa en la que esté puesto el
      * agente.
      *
+     * EN: Method to terminate the login of an agent whose number is indicated.
+     * This operation also terminates any pause the agent is in.
+     *
      * @param   string  Número del agente que se está logoneando: "9000"
+     *                  EN: Number of the agent being logged in: "9000"
      *
      * @return  VERDADERO en éxito, FALSE en error
+     *          EN: TRUE on success, FALSE on error
      */
     function logoutAgente()
     {
@@ -411,10 +461,17 @@ class PaloSantoConsola
      * 'agent show online'. Este método es el principal mecanismo para mantener
      * la sesión activa del agente en el navegador.
      *
+     * EN: Method to verify the agent login status through 'agent show online'.
+     * This method is the main mechanism to keep the agent session active in
+     * the browser.
+     *
      * @param   string  Número del agente que se está logoneando: "9000"
+     *                  EN: Number of the agent being logged in: "9000"
      * @param   string  Extensión que está usando el agente, como "SIP/1064"
+     *                  EN: Extension being used by the agent, like "SIP/1064"
      *
      * @return  string  Uno de logged-in logging logged-out mismatch error
+     *                  EN: One of logged-in logging logged-out mismatch error
      */
     function estadoAgenteLogoneado($sExtension)
     {
@@ -459,7 +516,7 @@ class PaloSantoConsola
             'channel'           =>  isset($connStatus->channel) ? (string)$connStatus->channel : NULL,
             'extension'         =>  isset($connStatus->extension) ? (string)$connStatus->extension : NULL,
             'onhold'            =>  isset($connStatus->onhold) ? ($connStatus->onhold == 1) : FALSE,
-            'callchannel'       =>  isset($connStatus->callchannel) ? (string)$connStatus->callchannel : NULL, // <-- duplicado en remote_channel
+            'callchannel'       =>  isset($connStatus->callchannel) ? (string)$connStatus->callchannel : NULL, // <-- duplicado en remote_channel // EN: duplicated in remote_channel
             'pauseinfo'         =>  isset($connStatus->pauseinfo) ? array(
                 'pauseid'       =>  (int)$connStatus->pauseinfo->pauseid,
                 'pausename'     =>  (string)$connStatus->pauseinfo->pausename,
@@ -518,20 +575,27 @@ class PaloSantoConsola
      * Método para calcular un intervalo razonable de espera durante una petición
      * larga de AJAX.
      *
+     * EN: Method to calculate a reasonable wait interval during a long AJAX
+     * request.
+     *
      * @return  integer     El valor en segundos recomendado según el navegador.
+     *                      EN: The recommended value in seconds according to the browser.
      */
     function recomendarIntervaloEsperaAjax()
     {
         $iTimeoutPoll = 2 * 60;
 /*
         // Problemas con MSIE al haber más de un AJAX con respuesta larga
+        // EN: Problems with MSIE when having more than one AJAX with long response
         if (strpos($_SERVER['HTTP_USER_AGENT'], 'MSIE ') !== false) {
             $iTimeoutPoll = 2;
         }
 */
         /* El intervalo de inactividad debe ser al menos 1.5 veces el intervalo
          * de espera AJAX. Si esto no se cumple, se reduce el intervalo de
-         * espera AJAX. */
+         * espera AJAX.
+         * EN: The inactivity interval must be at least 1.5 times the AJAX wait
+         * interval. If this is not met, the AJAX wait interval is reduced. */
         $oDB = $this->_obtenerConexion('call_center');
         $tupla = $oDB->getFirstRowQuery(
             'SELECT config_value FROM valor_config WHERE config_key = ?',
@@ -551,7 +615,10 @@ class PaloSantoConsola
     /**
      * Método para mandar a ejecutar el colgado de la llamada activa.
      *
+     * EN: Method to execute the hangup of the active call.
+     *
      * @return  bool  TRUE para llamada colgada, o FALSE si error
+     *                EN: TRUE for hung up call, or FALSE if error
      */
     function colgarLlamada()
     {
@@ -572,7 +639,10 @@ class PaloSantoConsola
     /**
      * Método para poner la llamada actual en hold (espera)
      *
+     * EN: Method to put the current call on hold
+     *
      * @return TRUE en caso de éxito, FALSE en caso de error
+     *         EN: TRUE on success, FALSE on error
      */
     function ponerEnHold()
     {
@@ -593,7 +663,10 @@ class PaloSantoConsola
     /**
      * Método para reanudar la llamada desde hold (espera)
      *
+     * EN: Method to resume the call from hold
+     *
      * @return TRUE en caso de éxito, FALSE en caso de error
+     *         EN: TRUE on success, FALSE on error
      */
     function reanudarDeHold()
     {
@@ -614,8 +687,11 @@ class PaloSantoConsola
     /**
      * Método para listar los breaks conocidos en el sistema.
      *
+     * EN: Method to list the breaks known in the system.
+     *
      * @return NULL en caso de éxito, o lista en la forma
-     *      array([breakid]=>"breakname - breakdesc")
+     *         array([breakid]=>"breakname - breakdesc")
+     *         EN: NULL on error, or list in the form array([breakid]=>"breakname - breakdesc")
      */
     function listarBreaks()
     {
@@ -641,9 +717,13 @@ class PaloSantoConsola
     /**
      * Método para iniciar el break del agente actualmente logoneado
      *
+     * EN: Method to start the break of the currently logged in agent
+     *
      * @param   int $idBreak    ID del break a usar para el agente
+     *                          EN: ID of the break to use for the agent
      *
      * @return  TRUE en caso de éxito, FALSE en caso de error.
+     *          EN: TRUE on success, FALSE on error.
      */
     function iniciarBreak($idBreak)
     {
@@ -664,7 +744,10 @@ class PaloSantoConsola
     /**
      * Método para terminar el break del agente actualmente logoneado
      *
+     * EN: Method to end the break of the currently logged in agent
+     *
      * @return  TRUE en caso de éxito, FALSE en caso de error.
+     *          EN: TRUE on success, FALSE on error.
      */
     function terminarBreak()
     {
@@ -938,12 +1021,15 @@ class PaloSantoConsola
                 switch ($sNombreEvento) {
                 case 'agentloggedin':
                     // TODO: implementar para consola de monitoreo
+                    // EN: TODO: implement for monitoring console
                     break;
                 case 'agentfailedlogin':
                     // TODO: implementar para consola de monitoreo
+                    // EN: TODO: implement for monitoring console
                     break;
                 case 'agentloggedout':
                     // TODO: no se devuelve la lista de colas reportada
+                    // EN: TODO: the list of reported queues is not returned
                     break;
                 case 'agentlinked':
                     $evento['remote_channel'] = (string)$evt->remote_channel;
@@ -959,6 +1045,7 @@ class PaloSantoConsola
                     $evento['matching_contacts'] = isset($evt->matching_contacts) ? $this->_traducirMatchingContacts($evt->matching_contacts) : NULL;
                     $evento['call_survey'] = isset($evt->call_survey) ? $this->_traducirCallSurvey($evt->call_survey) : NULL;
                     // Cae al siguiente caso
+                    // EN: Falls through to next case
                 case 'agentunlinked':
                     if (isset($evt->datetime_linkend)) $evento['datetime_linkend'] = (string)$evt->datetime_linkend;
                     if (isset($evt->duration)) $evento['duration'] = (int)$evt->duration;
@@ -974,6 +1061,7 @@ class PaloSantoConsola
                     $evento['pause_end'] = (string)$evt->pause_end;
                     $evento['pause_duration'] = (int)$evt->pause_duration;
                     // Cae al siguiente caso
+                    // EN: Falls through to next case
                 case 'pausestart':
                     $evento['pause_class'] = (string)$evt->pause_class;
                     $evento['pause_type'] = isset($evt->pause_type) ? (int)$evt->pause_type : NULL;
@@ -1032,12 +1120,14 @@ class PaloSantoConsola
             $colasCallCenter = $this->_obtenerColasCallCenter($oECCP);
 
             // Reunir los agentes involucrados
+            // EN: Gather the involved agents
             $agentlist = array();
             foreach ($respuestaResumen->agents->agent as $xml_agent) {
                 $agentlist[] = (string)$xml_agent->agentchannel;
             }
 
             // Listar las colas a la que pertenecen todos los agentes
+            // EN: List the queues to which all agents belong
             $pertenenciaColas = $oECCP->getmultipleagentqueues($agentlist);
             $agenteColas = array();
             foreach ($agentlist as $sAgente) $agenteColas[$sAgente] = array();  // array_fill_keys
@@ -1054,6 +1144,7 @@ class PaloSantoConsola
             }
 
             // Listar el estado de todos los agentes
+            // EN: List the status of all agents
             $estadosAgentes = $oECCP->getmultipleagentstatus($agentlist);
             $agenteEstado = array();
             foreach ($agentlist as $sAgente) $agenteEstado[$sAgente] = array();  // array_fill_keys
@@ -1064,9 +1155,11 @@ class PaloSantoConsola
 
             foreach ($respuestaResumen->agents->agent as $xml_agent) {
                 // Averiguar el estado del agente
+                // EN: Find out the agent status
                 $estadoAgente = $agenteEstado[(string)$xml_agent->agentchannel];
 
                 // Llenar plantilla con toda la información excepto el número de llamadas por cola
+                // EN: Fill template with all information except the number of calls per queue
                 $linkstart = isset($estadoAgente->callinfo->linkstart) ? (string)$estadoAgente->callinfo->linkstart : NULL;
 
                 if (!is_null($linkstart) && preg_match('/^\d+:\d+:\d+$/', $linkstart))
@@ -1076,8 +1169,8 @@ class PaloSantoConsola
                     'agentname'             =>  (string)$xml_agent->agentname,
                     'agentstatus'           =>  (string)$estadoAgente->status,  // offline online oncall paused
                     'logintime'             =>  (int)$xml_agent->logintime,
-                    'sec_calls'             =>  0,  // a llenar según la cola
-                    'num_calls'             =>  0,  // a llenar según la cola
+                    'sec_calls'             =>  0,  // a llenar según la cola // EN: to fill according to queue
+                    'num_calls'             =>  0,  // a llenar según la cola // EN: to fill according to queue
                     'lastsessionstart'      =>  isset($xml_agent->lastsessionstart) ? (string)$xml_agent->lastsessionstart : NULL,
                     'lastsessionend'        =>  isset($xml_agent->lastsessionend) ? (string)$xml_agent->lastsessionend : NULL,
                     'lastpausestart'        =>  isset($xml_agent->lastpausestart) ? (string)$xml_agent->lastpausestart : NULL,
@@ -1087,6 +1180,7 @@ class PaloSantoConsola
                 );
 
                 // Averiguar a qué colas pertenece el agente
+                // EN: Find out which queues the agent belongs to
                 foreach ($agenteColas[(string)$xml_agent->agentchannel] as $xml_queue) {
                     $infoAgenteCola = $infoAgente;
                     if (isset($xml_agent->callsummary->incoming->queue)) {

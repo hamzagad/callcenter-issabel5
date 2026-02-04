@@ -26,12 +26,13 @@ include_once("libs/paloSantoDB.class.php");
 
 class paloSantoIncomingCampaign
 {
-    var $_DB; // instancia de la clase paloDB
+    var $_DB; // instancia de la clase paloDB // EN: paloDB class instance
     var $errMsg;
 
     function __construct(&$pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
+        // EN: A reference to a paloDB connection is received as a parameter
         if (is_object($pDB)) {
             $this->_DB =& $pDB;
             $this->errMsg = $this->_DB->errMsg;
@@ -42,8 +43,10 @@ class paloSantoIncomingCampaign
             if (!$this->_DB->connStatus) {
                 $this->errMsg = $this->_DB->errMsg;
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             } else {
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             }
         }
     }
@@ -69,6 +72,7 @@ class paloSantoIncomingCampaign
         $paramSQL = array();
 
         // Verificación de estado para filtrar
+        // EN: Status verification to filter
         switch ($sEstado) {
         case 'all':
             break;
@@ -97,6 +101,7 @@ class paloSantoIncomingCampaign
         $paramSQL = array();
 
         // Verificación de estado para filtrar
+        // EN: Status verification to filter
         switch ($sEstado) {
         case 'all':
             break;
@@ -111,6 +116,7 @@ class paloSantoIncomingCampaign
         }
 
         // Verificación de ID de campaña
+        // EN: Campaign ID verification
         if (!is_null($id_campaign)) {
             if (!ctype_digit($id_campaign)) {
                 $this->errMsg = _tr("Campaign ID is not valid");
@@ -121,6 +127,7 @@ class paloSantoIncomingCampaign
         }
 
         // Construcción de la sentencia SQL
+        // EN: SQL statement construction
         $sWhere = implode(' AND ', $listaWhere);
         $sPeticionSQL = <<<SQL_CAMPANIAS
 SELECT ce.id, ce.name, qce.queue, ce.datetime_init, ce.datetime_end,
@@ -147,17 +154,28 @@ SQL_CAMPANIAS;
     /**
      * Procedimiento para crear una nueva campaña, vacía e inactiva. Esta campaña
      * debe luego llenarse con números de teléfono en sucesivas operaciones.
+     * EN: Procedure to create a new empty and inactive campaign. This campaign
+     * EN: must then be filled with phone numbers in successive operations.
      *
      * @param   $sNombre            Nombre de la campaña
+     *                              EN: Campaign name
      * @param   $sQueue             Número que identifica a la cola a conectar la campaña saliente (p.ej. '402')
+     *                              EN: Number that identifies the queue to connect the outgoing campaign (e.g. '402')
      * @param   $sFechaInicio       Fecha YYYY-MM-DD en que inicia la campaña
+     *                              EN: Date YYYY-MM-DD when the campaign starts
      * @param   $sFechaFinal        Fecha YYYY-MM-DD en que finaliza la campaña
+     *                              EN: Date YYYY-MM-DD when the campaign ends
      * @param   $sHoraInicio        Hora del día (HH:MM militar) en que se puede iniciar llamadas
+     *                              EN: Time of day (HH:MM military) when calls can be started
      * @param   $sHoraFinal         Hora del día (HH:MM militar) en que se debe dejar de hacer llamadas
+     *                              EN: Time of day (HH:MM military) when calls must stop
      * @param   $script             Diálogo a asociar a esta campaña
+     *                              EN: Script to associate with this campaign
      * @param   $id_form            ID del formulario a asociar a esta campaña, o NULL
+     *                              EN: ID of the form to associate with this campaign, or NULL
      *
      * @return  int    El ID de la campaña recién creada, o NULL en caso de error
+     *                  EN: The ID of the newly created campaign, or NULL on error
      */
     function createEmptyCampaign($sNombre, $sQueue, $sFechaInicial, $sFechaFinal,
         $sHoraInicio, $sHoraFinal, $script, $id_form = NULL, $id_url = NULL)
@@ -216,26 +234,33 @@ SQL_CAMPANIAS;
         }
 
         // Verificar que el nombre de la campaña es único
+        // EN: Verify that the campaign name is unique
         $tupla =& $this->_DB->getFirstRowQuery('SELECT COUNT(*) FROM campaign_entry WHERE name = ?', FALSE, array($sNombre));
         if (is_array($tupla) && $tupla[0] > 0) {
             // Ya existe una campaña duplicada
+            // EN: A duplicate campaign already exists
             $this->errMsg = _tr('Name Campaign already exists');//'Nombre de campaña indicado ya está en uso';
             return NULL;
         }
 
         // Obtener el ID de la cola entrante correspondiente al número
+        // EN: Get the ID of the incoming queue corresponding to the number
         $idQueue = NULL;
         $tupla = $this->_DB->getFirstRowQuery(
             'SELECT id FROM queue_call_entry WHERE queue = ? AND estatus = "A"',
             FALSE, array($sQueue));
         if (!is_array($tupla) || count($tupla) <= 0) {
         	// No se encuentra la cola indicada
+        	// EN: The indicated queue is not found
             $this->errMsg = _tr('Incoming queue not found');
             return NULL;
         }
         $idQueue = $tupla[0];
 
         // Construir y ejecutar la orden de inserción SQL
+        // EN: Build and execute SQL insert command
+        // EN: Build and execute SQL insert command
+        // EN: Build and execute SQL insert command
         $sPeticionSQL =
             'INSERT INTO campaign_entry (name, id_queue_call_entry, '.
                 'id_form, datetime_init, datetime_end, daytime_init, '.
@@ -251,6 +276,7 @@ SQL_CAMPANIAS;
         }
 
         // Leer el ID insertado por la operación
+        // EN: Read the ID inserted by the operation
         $sPeticionSQL = 'SELECT LAST_INSERT_ID()';
         $tupla =& $this->_DB->getFirstRowQuery($sPeticionSQL);
         if (!is_array($tupla)) {
@@ -394,14 +420,17 @@ SQL_CAMPANIAS;
         }
 
         // Verificar que el nombre de la campaña es único
+        // EN: Verify that the campaign name is unique
         $tupla =& $this->_DB->getFirstRowQuery('SELECT COUNT(*) FROM campaign_entry WHERE name = ? AND id <> ?', FALSE, array($sNombre, $idCampaign));
         if (is_array($tupla) && $tupla[0] > 0) {
             // Ya existe una campaña duplicada
+            // EN: A duplicate campaign already exists
             $this->errMsg = _tr('Name Campaign already exists');//'Nombre de campaña indicado ya está en uso';
             return false;
         }
 
         // Obtener el ID de la cola entrante correspondiente al número
+        // EN: Get the ID of the incoming queue corresponding to the number
         $idQueue = NULL;
         $tupla = $this->_DB->getFirstRowQuery(
             'SELECT id FROM queue_call_entry WHERE queue = ? AND estatus = "A"',
@@ -414,6 +443,9 @@ SQL_CAMPANIAS;
         $idQueue = $tupla[0];
 
         // Construir y ejecutar la orden de inserción SQL
+        // EN: Build and execute SQL insert command
+        // EN: Build and execute SQL insert command
+        // EN: Build and execute SQL insert command
         $sPeticionSQL =
             'UPDATE campaign_entry SET name = ?, id_queue_call_entry = ?, '.
                 'id_form = ?, datetime_init = ?, datetime_end = ?, '.
@@ -434,6 +466,7 @@ SQL_CAMPANIAS;
     {
         $listaSQL = array(
             // TODO: si se implementan contactos por campaña, meter SQL aquí
+            // EN: TODO: if contacts per campaign are implemented, put SQL here
             'DELETE FROM campaign_form_entry WHERE id_campaign = ?',
             'DELETE FROM call_recording WHERE id_call_incoming IN (SELECT id from call_entry WHERE id_campaign = ?)',
             'DELETE FROM form_data_recolected_entry WHERE id_call_entry IN (SELECT id from call_entry WHERE id_campaign = ?)',
@@ -459,12 +492,18 @@ SQL_CAMPANIAS;
     /**
      * Procedimiento para leer la totalidad de los datos de una campaña terminada,
      * incluyendo todos los datos recogidos en los diversos formularios asociados.
+     * EN: Procedure to read all data of a finished campaign, including all data
+     * EN: collected in the various associated forms.
      *
      * @param   object  $pDB            Conexión paloDB a la base de datos call_center
+     *                              EN: paloDB connection to call_center database
      * @param   int     $id_campaign    ID de la campaña a recuperar
+     *                              EN: Campaign ID to retrieve
      * @param(out) string $errMsg       Mensaje de error
+     *                              EN: Error message
      *
      * @return  NULL en caso de error, o una estructura de la siguiente forma:
+     *          EN: NULL on error, or a structure of the following form:
     array(
         BASE => array(
             LABEL   =>  array(
@@ -550,12 +589,14 @@ SQL_LLAMADAS;
         $datosTelefonos = NULL;
 
         // Construir índice para obtener la posición de la llamada, dado su ID
+        // EN: Build index to get the position of the call, given its ID
         $datosCampania['BASE']['ID2POS'] = array();
         foreach ($datosCampania['BASE']['DATA'] as $pos => $tuplaTelefono) {
             $datosCampania['BASE']['ID2POS'][$tuplaTelefono[0]] = $pos;
         }
 
         // Leer los datos de los atributos de cada llamada
+        // EN: Read attribute data of each call
         $iOffsetAttr = count($datosCampania['BASE']['LABEL']);
         $sqlAtributos = <<<SQL_ATRIBUTOS
 SELECT
@@ -578,6 +619,7 @@ SQL_ATRIBUTOS;
         $datosCampania['BASE']['LABEL'][$iOffsetAttr + 2] = _tr('Last Name');
         for ($i = 0; $i < count($datosCampania['BASE']['DATA']); $i++) {
         	// Relleno para llamadas sin contacto
+        	// EN: Fill for calls without contact
             $datosCampania['BASE']['DATA'][$i][$iOffsetAttr + 0] = NULL;
             $datosCampania['BASE']['DATA'][$i][$iOffsetAttr + 1] = NULL;
             $datosCampania['BASE']['DATA'][$i][$iOffsetAttr + 2] = NULL;
@@ -590,6 +632,7 @@ SQL_ATRIBUTOS;
         }
 
         // Leer los datos de los formularios asociados a esta campaña
+        // EN: Read data of forms associated with this campaign
         $sqlFormularios = <<<SQL_FORMULARIOS
 (SELECT
     f.id        AS id_form,
@@ -637,11 +680,13 @@ SQL_FORMULARIOS;
             $datosCampania['FORMS'][$tuplaFormulario[0]]['LABEL'][] = $tuplaFormulario[2];
 
             // Construir índice para obtener posición/orden del campo de formulario, dado su ID.
+            // EN: Build index to get position/order of the form field, given its ID.
             $datosCampania['FORMS'][$tuplaFormulario[0]]['FF2POS'][$tuplaFormulario[1]] = count($datosCampania['FORMS'][$tuplaFormulario[0]]['LABEL']) - 1;
         }
         $datosFormularios = NULL;
 
         // Leer los datos recolectados de los formularios
+        // EN: Read collected data from forms
         $sqlDatosForm = <<<SQL_DATOS_FORM
 SELECT
     c.id AS id_call,
@@ -664,6 +709,8 @@ SQL_DATOS_FORM;
             if (!isset($datosCampania['FORMS'][$vr['id_form']]['DATA'][$vr['id_call']])) {
                 // No está asignada la tupla de valores para esta llamada. Se construye
                 // una tupla de valores NULL que será llenada progresivamente.
+                // EN: The value tuple for this call is not assigned. A NULL value tuple
+                // EN: is built that will be filled progressively.
                 $tuplaVacia = array_fill(0, count($datosCampania['FORMS'][$vr['id_form']]['LABEL']), NULL);
                 $datosCampania['FORMS'][$vr['id_form']]['DATA'][$vr['id_call']] = $tuplaVacia;
             }
@@ -689,11 +736,13 @@ function checkDataBase(){
         $conn = new mysqli($DBHOST, $DBUSER, $DBPASS, $DBNAME);
 
         // Verificar la conexión
+        // EN: Verify the connection
         if ($conn->connect_error) {
             die("Error de conexión: " . $conn->connect_error);
         }
 
         // Consulta para verificar la existencia de las columnas id_url2 e id_url3
+        // EN: Query to verify existence of columns id_url2 and id_url3
         $query = "SELECT COLUMN_NAME
           FROM INFORMATION_SCHEMA.COLUMNS
           WHERE TABLE_NAME = 'campaign_entry'
@@ -702,24 +751,30 @@ function checkDataBase(){
         $result = $conn->query($query);
 
         // Verificar el resultado de la consulta
+        // EN: Verify query result
         if ($result) {
             $existingColumns = $result->fetch_assoc();
 
             // Verificar si la columna id_url2 no existe
+            // EN: Verify if column id_url2 does not exist
             if (!$existingColumns) {
 
                 $rutaArchivo = '/etc/issabel.conf';
                     if (file_exists($rutaArchivo)) {
                         // Leer el contenido del archivo
+                        // EN: Read file contents
                         $contenido = file_get_contents($rutaArchivo);
 
                         // Expresión regular para obtener lo que viene después del signo igual (=)
+                        // EN: Regular expression to get what comes after the equal sign (=)
                         $patron = '/mysqlrootpwd=(.+)/';
 
                         // Realizar la búsqueda en el contenido del archivo
+                        // EN: Perform search in file contents
                         preg_match($patron, $contenido, $coincidencias);
 
                         // Obtener el resultado
+                        // EN: Get the result
                         $AMPDBPASS = $coincidencias[1];
                     }
                     
@@ -739,12 +794,14 @@ function checkDataBase(){
 
                     if ($conn->query($alterQuery)) {
                         // Comando para revocar permisos de ALTER (opcional, según tus necesidades)
+                        // EN: Command to revoke ALTER permissions (optional, according to your needs)
                         $revokeCommand = "mysql -u root -p$AMPDBPASS -e \"REVOKE ALTER ON \`call_center\`.* FROM '$DBUSER'@'$DBHOST'; FLUSH PRIVILEGES;\"";
                         $revokeAlter = exec($revokeCommand);
                     } 
             }
         }
         // Cerrar la conexión a la base de datos
+        // EN: Close database connection
         $conn->close();
         }
 }

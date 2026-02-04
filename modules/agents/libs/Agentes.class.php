@@ -34,12 +34,13 @@ class Agentes
 {
     private $AGENT_FILE;
     var $arrAgents;
-    private $_DB; // instancia de la clase paloDB
+    private $_DB; // instancia de la clase paloDB // EN: instance of paloDB class
     var $errMsg;
 
     function __construct(&$pDB, $file = "/etc/asterisk/agents.conf")
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
+        // EN: Receives as parameter a reference to a paloDB connection
         if (is_object($pDB)) {
             $this->_DB =& $pDB;
             $this->errMsg = $this->_DB->errMsg;
@@ -50,8 +51,10 @@ class Agentes
             if (!$this->_DB->connStatus) {
                 $this->errMsg = $this->_DB->errMsg;
                 // debo llenar alguna variable de error
+                // EN: must fill some error variable
             } else {
                 // debo llenar alguna variable de error
+                // EN: must fill some error variable
             }
         }
 
@@ -63,19 +66,29 @@ class Agentes
      * Procedimiento para consultar los agentes estáticos que existen en la
      * base de datos de CallCenter. Opcionalmente, se puede consultar un solo
      * agente específico.
-     * 
+     *
+     * EN: Procedure to query the static agents that exist in the CallCenter
+     * database. Optionally, a single specific agent can be queried.
+     *
      * @param   int     $id     Número de agente asignado
-     * 
+     *                          EN: Assigned agent number
+     *
      * @return  NULL en caso de error
      *          Si $id es NULL, devuelve una matriz de las columnas conocidas:
      *              id number name password estatus eccp_password
      *          Si $id no es NULL y agente existe, se devuelve una sola tupla
      *          con la estructura de las columnas indicada anteriormente.
-     *          Si $id no es NULL y agente no existe, se devuelve arreglo vacío.  
+     *          Si $id no es NULL y agente no existe, se devuelve arreglo vacío.
+     *          EN: NULL on error. If $id is NULL, returns a matrix of known columns:
+     *              id number name password estatus eccp_password. If $id is not NULL
+     *              and agent exists, a single tuple is returned with the structure
+     *              of the columns indicated above. If $id is not NULL and agent
+     *              does not exist, an empty array is returned.
      */
     function getAgents($id=null)
     {
         // CONSULTA DE LA BASE DE DATOS LA INFORMACIÓN DE LOS AGENTES
+        // EN: QUERY THE DATABASE FOR AGENT INFORMATION
         $paramQuery = array(); $where = array("type = 'Agent'", "estatus = 'A'"); $sWhere = '';
         if (!is_null($id)) {
         	$paramQuery[] = $id;
@@ -118,14 +131,23 @@ class Agentes
     /**
      * Procedimiento para agregar un nuevo agente estático a la base de datos
      * de CallCenter y al archivo agents.conf de Asterisk.
-     * 
+     *
+     * EN: Procedure to add a new static agent to the CallCenter database
+     * and to the Asterisk agents.conf file.
+     *
      * @param   array   $agent  Información del agente con las posiciones:
+     *                          EN: Agent information with positions:
      *                  0   =>  Número del agente a crear
+     *                          EN: Number of the agent to create
      *                  1   =>  Contraseña telefónica del agente
+     *                          EN: Telephone password of the agent
      *                  2   =>  Nombre descriptivo del agente
+     *                          EN: Descriptive name of the agent
      *                  3   =>  Contraseña para login de ECCP
-     * 
+     *                          EN: Password for ECCP login
+     *
      * @return  bool    VERDADERO si se inserta correctamente agente, FALSO si no.
+     *                  EN: TRUE if agent is inserted correctly, FALSE otherwise.
      */
     function addAgent($agent)
     {
@@ -142,11 +164,14 @@ class Agentes
             return FALSE;
         }
         
-        /* Se debe de autogenerar una contraseña ECCP si no se especifica. 
-         * La contraseña será legible por la nueva consola de agente */
+        /* Se debe de autogenerar una contraseña ECCP si no se especifica.
+         * La contraseña será legible por la nueva consola de agente
+         * EN: An ECCP password must be auto-generated if not specified.
+         * The password will be readable by the new agent console */
         if (!isset($agent[3]) || $agent[3] == '') $agent[3] = sha1(time().rand());
 
         // GRABAR EN BASE DE DATOS
+        // EN: SAVE TO DATABASE
         $sPeticionSQL = 'INSERT INTO agent (number, password, name, eccp_password) VALUES (?, ?, ?, ?)';
         $paramSQL = array($agent[0], $agent[1], $agent[2], $agent[3]);
         
@@ -173,14 +198,23 @@ class Agentes
     /**
      * Procedimiento para modificar un agente estático exitente en la base de
      * datos de CallCenter y en el archivo agents.conf de Asterisk.
-     * 
+     *
+     * EN: Procedure to modify an existing static agent in the CallCenter
+     * database and in the Asterisk agents.conf file.
+     *
      * @param   array   $agent  Información del agente con las posiciones:
+     *                          EN: Agent information with positions:
      *                  0   =>  Número del agente a crear
+     *                          EN: Number of the agent to create
      *                  1   =>  Contraseña telefónica del agente
+     *                          EN: Telephone password of the agent
      *                  2   =>  Nombre descriptivo del agente
+     *                          EN: Descriptive name of the agent
      *                  3   =>  Contraseña para login de ECCP
-     * 
+     *                          EN: Password for ECCP login
+     *
      * @return  bool    VERDADERO si se inserta correctamente agente, FALSO si no.
+     *                  EN: TRUE if agent is inserted correctly, FALSE otherwise.
      */
     function editAgent($agent)
     {
@@ -190,6 +224,7 @@ class Agentes
         }
 
         // Verificar que el agente referenciado existe
+        // EN: Verify that the referenced agent exists
         $tupla = $this->_DB->getFirstRowQuery(
             'SELECT COUNT(*) FROM agent WHERE estatus = "A" AND number = ?',
             FALSE, array($agent[0]));
@@ -199,9 +234,11 @@ class Agentes
         }        
 
         // Asumir ninguna contraseña de ECCP (agente no será usable por ECCP)
+        // EN: Assume no ECCP password (agent will not be usable by ECCP)
         if (!isset($agent[3]) || $agent[3] == '') $agent[3] = NULL;
 
         // EDITAR EN BASE DE DATOS
+        // EN: EDIT IN DATABASE
         $sPeticionSQL = 'UPDATE agent SET password = ?, name = ?';
         $paramSQL = array($agent[1], $agent[2]);
         if (!is_null($agent[3])) {
@@ -220,8 +257,10 @@ class Agentes
             return false;
         }
 
-        /* Se debe de autogenerar una contraseña ECCP si no se especifica. 
-         * La contraseña será legible por la nueva consola de agente */
+        /* Se debe de autogenerar una contraseña ECCP si no se especifica.
+         * La contraseña será legible por la nueva consola de agente
+         * EN: An ECCP password must be auto-generated if not specified.
+         * The password will be readable by the new agent console */
         if (is_null($agent[3])) {
             $agent[3] = sha1(time().rand());
             $sPeticionSQL = 'UPDATE agent SET eccp_password = ? WHERE number = ? AND eccp_password IS NULL';
@@ -317,6 +356,7 @@ class Agentes
         }
 
         // BORRAR EN BASE DE DATOS
+        // EN: DELETE IN DATABASE
 
         $sPeticionSQL = "UPDATE agent SET estatus='I' WHERE number=$id_agent";
 
@@ -344,6 +384,9 @@ class Agentes
      * Procedimiento para agregar un agente estático al archivo agents.conf y
      * reiniciar Asterisk para que lea los cambios de agentes.
      *
+     * EN: Procedure to add a static agent to the agents.conf file and restart
+     * Asterisk to read the agent changes.
+     *
      * Uses app_agent_pool format (Asterisk 12+):
      * [agent-id]
      * fullname=Agent Name
@@ -352,13 +395,20 @@ class Agentes
      * wrapuptime=2000
      *
      * @param   array   $agent  Información del agente. Se recogen los valores:
+     *                          EN: Agent information. The following values are collected:
      *                  0   =>  Número del agente
+     *                          EN: Agent number
      *                  1   =>  Contraseña telefónica del agente (ignored in app_agent_pool)
+     *                          EN: Agent telephone password (ignored in app_agent_pool)
      *                  2   =>  Nombre descriptivo del agente
+     *                          EN: Descriptive name of the agent
      *                  Otras claves o posiciones se ignoran.
+     *                          EN: Other keys or positions are ignored.
      *
      * @return  VERDADERO si se puede escribir el archivo y reiniciar Asterisk,
      *          FALSO si ocurre algún error.
+     *          EN: TRUE if the file can be written and Asterisk restarted,
+     *          FALSE if any error occurs.
      */
     function addAgentFile($agent)
     {
@@ -663,7 +713,7 @@ class Agentes
         $this->errMsg = NULL;
 
         if (!(is_array($arrAgentes) && count($arrAgentes) > 0)) {
-            $this->errMsg = "Lista de agentes no válida";
+            $this->errMsg = "Lista de agentes no válida"; // EN: Invalid agent list
             return FALSE;
         }
 
@@ -684,12 +734,13 @@ class Agentes
         return true;
     }
 
-    /* FUNCIONES DEL AGI*/
+    /* FUNCIONES DEL AGI
+     * EN: AGI FUNCTIONS */
     /**
     * Agent Logoff
     *
     * @link http://www.voip-info.org/wiki/index.php?page=Asterisk+Manager+API+AgentLogoff
-    * @param Agent: Agent ID of the agent to login 
+    * @param Agent: Agent ID of the agent to login
     */
     private function Agentlogoff($obj_phpAgi, $agent)
     {

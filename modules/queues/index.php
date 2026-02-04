@@ -44,9 +44,11 @@ function _moduleContent(&$smarty,$module_name)
     $smarty->assign("relative_dir_rich_text", $relative_dir_rich_text);
 
     // Conexión a la base de datos CallCenter
+    // EN: CallCenter database connection
     $pDB = new paloDB($arrConf['cadena_dsn']);
 
     // Mostrar pantalla correspondiente
+    // EN: Show corresponding screen
     $contenidoModulo = '';
     $sAction = 'list_queues';
     if (isset($_GET['action'])) $sAction = $_GET['action'];
@@ -68,7 +70,8 @@ function listarColas($pDB, $smarty, $module_name, $local_templates_dir)
     
     $oColas = new paloSantoColaEntrante($pDB);
 
-    // Verificar si alguna cola debe activarse o inactivarse    
+    // Verificar si alguna cola debe activarse o inactivarse
+    // EN: Verify if any queue must be activated or deactivated    
     if (isset($_POST['change_status']) && isset($_POST['status_queue_sel']) &&
         in_array($_POST['status_queue_sel'], array('activate', 'deactivate')) &&
         !is_null($id = getParameter('id'))) {
@@ -80,6 +83,7 @@ function listarColas($pDB, $smarty, $module_name, $local_templates_dir)
     }
 
     // Estado indicado por el filtro
+    // EN: Status indicated by filter
     $sEstado = 'A';
     $tmpEstado = getParameter('cbo_estado');
     $arrStatus = array('all' => _tr('all'), 'A' => _tr('active'), 'I' => _tr('inactive'));

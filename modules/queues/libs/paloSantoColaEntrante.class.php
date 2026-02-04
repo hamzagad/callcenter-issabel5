@@ -24,12 +24,13 @@
 
 class paloSantoColaEntrante
 {
-    private $_DB; // instancia de la clase paloDB
+    private $_DB; // instancia de la clase paloDB // EN: paloDB class instance
     var $errMsg;
 
     function __construct(&$pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
+        // EN: A reference to a paloDB connection is received as a parameter
         if (is_object($pDB)) {
             $this->_DB =& $pDB;
             $this->errMsg = $this->_DB->errMsg;
@@ -40,8 +41,10 @@ class paloSantoColaEntrante
             if (!$this->_DB->connStatus) {
                 $this->errMsg = $this->_DB->errMsg;
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             } else {
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             }
         }
     }
@@ -52,6 +55,7 @@ class paloSantoColaEntrante
         $paramSQL = array();
         
         // Selección de cola específica
+        // EN: Specific queue selection
         if (!is_null($idCola)) {
             if (!ctype_digit("$idCola")) {
                 $this->errMsg = '(internal) Invalid queue ID';
@@ -62,6 +66,7 @@ class paloSantoColaEntrante
         }
         
         // Selección de estado de la cola
+        // EN: Queue status selection
         if (!is_null($status) && $status!='all') {
             if (!in_array($status, array('A', 'I'))) {
                 $this->errMsg = '(internal) Invalid status, must be A,I';
@@ -81,6 +86,7 @@ class paloSantoColaEntrante
         list($listaWhere, $paramSQL) = $l;        
         
         // Construcción de SQL
+        // EN: SQL construction
         $sql = 'SELECT count(id) FROM queue_call_entry'.
             ((count($listaWhere) > 0) ? ' WHERE '.implode(' AND ',$listaWhere) : '').
             ' ORDER BY queue';
@@ -94,13 +100,17 @@ class paloSantoColaEntrante
     }
     
     /**
-     * Procedimiento para leer toda la información de las colas entrantes 
-     * monitoreadas. 
-     * 
+     * Procedimiento para leer toda la información de las colas entrantes
+     * monitoreadas.
+     * EN: Procedure to read all information of monitored incoming queues
+     *
      * @param   int     $idCola ID de cola a leer, o NULL para leer todas las colas
+     *                      EN: Queue ID to read, or NULL to read all queues
      * @param   string  $status NULL para cualquier estado, (A)ctivas, (I)nactivas
-     * 
+     *                      EN: NULL for any status, (A)ctive, (I)nactive
+     *
      * @return  mixed   Recordset de las colas, o NULL
+     *                  EN: Queue recordset, or NULL
      */
     function leerColas($idCola = NULL, $status = NULL, $limit = NULL, $offset = NULL)
     {
@@ -109,6 +119,7 @@ class paloSantoColaEntrante
         list($listaWhere, $paramSQL) = $l;        
         
         // Construcción de SQL
+        // EN: SQL construction
         $sql = 'SELECT id, queue, estatus, script FROM queue_call_entry'.
             ((count($listaWhere) > 0) ? ' WHERE '.implode($listaWhere) : '').
             ' ORDER BY queue';
@@ -136,13 +147,21 @@ class paloSantoColaEntrante
      * las campañas entrantes, con un script de campaña entrante indicado.
      * Si la cola entrante indicada no se halla registrada, se ingresa. De lo
      * contrario, se actualiza su script y se marca como activa.
-     * 
+     * EN: Procedure to register or update a queue as monitored for incoming
+     * EN: campaigns, with a specified incoming campaign script. If the indicated
+     * EN: incoming queue is not registered, it is added. Otherwise, its script
+     * EN: is updated and it is marked as active.
+     *
      * @param   int     $queue  Número de la cola a monitorear
+     *                          EN: Queue number to monitor
      * @param   string  $script Texto a visualizar en campaña entrante cuando
      *                          entra una llamada a la cola y se asigna a un
      *                          agente.
-     * 
+     *                          EN: Text to display in incoming campaign when a call
+     *                          EN: enters the queue and is assigned to an agent.
+     *
      * @return  bool    VERDADERO en caso de éxito, FALSO en error.
+     *                  EN: TRUE on success, FALSE on error.
      */
     function iniciarMonitoreoCola($queue, $script)
     {
@@ -152,6 +171,7 @@ class paloSantoColaEntrante
         }
         
         // Verificar que la cola no se esté usando en una campaña saliente
+        // EN: Verify that the queue is not being used in an outgoing campaign
         $tupla = $this->_DB->getFirstRowQuery(
             'SELECT COUNT(*) FROM campaign WHERE estatus = "A" AND queue = ?', FALSE,
             array($queue));
@@ -165,6 +185,7 @@ class paloSantoColaEntrante
         }
         
         // Verificar si la cola ya se ha ingresado
+        // EN: Verify if the queue has already been entered
     	$tupla = $this->_DB->getFirstRowQuery(
             'SELECT id FROM queue_call_entry WHERE queue = ?', TRUE, 
             array($queue));
@@ -175,6 +196,7 @@ class paloSantoColaEntrante
         $idCola = isset($tupla['id']) ? $tupla['id'] : NULL;
         
         // Construcción de SQL
+        // EN: SQL construction
         $paramSQL = array($queue, $script, 'A');
         if (!is_null($idCola)) $paramSQL[] = $idCola; 
         $sql = is_null($idCola)
@@ -189,11 +211,15 @@ class paloSantoColaEntrante
     
     /**
      * Procedimiento para cambiar el estado de monitoreo de una cola entrante
-     * 
+     * EN: Procedure to change the monitoring status of an incoming queue
+     *
      * @param   int     $id     ID de la cola monitoreada (NO el número)
+     *                          EN: ID of the monitored queue (NOT the number)
      * @param   string  $status Nuevo estado deseado de la cola (A/I)
-     * 
+     *                          EN: New desired status for the queue (A/I)
+     *
      * @return bool VERDADERO en éxito, FALSO en error
+     *              EN: TRUE on success, FALSE on error
      */
     function cambiarMonitoreoCola($id, $status)
     {
@@ -219,11 +245,16 @@ class paloSantoColaEntrante
      * Procedimiento para filtrar de la lista de colas indicada, todas las colas
      * que se usan para campañas entrantes. Se devuelve la lista de colas que
      * pueden usarse para nuevas campañas entrantes.
-     * 
-     * @param   array   $listaColas Lista de las colas que se han leído de 
+     * EN: Procedure to filter from the indicated queue list all queues used for
+     * EN: incoming campaigns. Returns the list of queues that can be used for new
+     * EN: incoming campaigns.
+     *
+     * @param   array   $listaColas Lista de las colas que se han leído de
      *                              paloQueue::getQueue()
-     * 
+     *                              EN: List of queues read from paloQueue::getQueue()
+     *
      * @return  mixed   NULL en error, o lista filtrada (posiblemente vacía)
+     *                  EN: NULL on error, or filtered list (possibly empty)
      */
     function filtrarColasUsadas($listaColas)
     {

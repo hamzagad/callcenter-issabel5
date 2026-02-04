@@ -55,11 +55,13 @@ function _moduleContent(&$smarty, $module_name)
     $smarty->assign("relative_dir_rich_text", $relative_dir_rich_text);
 
     // Conexión a la base de datos CallCenter
+    // EN: CallCenter database connection
     $pDB = new paloDB($arrConf['cadena_dsn']);
 
     checkDataBase();
 
     // Mostrar pantalla correspondiente
+    // EN: Show corresponding screen
     $contenidoModulo = '';
     $sAction = 'list_campaign';
     if (isset($_GET['action'])) $sAction = $_GET['action'];
@@ -171,6 +173,7 @@ function listCampaign($pDB, $smarty, $module_name, $local_templates_dir)
     }
 
     // Definición de la tabla de las campañas
+    // EN: Definition of campaigns table
     $oGrid->setTitle(_tr("Campaigns List"));
     $oGrid->setWidth("99%");
     $oGrid->setIcon("images/list.png");
@@ -319,6 +322,7 @@ function formEditCampaign($pDB, $smarty, $module_name, $local_templates_dir, $id
         $smarty->assign('label_manage_external_url', _tr('Manage External URLs'));
 
         // Definición del formulario de nueva campaña
+        // EN: Definition of new campaign form
         $smarty->assign("REQUIRED_FIELD", _tr("Required field"));
         $smarty->assign("CANCEL", _tr("Cancel"));
         $smarty->assign("SAVE", _tr("Save"));
@@ -327,9 +331,9 @@ function formEditCampaign($pDB, $smarty, $module_name, $local_templates_dir, $id
         $smarty->assign('LABEL_CHANNEL_ZERO_DISABLE', _tr('(Leave as 0 to disable channel limit)'));
 
         // Valores por omisión para primera carga
-        $arrNoElegidos = array();   // Lista de selección de formularios elegibles
-        $arrElegidos = array();     // Lista de selección de formularios ya elegidos
-        $values_form = NULL;        // Selección hecha en el formulario
+        $arrNoElegidos = array();   // Lista de selección de formularios elegibles // EN: Selection list of eligible forms
+        $arrElegidos = array();     // Lista de selección de formularios ya elegidos // EN: Selection list of already chosen forms
+        $values_form = NULL;        // Selección hecha en el formulario // EN: Selection made in form
         if (is_null($id_campaign)) {
             if (!isset($_POST['nombre'])) $_POST['nombre']='';
             if (!isset($_POST["context"]) || $_POST["context"]=="") {
@@ -385,6 +389,7 @@ function formEditCampaign($pDB, $smarty, $module_name, $local_templates_dir, $id
         }
 
         // Generación del objeto de formulario
+        // EN: Form object generation
         $formCampos = getFormCampaign($arrDataTrunks, $arrDataQueues,
             $arrNoElegidos, $arrElegidos, $arrUrlsExternos);
         $oForm = new paloForm($smarty, $formCampos);

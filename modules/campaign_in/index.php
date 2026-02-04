@@ -43,6 +43,7 @@ function _moduleContent(&$smarty, $module_name)
 
     checkDataBase();
     // Se fusiona la configuración del módulo con la configuración global
+    // EN: Module configuration is merged with global configuration
     $arrConf = array_merge($arrConf, $arrConfModule);
 
     //folder path for custom templates

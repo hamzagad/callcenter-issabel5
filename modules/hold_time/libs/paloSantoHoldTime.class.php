@@ -25,12 +25,13 @@ include_once("libs/paloSantoDB.class.php");
 
 class paloSantoHoldTime
 {
-    var $_DB; // instancia de la clase paloDB
+    var $_DB; // instancia de la clase paloDB // EN: paloDB class instance
     var $errMsg;
 
     function __construct(&$pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
+        // EN: A reference to a paloDB connection is received as a parameter
         if (is_object($pDB)) {
             $this->_DB =& $pDB;
             $this->errMsg = $this->_DB->errMsg;
@@ -41,8 +42,10 @@ class paloSantoHoldTime
             if (!$this->_DB->connStatus) {
                 $this->errMsg = $this->_DB->errMsg;
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             } else {
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             }
         }
     }
@@ -50,22 +53,37 @@ class paloSantoHoldTime
     /**
      * Procedimiento para construir un histograma de los tiempos de espera de las
      * llamadas en la cola de atención.
-     * 
+     * EN: Procedure to build a histogram of hold times for calls in the service queue.
+     *
      * @param   string  $sTipoLlamada   Tipo de llamada a mostrar: 'incoming', 'outgoing'
+     *                              EN: Call type to show: 'incoming', 'outgoing'
      * @param   string  $sEstadoLlamada Estado de las llamadas a considerar. Los
+     *                              EN: Status of calls to consider. Values are
      *                  valores son NULL para cualquier llamada, 'Success' para
+     *                              EN: NULL for any call, 'Success' for
      *                  las llamadas conectadas, 'NoAnswer' para llamadas que no
+     *                              EN: connected calls, 'NoAnswer' for calls that
      *                  se conectaron pero que entraron en la cola (sólo llamadas
+     *                              EN: did not connect but entered the queue (only
      *                  salientes), o 'Abandoned' para llamadas cuyo lado remoto
+     *                              EN: outgoing calls), or 'Abandoned' for calls whose
      *                  cerró mientras esperaban en la cola.
+     *                              EN: remote side closed while waiting in queue.
      * @param   string  $sFechaInicio   Inicio de periodo yyyy-mm-dd hh:mm:ss
+     *                              EN: Period start yyyy-mm-dd hh:mm:ss
      * @param   string  $sFechaFinal    Final de periodo yyyy-mm-dd hh:mm:ss
+     *                              EN: Period end yyyy-mm-dd hh:mm:ss
      * @param   int     Tamaño del intervalo del histograma. Como caso especial
+     *                              EN: Histogram interval size. As a special case
      *                  el primer intervalo incluye al 0. Por omisión es 10.
+     *                              EN: the first interval includes 0. Default is 10.
      * @param   int     Valor más allá del cual se coloca las contribuciones en
+     *                              EN: Value beyond which contributions are placed
      *                  el último intervalo. Por omisión es 61.
-     * 
+     *                              EN: in the last interval. Default is 61.
+     *
      * @return  mixed   NULL en caso de error, o la siguiente estructura:
+     *                  EN: NULL on error, or the following structure:
      */
     function leerHistogramaEsperaCola($sTipoLlamada, $sEstadoLlamada, $sFechaInicio,
         $sFechaFinal, $iLongDiv = 10, $iValorDivFinal = 61)
@@ -89,6 +107,7 @@ class paloSantoHoldTime
         $sFechaFinal .= ' 23:59:59';
 
         // Construir petición WHERE
+        // EN: Build WHERE request
         $whereCond = array('datetime_entry_queue >= ?');
         $paramSQL = array($sFechaInicio);
         if (!is_null($sEstadoLlamada)) {
@@ -141,6 +160,7 @@ SQL_OUTGOING;
         foreach ($arr_result as $tupla) {
         	
             // Inicializar la estructura del histograma
+            // EN: Initialize histogram structure
             if (!isset($resultado[$tupla['queue']])) {
                 $resultado[$tupla['queue']] = array(
                     'hist'          =>  array_fill(0, $iPosMaxDiv + 1, 0),
@@ -151,6 +171,7 @@ SQL_OUTGOING;
         	}
             
             // Posición de la contribución de la muestra al histograma
+            // EN: Position of sample contribution to histogram
             if ($tupla['duration_wait'] >= $iValorDivFinal)
                 $iPos = $iPosMaxDiv;
             elseif ($tupla['duration_wait'] <= 0)
@@ -160,6 +181,7 @@ SQL_OUTGOING;
             $resultado[$tupla['queue']]['hist'][$iPos] += $tupla['N'];
             
             // Actualización de los totales
+            // EN: Update totals
             $resultado[$tupla['queue']]['total_calls'] += $tupla['N'];
             $resultado[$tupla['queue']]['total_wait'] += $tupla['duration_wait'] * $tupla['N'];
             if ($tupla['duration_wait'] > $resultado[$tupla['queue']]['max_wait'])

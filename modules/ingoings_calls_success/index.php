@@ -60,6 +60,7 @@ function _moduleContent(&$smarty, $module_name)
     global $arrConf;
 
     // Se fusiona la configuración del módulo con la configuración global
+    // EN: Module configuration is merged with global configuration
     $arrConf = array_merge($arrConf, $arrConfModule);
 
     require_once "modules/$module_name/libs/paloSantoReportsCalls.class.php";
@@ -76,6 +77,7 @@ function _moduleContent(&$smarty, $module_name)
     }
 
     // Parámetros por omisión
+    // EN: Default parameters
     $url = array('menu' => $module_name);
     $paramFiltroBase = $paramFiltro = array(
         'txt_fecha_init'    => date("d M Y"),

@@ -26,7 +26,7 @@ require_once("$DocumentRoot/libs/paloSantoInstaller.class.php");
 require_once("$DocumentRoot/libs/paloSantoDB.class.php");
 
 $tmpDir = '/tmp/new_module/callcenter';  # in this folder the load module extract the package content
-#generar el archivo db de campañas
+#generar el archivo db de campañas // EN: Generate campaign db file
 $return=1;
 $path_script_db="$tmpDir/setup/call_center.sql";
 $datos_conexion['user']     = "asterisk";
@@ -45,7 +45,7 @@ if (file_exists($path_script_db))
     $pDBRoot->genQuery("GRANT ALL ON call_center.* TO asterisk@localhost IDENTIFIED BY 'asterisk'");
     $pDBRoot->genQuery("FLUSH PRIVILEGES");
     $pDBRoot->disconnect();
-    fputs(STDERR, "INFO: Granted permissions to asterisk@localhost on call_center database\n");
+    fputs(STDERR, "INFO: Granted permissions to asterisk@localhost on call_center database | Es: Permisos concedidos a asterisk@localhost en base de datos call_center\n");
 
     $pDB = new paloDB ('mysql://root:'.MYSQL_ROOT_PASSWORD.'@localhost/call_center');
     quitarColumnaSiExiste($pDB, 'call_center', 'agent', 'queue');
@@ -117,6 +117,7 @@ if (file_exists($path_script_db))
         "ADD KEY `campaign_date_schedule` (`id_campaign`, `date_init`, `date_end`, `time_init`, `time_end`)");
 
     // Actualizar longitud de campos trunk y ChannelClient a 50 caracteres
+    // EN: Update length of trunk and ChannelClient fields to 50 characters
     actualizarLongitudCampo($pDB, 'call_center', 'call_entry', 'trunk', 50);
     actualizarLongitudCampo($pDB, 'call_center', 'call_progress_log', 'trunk', 50);
     actualizarLongitudCampo($pDB, 'call_center', 'calls', 'trunk', 50);
@@ -125,6 +126,7 @@ if (file_exists($path_script_db))
     actualizarLongitudCampo($pDB, 'call_center', 'current_calls', 'ChannelClient', 50);
 
     // Asegurarse de que todo agente tiene una contraseña de ECCP
+    // EN: Ensure that every agent has an ECCP password
     $pDB->genQuery('UPDATE agent SET eccp_password = SHA1(CONCAT(NOW(), RAND(), number)) WHERE eccp_password IS NULL');
 
     $pDB->disconnect();
@@ -144,17 +146,17 @@ WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
 EXISTE_COLUMNA;
     $r = $pDB->getFirstRowQuery($sPeticionSQL, FALSE, array($sDatabase, $sTabla, $sColumna));
     if (!is_array($r)) {
-        fputs(STDERR, "ERR: al verificar tabla $sTabla.$sColumna - ".$pDB->errMsg."\n");
+        fputs(STDERR, "ERR: al verificar tabla $sTabla.$sColumna - ".$pDB->errMsg." | EN: ERR: al verificar tabla $sTabla.$sColumna\n");
         return;
     }
     if ($r[0] > 0) {
-        fputs(STDERR, "INFO: Se encuentra $sTabla.$sColumna en base de datos $sDatabase, se ejecuta:\n");
+        fputs(STDERR, "INFO: Se encuentra $sTabla.$sColumna en base de datos $sDatabase, se ejecuta: | EN: INFO: Found $sTabla.$sColumna in database $sDatabase, executing:\n");
         $sql = "ALTER TABLE $sTabla DROP COLUMN $sColumna";
         fputs(STDERR, "\t$sql\n");
         $r = $pDB->genQuery($sql);
         if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
     } else {
-        fputs(STDERR, "INFO: No existe $sTabla.$sColumna en base de datos $sDatabase. No se hace nada.\n");
+        fputs(STDERR, "INFO: No existe $sTabla.$sColumna en base de datos $sDatabase. No se hace nada. | EN: INFO: $sTabla.$sColumna does not exist in database $sDatabase. Nothing done.\n");
     }
 }
 
@@ -167,17 +169,17 @@ WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
 EXISTE_COLUMNA;
     $r = $pDB->getFirstRowQuery($sPeticionSQL, FALSE, array($sDatabase, $sTabla, $sColumna));
     if (!is_array($r)) {
-        fputs(STDERR, "ERR: al verificar tabla $sTabla.$sColumna - ".$pDB->errMsg."\n");
+        fputs(STDERR, "ERR: al verificar tabla $sTabla.$sColumna - ".$pDB->errMsg." | EN: ERR: al verificar tabla $sTabla.$sColumna\n");
         return;
     }
     if ($r[0] <= 0) {
-        fputs(STDERR, "INFO: No se encuentra $sTabla.$sColumna en base de datos $sDatabase, se ejecuta:\n");
+        fputs(STDERR, "INFO: No se encuentra $sTabla.$sColumna en base de datos $sDatabase, se ejecuta: | EN: INFO: $sTabla.$sColumna not found in database $sDatabase, executing:\n");
         $sql = "ALTER TABLE $sTabla $sColumnaDef";
         fputs(STDERR, "\t$sql\n");
         $r = $pDB->genQuery($sql);
         if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
     } else {
-        fputs(STDERR, "INFO: Ya existe $sTabla.$sColumna en base de datos $sDatabase.\n");
+        fputs(STDERR, "INFO: Ya existe $sTabla.$sColumna en base de datos $sDatabase. | EN: INFO: $sTabla.$sColumna already exists in database $sDatabase.\n");
     }
 }
 
@@ -190,23 +192,24 @@ WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?
 EXISTE_INDICE;
     $r = $pDB->getFirstRowQuery($sPeticionSQL, FALSE, array($sDatabase, $sTabla, $sIndice));
     if (!is_array($r)) {
-        fputs(STDERR, "ERR: al verificar tabla $sTabla.$sIndice - ".$pDB->errMsg."\n");
+        fputs(STDERR, "ERR: al verificar tabla $sTabla.$sIndice - ".$pDB->errMsg." | EN: ERR: al verificar índice $sTabla.$sIndice\n");
         return;
     }
     if ($r[0] <= 0) {
-        fputs(STDERR, "INFO: No se encuentra $sTabla.$sIndice en base de datos $sDatabase, se ejecuta:\n");
+        fputs(STDERR, "INFO: No se encuentra $sTabla.$sIndice en base de datos $sDatabase, se ejecuta: | EN: INFO: $sTabla.$sIndice not found in database $sDatabase, executing:\n");
         $sql = "ALTER TABLE $sTabla $sIndiceDef";
         fputs(STDERR, "\t$sql\n");
         $r = $pDB->genQuery($sql);
         if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
     } else {
-        fputs(STDERR, "INFO: Ya existe $sTabla.$sIndice en base de datos $sDatabase.\n");
+        fputs(STDERR, "INFO: Ya existe $sTabla.$sIndice en base de datos $sDatabase. | EN: INFO: $sTabla.$sIndice already exists in database $sDatabase.\n");
     }
 }
 
 function actualizarLongitudCampo($pDB, $sDatabase, $sTabla, $sColumna, $iNuevaLongitud)
 {
     // Verificar longitud actual de la columna
+    // EN: Verify current length of column
     $sPeticionSQL = <<<VERIFICAR_LONGITUD
 SELECT CHARACTER_MAXIMUM_LENGTH
 FROM INFORMATION_SCHEMA.COLUMNS
@@ -214,7 +217,7 @@ WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
 VERIFICAR_LONGITUD;
     $r = $pDB->getFirstRowQuery($sPeticionSQL, FALSE, array($sDatabase, $sTabla, $sColumna));
     if (!is_array($r)) {
-        fputs(STDERR, "ERR: al verificar longitud de $sTabla.$sColumna - ".$pDB->errMsg."\n");
+        fputs(STDERR, "ERR: al verificar longitud de $sTabla.$sColumna - ".$pDB->errMsg." | EN: ERR: al verificar longitud de $sTabla.$sColumna\n");
         return;
     }
     if (isset($r[0]) && $r[0] < $iNuevaLongitud) {
@@ -230,18 +233,21 @@ VERIFICAR_LONGITUD;
         );
         $nullClause = (is_array($nulo) && strtoupper($nulo[0]) == 'YES') ? 'NULL' : 'NOT NULL';
         $sql = "ALTER TABLE $sTabla MODIFY COLUMN $sColumna " . $tipo[0] . "($iNuevaLongitud) $nullClause";
-        fputs(STDERR, "INFO: Actualizando longitud de $sTabla.$sColumna a $iNuevaLongitud caracteres\n");
+        fputs(STDERR, "INFO: Actualizando longitud de $sTabla.$sColumna a $iNuevaLongitud caracteres | EN: INFO: Updating length of $sTabla.$sColumna to $iNuevaLongitud characters\n");
         fputs(STDERR, "\t$sql\n");
         $r = $pDB->genQuery($sql);
         if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
     } else {
-        fputs(STDERR, "INFO: La longitud de $sTabla.$sColumna ya es adecuada o no existe.\n");
+        fputs(STDERR, "INFO: La longitud de $sTabla.$sColumna ya es adecuada o no existe. | EN: INFO: The length of $sTabla.$sColumna is already adequate or does not exist.\n");
     }
 }
 
 /**
  * Procedimiento que instala algunos contextos especiales requeridos para algunas
  * funcionalidades del CallCenter.
+ *
+ * EN: Function that installs some special contexts required for some
+ * CallCenter functionalities.
  */
 function instalarContextosEspeciales()
 {
@@ -250,6 +256,7 @@ function instalarContextosEspeciales()
     $sFinalContenido =  "; END ISSABEL CALL-CENTER CONTEXTS DO NOT REMOVE THIS LINE\n";
 
     // Cargar el archivo, notando el inicio y el final del área de contextos de callcenter
+    // EN: Load the file, noting the start and end of the callcenter contexts area
     $bEncontradoInicio = $bEncontradoFinal = FALSE;
     $contenido = array();
     foreach (file($sArchivo) as $sLinea) {
@@ -264,7 +271,7 @@ function instalarContextosEspeciales()
     	}
     }
     if ($bEncontradoInicio xor $bEncontradoFinal) {
-    	fputs(STDERR, "ERR: no se puede localizar correctamente segmento de contextos de Call Center\n");
+    	fputs(STDERR, "ERR: no se puede localizar correctamente segmento de contextos de Call Center | EN: ERR: cannot correctly locate Call Center contexts segment\n");
     } else {
     	$contenido[] = $sInicioContenido;
         $contenido[] =
@@ -315,21 +322,24 @@ function instalarAgentDefaultsTemplate()
                  "autologoff=0\n" .
                  "wrapuptime=0\n\n";
 
-    // Check if file exists and if template already exists
+    // EN: Check if file exists and if template already exists
+    // Verificar si el archivo existe y si la plantilla ya existe
     if (file_exists($sArchivo)) {
         $contenido = file_get_contents($sArchivo);
         if (strpos($contenido, '[agent-defaults](!)') !== false) {
-            fputs(STDERR, "INFO: [agent-defaults] template already exists in agents.conf\n");
+            fputs(STDERR, "INFO: [agent-defaults] template already exists in agents.conf | EN: INFO: plantilla [agent-defaults] ya existe en agents.conf\n");
             return;
         }
-        // Append template at the end
+        // EN: Append template at the end
+        // Agregar plantilla al final
         file_put_contents($sArchivo, $contenido . $sTemplate);
     } else {
-        // Create new file with template
+        // EN: Create new file with template
+        // Crear nuevo archivo con plantilla
         file_put_contents($sArchivo, $sTemplate);
     }
     chown($sArchivo, 'asterisk');
     chgrp($sArchivo, 'asterisk');
-    fputs(STDERR, "INFO: Created [agent-defaults] template in agents.conf\n");
+    fputs(STDERR, "INFO: Created [agent-defaults] template in agents.conf | Es: INFO: Plantilla [agent-defaults] creada en agents.conf\n");
 }
 ?>

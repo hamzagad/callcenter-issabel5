@@ -180,9 +180,11 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         $sEstadoTag .= '</span>';
 
         // Estado a mostrar en HTML se deriva del estado JSON
+        // EN: Status to display in HTML is derived from JSON status
         if ($sPrevQueue != $sQueue) {
             if (!is_null($tuplaTotal)) {
             	// Emitir fila de totales para la cola ANTERIOR
+            	// EN: Emit totals row for the PREVIOUS queue
                 $jsTotalKey = 'queue-'.$sPrevQueue;
                 $arrData[] = array(
                     '<b>'._tr('TOTAL').'</b>',
@@ -196,6 +198,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
             }
 
             // Reiniciar totales aquí
+            // EN: Reset totals here
             $tuplaTotal = array(
                 'num_agents'    =>  0,
                 'logintime'     =>  0,

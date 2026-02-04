@@ -33,17 +33,20 @@ class ECCPBadRequestException extends Exception {}
 /**
  * Clase que contiene una implementación de un cliente del protocolo ECCP
  * (Elastix CallCenter Protocol) para uso de una consola de cliente web.
+ *
+ * EN: Class that contains an implementation of an ECCP protocol client
+ * (Elastix CallCenter Protocol) for use by a web client console.
  */
 class ECCP
 {
-    private $_listaEventos = array(); // Lista de eventos pendientes
+    private $_listaEventos = array(); // Lista de eventos pendientes // EN: List of pending events
     private $_parseError = NULL;
-    private $_response = NULL;      // Respuesta recibida para un requerimiento
-    private $_parser = NULL;        // Parser expat para separar los paquetes
-    private $_iPosFinal = NULL;     // Posición de parser para el paquete parseado
-    private $_sTipoDoc = NULL;      // Tipo de paquete. Sólo se acepta 'event' y 'response'
-    private $_bufferXML = '';       // Datos pendientes que no forman un paquete completo
-    private $_iNestLevel = 0;       // Al llegar a cero, se tiene fin de paquete
+    private $_response = NULL;      // Respuesta recibida para un requerimiento // EN: Response received for a request
+    private $_parser = NULL;        // Parser expat para separar los paquetes // EN: Expat parser to separate packets
+    private $_iPosFinal = NULL;     // Posición de parser para el paquete parseado // EN: Parser position for the parsed packet
+    private $_sTipoDoc = NULL;      // Tipo de paquete. Sólo se acepta 'event' y 'response' // EN: Packet type. Only 'event' and 'response' accepted
+    private $_bufferXML = '';       // Datos pendientes que no forman un paquete completo // EN: Pending data that does not form a complete packet
+    private $_iNestLevel = 0;       // Al llegar a cero, se tiene fin de paquete // EN: When reaching zero, end of packet is reached
 
     private $_hConn = NULL;
     private $_iRequestID = 0;
@@ -55,10 +58,16 @@ class ECCP
     /**
      * Procedimiento que inicia la conexión y el login al servidor ECCP.
      *
+     * EN: Procedure that initiates connection and login to the ECCP server.
+     *
      * @param   string  $server     Servidor al cual conectarse. Puede opcionalmente
      *                              indicar el puerto como localhost:20005
+     *                              EN: Server to connect to. Can optionally indicate
+     *                              port as localhost:20005
      * @param   string  $username   Nombre de usuario a usar para la conexión
+     *                              EN: Username to use for the connection
      * @param   string  $secret     Contraseña a usar para login
+     *                              EN: Password to use for login
      *
      * @return  void
      * @throws  ECCPConnFailedException, ECCPUnauthorizedException, ECCPIOException
@@ -66,6 +75,7 @@ class ECCP
     public function connect($server, $username, $secret)
     {
     	// Determinar servidor y puerto a usar
+        // EN: Determine server and port to use
         $iPuerto = ECCP_PORT;
         if(strpos($server, ':') !== false) {
             $c = explode(':', $server);
@@ -74,6 +84,7 @@ class ECCP
         }
 
         // Iniciar la conexión
+        // EN: Start the connection
         $errno = $errstr = NULL;
         $sUrlConexion = "tcp://$server:$iPuerto";
         $this->_hConn = @stream_socket_client($sUrlConexion, $errno, $errstr);
@@ -97,6 +108,7 @@ class ECCP
     }
 
     // Enviar una cadena entera de requerimiento al servidor ECCP
+    // EN: Send a complete request string to the ECCP server
     private function send_request($xml_request)
     {
         $this->_iRequestID++;
@@ -105,6 +117,7 @@ class ECCP
         while ($s != '') {
             $iEscrito = @fwrite($this->_hConn, $s);
             // fwrite en socket bloqueante puede devolver 0 en lugar de FALSE en error
+            // EN: fwrite on blocking socket can return 0 instead of FALSE on error
             if ($iEscrito === FALSE || $iEscrito <= 0) throw new ECCPIOException('output');
             $s = substr($s, $iEscrito);
         }
@@ -119,13 +132,22 @@ class ECCP
      * Este método leerá datos hasta que se haya visto alguna respuesta, o hasta
      * que el timeout opcional haya expirado.
      *
+     * EN: Procedure to receive events or responses from the ECCP server.
+     * This method will read data until a response is seen, or until the optional
+     * timeout has expired.
+     *
      * @param   int     $timeout    Intervalo en segundos a esperar por una
      *                              respuesta. Si se omite, se espera para siempre.
      *                              Si se especifica 0, se regresa de inmediato luego
      *                              de una sola verificación de datos.
+     *                              EN: Interval in seconds to wait for a response.
+     *                              If omitted, waits forever. If 0 is specified,
+     *                              returns immediately after a single data check.
      *
      * @return  mixed   Objeto SimpleXMLElement que representa los datos de la
      *                  respuesta, o NULL si timeout.
+     *                  EN: SimpleXMLElement object representing the response data,
+     *                  or NULL if timeout.
      *
      * @throws  ECCPIOException
      */
@@ -165,6 +187,7 @@ class ECCP
         } while (is_null($this->_response) && (is_null($timeout) || ($timeout > 0 && $iTotalPaquetes == 0)));
 
         // Devolver lo que haya de respuesta
+        // EN: Return whatever response exists
         $r = $this->_response;
         $this->_response = NULL;
         return $r;
@@ -174,8 +197,10 @@ class ECCP
     public function getEvent() { return array_shift($this->_listaEventos); }
 
     // Implementación de parser expat: inicio
+    // EN: Expat parser implementation: start
 
     // Parsear y separar tantos paquetes XML como sean posibles
+    // EN: Parse and separate as many XML packets as possible
     private function _parsearPaquetesXML($data)
     {
         $iNumPaquetes = 0;
@@ -217,6 +242,7 @@ class ECCP
     }
 
     // Resetear el parseador, para iniciarlo, o luego de parsear un paquete
+    // EN: Reset the parser, to initialize it, or after parsing a packet
     private function _resetParser()
     {
         if (!is_null($this->_parser)) xml_parser_free($this->_parser);
@@ -242,6 +268,7 @@ class ECCP
     }
 
     // Implementación de parser expat: final
+    // EN: Expat parser implementation: end
 
     private function agentHash($agent_number, $agent_pass)
     {
@@ -249,6 +276,7 @@ class ECCP
     }
 
     // Requerimientos conocidos del protocolo ECCP
+    // EN: Known requirements of the ECCP protocol
 
     public function login($username, $password)
     {

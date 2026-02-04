@@ -26,6 +26,7 @@ class paloSantoCallsAgent {
     function __construct(&$pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
+        // EN: A reference to a paloDB connection is received as a parameter
         if (is_object($pDB)) {
             $this->_DB =& $pDB;
             $this->errMsg = $this->_DB->errMsg;
@@ -36,8 +37,10 @@ class paloSantoCallsAgent {
             if (!$this->_DB->connStatus) {
                 $this->errMsg = $this->_DB->errMsg;
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             } else {
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             }
         }
     }
@@ -59,6 +62,7 @@ class paloSantoCallsAgent {
         $sCampoLlamada = $campoLlamadas[$sTipo];
 
         // Fechas de inicio y de fin
+        // EN: Start and end dates
         if (!is_null($date_start)) {
         	$condSQL[] = "$sCampoLlamada >= ?";
             $paramSQL[] = $date_start;
@@ -73,18 +77,21 @@ class paloSantoCallsAgent {
         }
         
         // Colas a buscar
+        // EN: Queues to search
         if (isset($fieldPat['queue']) && count($fieldPat['queue']) > 0) {
             $condSQL[] = '('.implode(' OR ', array_fill(0, count($fieldPat['queue']), "$sTablaCola.queue LIKE ?")).')';
             $paramSQL = array_merge($paramSQL, array_map('_construirWhere_mapLike', $fieldPat['queue']));            
         }
 
         // Agentes a buscar
+        // EN: Agents to search
         if (isset($fieldPat['number']) && count($fieldPat['number']) > 0) {
             $condSQL[] = '('.implode(' OR ', array_fill(0, count($fieldPat['number']), 'agent.number LIKE ?')).')';
             $paramSQL = array_merge($paramSQL, array_map('_construirWhere_mapLike', $fieldPat['number']));            
         }
 
         // Construir fragmento completo de sentencia SQL
+        // EN: Build complete SQL statement fragment
         $where = array(implode(' AND ', $condSQL), $paramSQL);
         if ($where[0] != '') $where[0] = ' AND '.$where[0];
         return $where;
@@ -92,15 +99,23 @@ class paloSantoCallsAgent {
 
     /**
      * Procedimiento para listar los totales de llamadas de los agentes
-     * 
-     * @param   string  $date_start Fecha en formato yyyy-mm-dd hh:mm:ss 
+     * EN: Procedure to list call totals for agents
+     *
+     * @param   string  $date_start Fecha en formato yyyy-mm-dd hh:mm:ss
+     *                              EN: Date in format yyyy-mm-dd hh:mm:ss
      * @param   string  $date_end   Fecha en formato yyyy-mm-dd hh:mm:ss
+     *                              EN: Date in format yyyy-mm-dd hh:mm:ss
      * @param   array   $fieldPat   Lista de elementos a buscar
+     *                              EN: List of elements to search
      *          number  Número de agente
+     *                  EN: Agent number
      *          queue   Cola usada para recibir la llamada
+     *                  EN: Queue used to receive the call
      *          type    IN,INBOUND,OUT,OUTBOUND
-     * 
-     * @return  mixed   NULL en caso de error, o tupla (Data, NumRecords)  
+     *                  EN: IN,INBOUND,OUT,OUTBOUND
+     *
+     * @return  mixed   NULL en caso de error, o tupla (Data, NumRecords)
+     *                  EN: NULL on error, or tuple (Data, NumRecords)
      */
     function obtenerCallsAgent($date_start = NULL, $date_end = NULL, $fieldPat = array())
     {
@@ -133,24 +148,29 @@ SQL_OUTGOING;
         $sPeticion_outgoing .= $sWhere_outgoing.' GROUP BY agent.number, queue';
 
         // Construir la unión SQL en caso necesario
+        // EN: Build SQL union if necessary
         if (!isset($fieldPat['type'])) $fieldPat['type'] = array('IN', 'OUT');
         $sPeticionSQL = NULL; $paramSQL = NULL;
         if (!in_array('IN', $fieldPat['type']) && !in_array('INBOUND', $fieldPat['type'])) {
         	// Sólo llamadas salientes
+        	// EN: Only outgoing calls
             $sPeticionSQL = $sPeticion_outgoing;
             $paramSQL = $param_outgoing;
         } elseif (!in_array('OUT', $fieldPat['type']) && !in_array('OUTBOUND', $fieldPat['type'])) {
         	// Sólo llamadas entrantes
+        	// EN: Only incoming calls
             $sPeticionSQL = $sPeticion_incoming;
             $paramSQL = $param_incoming;
         } else {
         	// Todas las llamadas
+        	// EN: All calls
             $sPeticionSQL = "($sPeticion_incoming) UNION ($sPeticion_outgoing)";
             $paramSQL = array_merge($param_incoming, $param_outgoing);
         }
         $sPeticionSQL .= ' ORDER BY agent_number, queue';
 
         // Ejecutar la petición SQL para todos los datos
+        // EN: Execute SQL request for all data
         //print "<pre>$sPeticionSQL</pre>"; print_r($paramSQL);
         $recordset = $this->_DB->fetchTable($sPeticionSQL, TRUE, $paramSQL);
         if (!is_array($recordset)) {

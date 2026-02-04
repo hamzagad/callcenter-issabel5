@@ -63,6 +63,7 @@ function _moduleContent(&$smarty, $module_name)
     $arrConf = array_merge($arrConf,$arrConfModule);
 
     // Obtengo la ruta del template a utilizar para generar el filtro.
+    // EN: Get template path to use to generate filter.
     $base_dir = dirname($_SERVER['SCRIPT_FILENAME']);
     $templates_dir = (isset($arrConf['templates_dir']))?$arrConf['templates_dir']:'themes';
     $local_templates_dir = "$base_dir/modules/$module_name/".$templates_dir.'/'.$arrConf['theme'];
@@ -82,6 +83,7 @@ function _moduleContent(&$smarty, $module_name)
     $oCallsAgent = new paloSantoTiempoConexiondeAgentes($pDB);
 
     // Variables estáticas asignadas vía Smarty
+    // EN: Static variables assigned via Smarty
     $smarty->assign(array(
         "Filter"    =>  _tr('Show'),
     ));
@@ -93,6 +95,7 @@ function _moduleContent(&$smarty, $module_name)
         : (isset( $_GET['exportcsv'] ) && $_GET['exportcsv'] == 'yes');
 
     // Estas son las colas entrantes disponibles en el sistema
+    // EN: These are the incoming queues available in the system
     $arrQueue = leerColasEntrantes($pDB, $pDB_asterisk);
     $t = array_keys($arrQueue);
 
