@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `audit` (
   `datetime_end` datetime default NULL,
   `duration` time default NULL,
   `ext_parked` varchar(10) default NULL,
+  `login_extension` varchar(20) default NULL,
   PRIMARY KEY  (`id`),
   KEY `id_agent` (`id_agent`),
   KEY `id_break` (`id_break`),

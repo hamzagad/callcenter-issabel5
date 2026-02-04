@@ -460,6 +460,7 @@ class Agente
                 $this->_tuberia->msg_SQLWorkerProcess_AgentLogin(
                     $this->channel,
                     microtime(TRUE),
+                    NULL,
                     NULL);
             }
 
@@ -493,7 +494,8 @@ class Agente
         $this->_tuberia->msg_SQLWorkerProcess_AgentLogin(
             $this->channel,
             microtime(TRUE),
-            $this->id_agent);
+            $this->id_agent,
+            $this->_extension);
         if (count($this->_estado_agente_colas) > 0) {
             $this->asyncQueuePause($ami, FALSE);
         }

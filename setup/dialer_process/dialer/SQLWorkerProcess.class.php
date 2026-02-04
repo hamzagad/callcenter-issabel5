@@ -936,7 +936,7 @@ class SQLWorkerProcess extends TuberiaProcess
         return $eventos;
     }
 
-    private function _AgentLogin($sAgente, $iTimestampLogin, $id_agent)
+    private function _AgentLogin($sAgente, $iTimestampLogin, $id_agent, $sExtension = NULL)
     {
         $eventos = array();
         $eventos_forward = array();
@@ -946,7 +946,7 @@ class SQLWorkerProcess extends TuberiaProcess
             // A login attempt has failed
             $eventos_forward[] = array('AgentLogin', array($sAgente, FALSE));
         } else {
-            $id_sesion = $this->_marcarInicioSesionAgente($id_agent, $iTimestampLogin);
+            $id_sesion = $this->_marcarInicioSesionAgente($id_agent, $iTimestampLogin, $sExtension);
             if (!is_null($id_sesion)) {
                 $eventos[] = array('AMIEventProcess', 'idNuevaSesionAgente', array($sAgente, $id_sesion));
 
@@ -1003,7 +1003,7 @@ class SQLWorkerProcess extends TuberiaProcess
      * @return  mixed   NULL en error, o el ID de la auditoría de inicio de sesión
      *                  NULL on error, or the ID of the login audit
      */
-    private function _marcarInicioSesionAgente($idAgente, $iTimestampLogin)
+    private function _marcarInicioSesionAgente($idAgente, $iTimestampLogin, $sExtension = NULL)
     {
         // Verificación de sesión activa
         // Active session verification
@@ -1028,12 +1028,16 @@ SQL_EXISTE_AUDIT;
                     " pero hay sesión abierta ID={$idAudit}, se reusa. | EN: agent {$idAgente} ".
                     'started session at '.date('Y-m-d H:i:s', $iTimestampLogin).
                     " but there is open session ID={$idAudit}, reusing.");
+            if (!is_null($sExtension)) {
+                $sthExt = $this->_db->prepare('UPDATE audit SET login_extension = ? WHERE id = ?');
+                $sthExt->execute(array($sExtension, $idAudit));
+            }
         } else {
             // Ingreso de sesión del agente
             // Agent session entry
             $sTimeStamp = date('Y-m-d H:i:s', $iTimestampLogin);
-            $sth = $this->_db->prepare('INSERT INTO audit (id_agent, datetime_init) VALUES (?, ?)');
-            $sth->execute(array($idAgente, $sTimeStamp));
+            $sth = $this->_db->prepare('INSERT INTO audit (id_agent, datetime_init, login_extension) VALUES (?, ?, ?)');
+            $sth->execute(array($idAgente, $sTimeStamp, $sExtension));
             $idAudit = $this->_db->lastInsertId();
         }
 

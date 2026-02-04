@@ -101,7 +101,7 @@ class paloSantoAgentJourney
             SELECT agent.id, agent.number, agent.name,
                 audit.datetime_init AS event_time,
                 'LOGIN' AS event_type,
-                NULL AS event_detail,
+                audit.login_extension AS event_detail,
                 NULL AS duration
             FROM audit
             JOIN agent ON audit.id_agent = agent.id

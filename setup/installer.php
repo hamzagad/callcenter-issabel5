@@ -90,6 +90,9 @@ if (file_exists($path_script_db))
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'scheduled',
         "ALTER TABLE calls ADD COLUMN scheduled BOOLEAN NOT NULL DEFAULT 0");
+    crearColumnaSiNoExiste($pDB, 'call_center', 'audit',
+        'login_extension',
+        "ADD COLUMN login_extension varchar(20) default NULL");
 
     crearIndiceSiNoExiste($pDB, 'call_center', 'audit',
         'agent_break_datetime',
