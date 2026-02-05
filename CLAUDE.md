@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Issabel Call Center module (v4.0.0.6) for Issabel 5 - a predictive dialer and call center solution built on Asterisk PBX. Runs on Rocky 8 with PHP 7.x, Asterisk 16/18, and MySQL/MariaDB.
+Issabel Call Center module for Issabel PBX - a predictive dialer and call center solution built on Asterisk PBX. Runs on Centos 7 Rocky 8 with PHP 5.4 - 7.4, Asterisk 11/13/18, and MariaDB.
 
 ## Installation Commands
 
@@ -13,7 +13,7 @@ Issabel Call Center module (v4.0.0.6) for Issabel 5 - a predictive dialer and ca
 cd /usr/src
 git clone https://github.com/ISSABELPBX/callcenter-issabel5.git callcenter
 cd callcenter
-bash build/5.0/install-issabel-callcenter.sh
+bash build/5.0/install-issabel-callcenter.sh -l
 
 # Service management
 systemctl start issabeldialer
@@ -43,7 +43,7 @@ Processes communicate via `TuberiaMensaje` (message pipe) class.
 
 ### Web Modules Structure
 
-28 modules in `/var/www/html/modules/` (copied from `modules/`), each following:
+31 modules in `/var/www/html/modules/` (copied from `modules/`), each following:
 
 ```
 module_name/
@@ -59,7 +59,7 @@ module_name/
 - **Agent Console**: `agent_console` - main agent interface with ECCP client
 - **Campaigns**: `campaign_out` (outgoing), `campaign_in` (incoming)
 - **Reports**: `calls_detail`, `calls_per_agent`, `calls_per_hour`, `hold_time`, etc.
-- **Admin**: `agents`, `queues`, `break_administrator`, `form_designer`
+- **Admin**: `agents`, `queues`, `break_administrator`, `form_designer`, etc.
 
 ### Database
 
@@ -100,12 +100,6 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
 - Always use English language for the added code, comments, variables, and functions
 - Always provide the test steps, and I will provide the logs after testing, don't use tail -f
-
----
-
-## Change History
-
-See [CHANGES.md](CHANGES.md) for detailed bug fixes and modifications.
 
 ---
 

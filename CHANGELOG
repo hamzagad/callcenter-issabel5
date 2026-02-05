@@ -5,7 +5,7 @@
 * IMPROVED: Multiple fixes for backward PHP v5.4 compatible modules.
 * Improved: Agent Journey module now displays the extension used in the agent
   in the Details column.
-* Improved: English translation lines of logs increased and now reliable for 
+* Improved: English translation lines of logs completed and now reliable for 
   Only English speakers
 
 5.0.0-2
