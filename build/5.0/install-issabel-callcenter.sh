@@ -27,16 +27,20 @@ if [ -z "$VERSION" ]; then
 fi
 
 if [ "$VERSION" = "11" ]; then
-    echo -e "${RED}Error: Issabel CallCenter ${RELEASE} is NOT compatible with Asterisk 11.${NC}"
-    echo -e "${RED}Please upgrade to Asterisk 16 or 18.${NC}"
-    exit 1
-fi
-
-if [ "$VERSION" != "18" ] && [ "$VERSION" != "16" ]; then
-    echo -e "${YELLOW}Warning: Issabel CallCenter ${RELEASE} is tested with Asterisk 18. Detected version: $VERSION${NC}"
+    echo -e "${YELLOW}Info: Detected Asterisk 11. Using chan_agent compatibility mode.${NC}"
+    echo -e "${YELLOW}  - Agent authentication: via Asterisk (password in agents.conf)${NC}"
+    echo -e "${YELLOW}  - Agent interface: Agent/XXXX${NC}"
+    echo -e "${YELLOW}  - Agent logout: Agentlogoff AMI command${NC}"
+elif [ "$VERSION" = "13" ] || [ "$VERSION" = "16" ] || [ "$VERSION" = "18" ]; then
+    echo -e "${GREEN}Info: Detected Asterisk $VERSION. Using app_agent_pool mode.${NC}"
+    echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
+    echo -e "${GREEN}  - Agent interface: Local/XXXX@agents${NC}"
+    echo -e "${GREEN}  - Agent logout: Hangup login channel${NC}"
+else
+    echo -e "${YELLOW}Warning: Issabel CallCenter ${RELEASE} is tested with Asterisk 11/13/18. Detected version: $VERSION${NC}"
     echo -e "${YELLOW}Proceeding with installation, but some features may not work correctly.${NC}"
-    echo
 fi
+echo
 
 # Determine source directory
 if [ "$LOCAL_INSTALL" = true ]; then
@@ -112,9 +116,11 @@ mkdir -p /usr/share/issabel/module_installer/callcenter/
 echo "Merging menu..."
 issabel-menumerge /usr/share/issabel/module_installer/callcenter/menu.xml
 
-# Install SSE Apache config for PHP-FPM compatibility
-/bin/cp -f /usr/share/issabel/module_installer/callcenter/setup/issabel-sse.conf /etc/httpd/conf.d/
-systemctl reload httpd 2>/dev/null || true
+# Install SSE Apache config only on Rocky/PHP-FPM systems
+if [ -f /etc/rocky-release ]; then
+    /bin/cp -f /usr/share/issabel/module_installer/callcenter/setup/issabel-sse.conf /etc/httpd/conf.d/
+    systemctl reload httpd 2>/dev/null || true
+fi
 
 # Run database installer
 echo "Running database installer..."

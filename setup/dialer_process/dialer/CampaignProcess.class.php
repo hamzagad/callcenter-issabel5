@@ -72,6 +72,7 @@ class CampaignProcess extends TuberiaProcess
     // Estimación de la versión de Asterisk que se usa
     // Estimate of the Asterisk version being used
     private $_asteriskVersion = array(1, 4, 0, 0);
+    private $_compat = NULL; // AsteriskCompat instance for version-aware behavior
 
     /* VERDADERO si al momento de verificar actividad en tubería, no habían
      * mensajes pendientes. Sólo cuando se esté ocioso se intentarán verificar
@@ -169,7 +170,7 @@ class CampaignProcess extends TuberiaProcess
             return TRUE;
     	} catch (PDOException $e) {
             $this->_db = NULL;
-            $this->_log->output("FATAL: no se puede conectar a DB - ".$e->getMessage());
+            $this->_log->output("FATAL: no se puede conectar a DB - ".$e->getMessage()." | EN: cannot connect to DB - ".$e->getMessage());
     		return FALSE;
     	}
     }
@@ -302,8 +303,7 @@ class CampaignProcess extends TuberiaProcess
         // Disconnect from the database
         $this->_configDB = NULL;
     	if (!is_null($this->_db)) {
-            $this->_log->output('INFO: desconectando de la base de datos...');
-            $this->_log->output('INFO: disconnecting from database...');
+            $this->_log->output('INFO: desconectando de la base de datos... | EN: disconnecting from database...');
     		$this->_db = NULL;
     	}
     }
@@ -336,6 +336,7 @@ class CampaignProcess extends TuberiaProcess
             } else {
                 $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x. | EN: no CoreSettings support in Asterisk Manager, assuming Asterisk 1.4.x.");
             }
+            $this->_compat = new AsteriskCompat($this->_asteriskVersion);
 
             /* CampaignProcess no tiene manejadores de eventos AMI. Aunque el
              * objeto Predictor hace uso de eventos para recoger el resultado
@@ -583,8 +584,7 @@ PETICION_CAMPANIAS_ENTRANTES;
         // Find out how many calls can be made (by prediction), and take the
         // lower value between campaign max and predictive.
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' verificando agentes libres...');
-            $this->_log->output('DEBUG: '.__METHOD__.' checking free agents...');
+            $this->_log->output('DEBUG: '.__METHOD__.' verificando agentes libres... | EN: checking free agents...');
         }
 
         // Parámetros requeridos para predicción de colocación de llamadas
@@ -610,11 +610,11 @@ PETICION_CAMPANIAS_ENTRANTES;
                 $this->_leerTiempoContestar($infoCampania['id']))
             : $oPredictor->predecirNumeroLlamadas($infoCola);
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__." (campania {$infoCampania['id']} ".
-                "cola {$infoCampania['queue']}): resumen de predicción:\n".
-                    "\tagentes libres.........: {$resumenPrediccion['AGENTES_LIBRES']}\n".
-                    "\tagentes por desocuparse: {$resumenPrediccion['AGENTES_POR_DESOCUPAR']}\n".
-                    "\tclientes en espera.....: {$resumenPrediccion['CLIENTES_ESPERA']}");
+            $this->_log->output('DEBUG: '.__METHOD__." (campania/campaign {$infoCampania['id']} ".
+                "cola/queue {$infoCampania['queue']}): resumen de predicción / prediction summary:\n".
+                    "\tagentes libres / free agents.........: {$resumenPrediccion['AGENTES_LIBRES']}\n".
+                    "\tagentes por desocuparse / agents about to become free: {$resumenPrediccion['AGENTES_POR_DESOCUPAR']}\n".
+                    "\tclientes en espera / clients waiting.....: {$resumenPrediccion['CLIENTES_ESPERA']}");
         }
         $iMaxPredecidos = $resumenPrediccion['AGENTES_LIBRES'] + $resumenPrediccion['AGENTES_POR_DESOCUPAR'] - $resumenPrediccion['CLIENTES_ESPERA'];
 
@@ -659,10 +659,8 @@ $pepe = $iNumLlamadasColocar;
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: ".__METHOD__." (campania {$infoCampania['id']} cola ".
                     "{$infoCampania['queue']}) no hay agentes libres ni a punto ".
-                    "de desocuparse!");
-                $this->_log->output("DEBUG: ".__METHOD__." (campaign {$infoCampania['id']} queue ".
-                    "{$infoCampania['queue']}) no hay agentes libres ni a punto ".
-                    "de desocuparse!");
+                    "de desocuparse! | EN: (campaign {$infoCampania['id']} queue ".
+                    "{$infoCampania['queue']}) no free agents or about to become free!");
             }
             return FALSE;
         }
@@ -705,7 +703,10 @@ $pepe = $iNumLlamadasColocar;
                         "DEBUG: (campania {$infoCampania['id']} cola {$infoCampania['queue']}) ".
                         "en los últimos $iVentanaHistoria seg. tuvieron éxito " .
                         "{$tupla['exito']} de {$tupla['total']} llamadas colocadas (ASR=".(sprintf('%.2f', $ASR * 100))."%). Se colocan " .
-                        "$iNumLlamadasColocar para compensar.");
+                        "$iNumLlamadasColocar para compensar. | EN: (campaign {$infoCampania['id']} queue {$infoCampania['queue']}) ".
+                        "in the last $iVentanaHistoria sec. " .
+                        "{$tupla['exito']} of {$tupla['total']} placed calls succeeded (ASR=".(sprintf('%.2f', $ASR * 100))."%). Placing " .
+                        "$iNumLlamadasColocar to compensate.");
                 }
             }
         }
@@ -819,7 +820,10 @@ PETICION_LLAMADAS;
                     $this->_log->output("DEBUG: ".__METHOD__." (campania {$infoCampania['id']} ".
                         "cola {$infoCampania['queue']}) no hay llamadas a ".
                         "colocar; $iNumTotal llamadas agendadas pero fuera de ".
-                        "horario.");
+                        "horario. | EN: (campaign {$infoCampania['id']} ".
+                        "queue {$infoCampania['queue']}) no calls to ".
+                        "place; $iNumTotal scheduled calls but outside ".
+                        "time range.");
                 }
                 return FALSE;
             }
@@ -900,30 +904,18 @@ SQL_LLAMADA_COLOCADA;
             }
             $sCadenaVar = $this->_construirCadenaVariables($listaVars);
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__." generando llamada\n".
-                    "\tClave....... {$tupla['actionid']}\n" .
-                    "\tAgente...... ".(is_null($tupla['agent']) ? '(ninguno)' : $tupla['agent'])."\n" .
-                    "\tDestino..... {$tupla['phone']}\n" .
-                    "\tCola........ {$infoCampania['queue']}\n" .
-                    "\tContexto.... {$infoCampania['context']}\n" .
-                    "\tVar. Contexto $sCadenaVar\n" .
-                    "\tTrunk....... ".(is_null($infoCampania['trunk']) ? '(por plan de marcado)' : $infoCampania['trunk'])."\n" .
-                    "\tPlantilla... ".$datosTrunk['TRUNK']."\n" .
-                    "\tCaller ID... ".(isset($datosTrunk['CID']) ? $datosTrunk['CID'] : "(no definido)")."\n".
-                    "\tCadena de marcado... {$tupla['dialstring']}\n".
-                    "\tTimeout marcado..... ".(is_null($iTimeoutOriginate) ? '(por omisión)' : $iTimeoutOriginate.' ms.'));
-                $this->_log->output("DEBUG: ".__METHOD__." generating call\n".
-                    "\tKey....... {$tupla['actionid']}\n" .
-                    "\tAgent...... ".(is_null($tupla['agent']) ? '(none)' : $tupla['agent'])."\n" .
-                    "\tDestination..... {$tupla['phone']}\n" .
-                    "\tQueue........ {$infoCampania['queue']}\n" .
-                    "\tContext.... {$infoCampania['context']}\n" .
-                    "\tContext Var $sCadenaVar\n" .
-                    "\tTrunk....... ".(is_null($infoCampania['trunk']) ? '(by dial plan)' : $infoCampania['trunk'])."\n" .
-                    "\tTemplate... ".$datosTrunk['TRUNK']."\n" .
-                    "\tCaller ID... ".(isset($datosTrunk['CID']) ? $datosTrunk['CID'] : "(not defined)")."\n".
-                    "\tDial string... {$tupla['dialstring']}\n".
-                    "\tDial timeout..... ".(is_null($iTimeoutOriginate) ? '(default)' : $iTimeoutOriginate.' ms.'));
+                $this->_log->output("DEBUG: ".__METHOD__." generando llamada | EN: generating call\n".
+                    "\tClave/Key....... {$tupla['actionid']}\n" .
+                    "\tAgente/Agent...... ".(is_null($tupla['agent']) ? '(ninguno/none)' : $tupla['agent'])."\n" .
+                    "\tDestino/Destination..... {$tupla['phone']}\n" .
+                    "\tCola/Queue........ {$infoCampania['queue']}\n" .
+                    "\tContexto/Context.... {$infoCampania['context']}\n" .
+                    "\tVar. Contexto/Context Var $sCadenaVar\n" .
+                    "\tTrunk....... ".(is_null($infoCampania['trunk']) ? '(por plan de marcado/by dial plan)' : $infoCampania['trunk'])."\n" .
+                    "\tPlantilla/Template... ".$datosTrunk['TRUNK']."\n" .
+                    "\tCaller ID... ".(isset($datosTrunk['CID']) ? $datosTrunk['CID'] : "(no definido/not defined)")."\n".
+                    "\tCadena de marcado/Dial string... {$tupla['dialstring']}\n".
+                    "\tTimeout marcado/Dial timeout..... ".(is_null($iTimeoutOriginate) ? '(por omisión/default)' : $iTimeoutOriginate.' ms.'));
             }
 
             /* La actualización de la llamada a estado Placing en la base de
@@ -1024,16 +1016,12 @@ SQL_LLAMADA_COLOCADA;
         if (count($listaAgentesAgendados) <= 0) return array();
 
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.': lista de agentes con llamadas agendadas: '.
-                print_r($listaAgentesAgendados, 1));
-            $this->_log->output('DEBUG: '.__METHOD__.': list of agents with scheduled calls: '.
+            $this->_log->output('DEBUG: '.__METHOD__.': lista de agentes con llamadas agendadas | EN: list of agents with scheduled calls: '.
                 print_r($listaAgentesAgendados, 1));
         }
         $resultado = $this->_tuberia->AMIEventProcess_agentesAgendables($listaAgentesAgendados);
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.': resultado de agentesAgendables: '.
-                print_r($resultado, 1));
-            $this->_log->output('DEBUG: '.__METHOD__.': result of agentesAgendables: '.
+            $this->_log->output('DEBUG: '.__METHOD__.': resultado de agentesAgendables | EN: result of agentesAgendables: '.
                 print_r($resultado, 1));
         }
 
@@ -1428,9 +1416,7 @@ PETICION_LLAMADAS_AGENTE;
         } catch (PDOException $e) {
         	$this->_log->output(
                 "ERR: al consultar información de trunk '$sTrunkConsulta' en FreePBX - ".
-                implode(' - ', $e->errorInfo));
-        	$this->_log->output(
-                "ERR: querying trunk information '$sTrunkConsulta' in FreePBX - ".
+                implode(' - ', $e->errorInfo)." | EN: querying trunk information '$sTrunkConsulta' in FreePBX - ".
                 implode(' - ', $e->errorInfo));
         }
 
@@ -1532,12 +1518,9 @@ PETICION_LLAMADAS_AGENTE;
 
     private function _construirListaParametros($listaVar)
     {
-        $versionMinima = array(1, 6, 0);
-        while (count($versionMinima) < count($this->_asteriskVersion))
-            array_push($versionMinima, 0);
-        while (count($versionMinima) > count($this->_asteriskVersion))
-            array_push($this->_asteriskVersion, 0);
-        $sSeparador = ($this->_asteriskVersion >= $versionMinima) ? ',' : '|';
+        $sSeparador = !is_null($this->_compat)
+            ? $this->_compat->getVariableSeparator()
+            : ',';
         return implode($sSeparador, $listaVar);
     }
 
@@ -1547,7 +1530,7 @@ PETICION_LLAMADAS_AGENTE;
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_verificarFinLlamadasAgendables'), $datos);
     }
@@ -1573,8 +1556,7 @@ PETICION_LLAMADAS_AGENTE;
              * must be removed. */
             if ($this->DEBUG) {
                 $this->_log->output('DEBUG: '.__METHOD__.': el siguiente agente '.
-                    'no tiene más llamadas agendadas: '.$sAgente);
-                $this->_log->output('DEBUG: '.__METHOD__.': the following agent '.
+                    'no tiene más llamadas agendadas: '.$sAgente.' | EN: the following agent '.
                     'has no more scheduled calls: '.$sAgente);
             }
             $this->_tuberia->msg_AMIEventProcess_quitarReservaAgente($sAgente);

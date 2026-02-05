@@ -82,7 +82,7 @@ class HubServer extends MultiplexServer
     function registrarInspectorMsg($msgH)
     {
         if (!($msgH instanceof iRoutedMessageHook)) {
-            $this->_log->output("FATAL: ".__METHOD__." (internal) not an instance of iRoutedMessageHook");
+            $this->_log->output("FATAL: ".__METHOD__." (interno) no es una instancia de iRoutedMessageHook | EN: (internal) not an instance of iRoutedMessageHook");
             die(__METHOD__." (internal) not an instance of iRoutedMessageHook\n");
         }
         $this->_inspectores[] = $msgH;
@@ -99,8 +99,7 @@ class HubServer extends MultiplexServer
         }
 
     	if (!isset($this->_tuberias[$sDestino])) {
-    		$this->_oLog->output('ERR: '.__METHOD__." - no se encuentra destino para $sNombreMensaje($sFuente-->$sDestino)");
-    		// Destination not found for message
+    		$this->_oLog->output('ERR: '.__METHOD__." - no se encuentra destino para $sNombreMensaje($sFuente-->$sDestino) | EN: destination not found for $sNombreMensaje($sFuente-->$sDestino)");
             return;
     	}
         $this->_tuberias[$sDestino]->enviarMensajeDesdeFuente($sFuente, $sDestino, $sNombreMensaje, $datos);
@@ -118,8 +117,7 @@ class HubServer extends MultiplexServer
 
     function msg_finalizacionTerminada($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-    	$this->_oLog->output("INFO: $sFuente indica que ya terminó de prepararse para finalización.");
-    	// Source indicates it has finished preparing for termination
+    	$this->_oLog->output("INFO: $sFuente indica que ya terminó de prepararse para finalización. | EN: $sFuente indicates it has finished preparing for termination.");
         $this->_iNumFinalizados++;
     }
 

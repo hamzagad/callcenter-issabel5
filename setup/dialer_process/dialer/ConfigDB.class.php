@@ -262,18 +262,18 @@ class ConfigDB
             // Base de datos no tiene usuario explícito, se lee de manager.conf
             // Database has no explicit user, read from manager.conf
             if ($this->_fuenteCredAst != ASTCONN_CRED_CONF)
-                $log->output("INFO: AMI login no se ha configurado, se busca en configuración de Asterisk...");
+                $log->output("INFO: AMI login no se ha configurado, se busca en configuración de Asterisk... | EN: AMI login not configured, searching in Asterisk configuration...");
             $amiConfig = $this->_leerConfigManager();
             if (is_array($amiConfig)) {
                 if ($this->_fuenteCredAst != ASTCONN_CRED_CONF)
-                    $log->output("INFO: usando configuración de Asterisk para AMI login.");
+                    $log->output("INFO: usando configuración de Asterisk para AMI login. | EN: using Asterisk configuration for AMI login.");
                 $this->_infoConfig['asterisk']['astuser']['valor_actual'] = $amiConfig[0];
                 $this->_infoConfig['asterisk']['astpass']['valor_actual'] = $amiConfig[1];
                 $this->_fuenteCredAst = ASTCONN_CRED_CONF;
             }
         } else {
             if ($this->_fuenteCredAst == ASTCONN_CRED_DESCONOCIDO)
-                $log->output("INFO: AMI login configurado en DB...");
+                $log->output("INFO: AMI login configurado en DB... | EN: AMI login configured in DB...");
             $this->_fuenteCredAst = ASTCONN_CRED_DB;
         }
         
@@ -288,25 +288,32 @@ class ConfigDB
 						preg_match('/'.$infoValor['regex'].'/', $infoValor['valor_actual'])) {
 						if (is_null($infoValor['valor_viejo'])) {
 							$log->output('INFO: usando '.$infoValor['descripcion'].': '.
+								($infoValor['mostrar_valor'] ? $infoValor['valor_actual'] : '*****').
+								' | EN: using '.$infoValor['descripcion'].': '.
 								($infoValor['mostrar_valor'] ? $infoValor['valor_actual'] : '*****'));
 						}
 					} else {
 						// El valor no pasa el regex
 						// The value does not pass the regex
-						if (is_null($infoValor['valor_viejo'])) 
-							$log->output('ERR: valor para '.$infoValor['descripcion'].' inválido: '.$infoValor['valor_actual']);
-						$this->_infoConfig[$seccion][$clave]['valor_actual'] = 
+						if (is_null($infoValor['valor_viejo']))
+							$log->output('ERR: valor para '.$infoValor['descripcion'].' inválido: '.$infoValor['valor_actual'].
+								' | EN: invalid value for '.$infoValor['descripcion'].': '.$infoValor['valor_actual']);
+						$this->_infoConfig[$seccion][$clave]['valor_actual'] =
 							$this->_infoConfig[$seccion][$clave]['valor_omision'];
-						if (is_null($infoValor['valor_viejo'])) 
+						if (is_null($infoValor['valor_viejo']))
 							$log->output('INFO: usando '.$infoValor['descripcion'].' (por omisión): '.
+							($infoValor['mostrar_valor'] ? $this->_infoConfig[$seccion][$clave]['valor_actual'] : '*****').
+							' | EN: using '.$infoValor['descripcion'].' (default): '.
 							($infoValor['mostrar_valor'] ? $this->_infoConfig[$seccion][$clave]['valor_actual'] : '*****'));
 					}
 				} else {
 					// Asignación inicial de las variables
 					// Initial assignment of variables
-					$this->_infoConfig[$seccion][$clave]['valor_actual'] = 
+					$this->_infoConfig[$seccion][$clave]['valor_actual'] =
 						$this->_infoConfig[$seccion][$clave]['valor_omision'];
 					$log->output('INFO: usando '.$infoValor['descripcion'].' (por omisión): '.
+						($infoValor['mostrar_valor'] ? $this->_infoConfig[$seccion][$clave]['valor_actual'] : '*****').
+						' | EN: using '.$infoValor['descripcion'].' (default): '.
 						($infoValor['mostrar_valor'] ? $this->_infoConfig[$seccion][$clave]['valor_actual'] : '*****'));
 				}
 			}
@@ -326,13 +333,11 @@ class ConfigDB
 
     	$sNombreArchivo = '/etc/asterisk/manager.conf';
         if (!file_exists($sNombreArchivo)) {
-        	$log->output("WARN: $sNombreArchivo no se encuentra.");
-        	// WARN: file not found
+        	$log->output("WARN: $sNombreArchivo no se encuentra. | EN: $sNombreArchivo not found.");
             return NULL;
         }
         if (!is_readable($sNombreArchivo)) {
-            $log->output("WARN: $sNombreArchivo no puede leerse por usuario de marcador.");
-            // WARN: file cannot be read by dialer user
+            $log->output("WARN: $sNombreArchivo no puede leerse por usuario de marcador. | EN: $sNombreArchivo cannot be read by dialer user.");
             return NULL;        	
         }
         //$infoConfig = parse_ini_file($sNombreArchivo, TRUE);
@@ -348,8 +353,7 @@ class ConfigDB
             	}
             }
         } else {
-            $log->output("ERR: $sNombreArchivo no puede parsearse correctamente.");
-            // ERR: file cannot be parsed correctly	
+            $log->output("ERR: $sNombreArchivo no puede parsearse correctamente. | EN: $sNombreArchivo cannot be parsed correctly.");
         }
         return NULL;
     }
@@ -421,7 +425,7 @@ class ConfigDB
 			}
 		}
 		$log = $this->_log;
-		$log->output("ERR: referencia inválida a propiedad: ConfigDB::$s");			
+		$log->output("ERR: referencia inválida a propiedad: ConfigDB::$s | EN: invalid property reference: ConfigDB::$s");			
 		foreach (debug_backtrace() as $traceElement) {
 			$sNombreFunc = $traceElement['function'];
 			if (isset($traceElement['type'])) {
@@ -429,7 +433,7 @@ class ConfigDB
 				if ($traceElement['type'] == '::')
 					$sNombreFunc = '(static) '.$sNombreFunc;
 			}
-			$log->output("\ten {$traceElement['file']}:{$traceElement['line']} en función {$sNombreFunc}()");
+			$log->output("\ten {$traceElement['file']}:{$traceElement['line']} en función {$sNombreFunc}() | EN: at {$traceElement['file']}:{$traceElement['line']} in function {$sNombreFunc}()");
 		}			
 		return NULL;
 	}

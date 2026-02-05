@@ -1,3 +1,23 @@
+5.0.0-3
+* REWORKED: Asterisk version handling for backward compatibility with Issabel4.
+  Now, Call Center module can be installed on both Issabel 4 and 5 from the 
+  same repo, chan_agent vs app_agent_pool templating handled
+* IMPROVED: Multiple fixes for backward PHP v5.4 compatible modules.
+* Improved: Agent Journey module now displays the extension used in the agent
+  in the Details column.
+* Improved: English translation lines of logs increased and now reliable for 
+  Only English speakers
+
+5.0.0-2
+* ADDED: Translation: All modules and installer comments, logs, docblocks are 
+  translated to English.
+* IMPROVED: user login now stores the login extension in the database, added a new
+  column in audit table (login_extension), handled in both installer.php and 
+  call_center.sql, storing the information handled in Agente.class.php and 
+  SQLWorkerProcess.class.php.
+* Improved: Agent Journey module now displays the extension used in the agent
+  in the Details column.
+
 5.0.0-1
 * ADDED: Documentation: Added ECCP_Protocol.md (English compact translation of protocol spec).
 * ADDED: Translation: All dialer comments, logs, docblocks are translated to English.
@@ -1211,7 +1231,7 @@
   campaign with at least one logged-in static agent.
 * Callback Extensions: fixed multiple bugs in a single function: 1) removed
   incorrect attempt to use database root user for ordinary module operation.
-  2) fixed incorrect assumption that selected database user can read both the
+  1) fixed incorrect assumption that selected database user can read both the
   'call_center' and the 'asterisk' databases. 3) added missing error reporting
   so that database failures are not hidden.
 * Campaign Monitoring: added new module. This module displays a campaign-centric

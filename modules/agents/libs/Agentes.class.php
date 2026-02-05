@@ -36,6 +36,7 @@ class Agentes
     var $arrAgents;
     private $_DB; // instancia de la clase paloDB // EN: instance of paloDB class
     var $errMsg;
+    private $_detectedChanAgent = NULL; // cached: TRUE if Asterisk 11 (chan_agent)
 
     function __construct(&$pDB, $file = "/etc/asterisk/agents.conf")
     {
@@ -274,14 +275,16 @@ class Agentes
             }
         }
 
-        // Update agent in agents.conf (app_agent_pool format)
+        // Update agent in agents.conf (format depends on Asterisk version)
         $bExito = TRUE;
+        $bChanAgent = $this->_hasChanAgent();
         $contenido = file($this->AGENT_FILE);
         if (!is_array($contenido)) {
             $bExito = FALSE;
             $this->errMsg = '(internal) Unable to read agent file';
         } else {
             $agentId = $agent[0];
+            $agentPass = isset($agent[1]) ? $agent[1] : '';
             $agentName = $agent[2];
             $bModificado = FALSE;
             $bEnSeccionAgente = FALSE;
@@ -292,9 +295,13 @@ class Agentes
                 if (preg_match('/^\[' . preg_quote($agentId, '/') . '\](\(agent-defaults\))?/', trim($sLinea))) {
                     $bEnSeccionAgente = TRUE;
                     $bModificado = TRUE;
-                    // Write updated section using template
-                    $contenidoNuevo[] = "[{$agentId}](agent-defaults)\n";
-                    $contenidoNuevo[] = "fullname={$agentName}\n";
+                    if ($bChanAgent) {
+                        // chan_agent: password used by Asterisk to authenticate AgentLogin
+                        $contenidoNuevo[] = "agent => {$agentId},{$agentPass},{$agentName}\n";
+                    } else {
+                        $contenidoNuevo[] = "[{$agentId}](agent-defaults)\n";
+                        $contenidoNuevo[] = "fullname={$agentName}\n";
+                    }
                     continue;
                 }
 
@@ -309,21 +316,28 @@ class Agentes
 
                 // Also handle old chan_agent format
                 if (preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($agentId, '/') . ',/', $sLinea)) {
-                    // Replace old format with new app_agent_pool format using template
-                    $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
-                    $contenidoNuevo[] = "fullname={$agentName}\n";
                     $bModificado = TRUE;
+                    if ($bChanAgent) {
+                        $contenidoNuevo[] = "agent => {$agentId},{$agentPass},{$agentName}\n";
+                    } else {
+                        $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
+                        $contenidoNuevo[] = "fullname={$agentName}\n";
+                    }
                     continue;
                 }
 
                 $contenidoNuevo[] = $sLinea;
             }
 
-            // If agent wasn't found, add new section using template
+            // If agent wasn't found, add it
             if (!$bModificado) {
-                $this->_ensureAgentDefaultsTemplate();
-                $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
-                $contenidoNuevo[] = "fullname={$agentName}\n";
+                if ($bChanAgent) {
+                    $contenidoNuevo[] = "\nagent => {$agentId},{$agentPass},{$agentName}\n";
+                } else {
+                    $this->_ensureAgentDefaultsTemplate();
+                    $contenidoNuevo[] = "\n[{$agentId}](agent-defaults)\n";
+                    $contenidoNuevo[] = "fullname={$agentName}\n";
+                }
             }
 
             $hArchivo = fopen($this->AGENT_FILE, 'w');
@@ -381,34 +395,13 @@ class Agentes
     }
 
     /**
-     * Procedimiento para agregar un agente estático al archivo agents.conf y
-     * reiniciar Asterisk para que lea los cambios de agentes.
+     * Add a static agent to agents.conf and reload Asterisk.
+     * Format is version-dependent:
+     *   chan_agent (Ast 11):      agent => number,,name
+     *   app_agent_pool (Ast 12+): [number](agent-defaults) / fullname=name
      *
-     * EN: Procedure to add a static agent to the agents.conf file and restart
-     * Asterisk to read the agent changes.
-     *
-     * Uses app_agent_pool format (Asterisk 12+):
-     * [agent-id]
-     * fullname=Agent Name
-     * ackcall=yes
-     * autologoff=60
-     * wrapuptime=2000
-     *
-     * @param   array   $agent  Información del agente. Se recogen los valores:
-     *                          EN: Agent information. The following values are collected:
-     *                  0   =>  Número del agente
-     *                          EN: Agent number
-     *                  1   =>  Contraseña telefónica del agente (ignored in app_agent_pool)
-     *                          EN: Agent telephone password (ignored in app_agent_pool)
-     *                  2   =>  Nombre descriptivo del agente
-     *                          EN: Descriptive name of the agent
-     *                  Otras claves o posiciones se ignoran.
-     *                          EN: Other keys or positions are ignored.
-     *
-     * @return  VERDADERO si se puede escribir el archivo y reiniciar Asterisk,
-     *          FALSO si ocurre algún error.
-     *          EN: TRUE if the file can be written and Asterisk restarted,
-     *          FALSE if any error occurs.
+     * @param   array   $agent  Agent info: [0]=number, [1]=password (ignored), [2]=name
+     * @return  bool    TRUE on success, FALSE on error
      */
     function addAgentFile($agent)
     {
@@ -421,11 +414,10 @@ class Agentes
         $agentId = $agent[0];
         $agentName = $agent[2];
 
-        // Check if agent already exists in app_agent_pool format
+        // Check if agent already exists in either format
         $contenido = file($archivo);
         if (is_array($contenido)) {
             foreach ($contenido as $sLinea) {
-                // Check for [agent-id] section or old format
                 if (preg_match('/^\[' . preg_quote($agentId, '/') . '\]/', trim($sLinea)) ||
                     preg_match('/^[[:space:]]*agent[[:space:]]*=>[[:space:]]*' . preg_quote($agentId, '/') . ',/', $sLinea)) {
                     $this->errMsg = "Agent number already exists.";
@@ -434,12 +426,17 @@ class Agentes
             }
         }
 
-        // Ensure [agent-defaults] template exists
-        $this->_ensureAgentDefaultsTemplate();
-
-        // Build app_agent_pool section using template inheritance
-        $nuevo_agente = "\n[{$agentId}](agent-defaults)\n";
-        $nuevo_agente .= "fullname={$agentName}\n";
+        if ($this->_hasChanAgent()) {
+            // chan_agent format: agent => number,password,name
+            // Password is used by Asterisk to authenticate AgentLogin
+            $agentPass = isset($agent[1]) ? $agent[1] : '';
+            $nuevo_agente = "\nagent => {$agentId},{$agentPass},{$agentName}\n";
+        } else {
+            // app_agent_pool format with template inheritance
+            $this->_ensureAgentDefaultsTemplate();
+            $nuevo_agente = "\n[{$agentId}](agent-defaults)\n";
+            $nuevo_agente .= "fullname={$agentName}\n";
+        }
 
         // Append to file
         $open = fopen($archivo, "a");
@@ -570,11 +567,12 @@ class Agentes
     }
 
     /**
-     * Ensure [agent-defaults] template exists in agents.conf
-     * This template defines common settings for all agents
+     * Ensure [agent-defaults] template exists in agents.conf (app_agent_pool only).
+     * Skipped for chan_agent (Asterisk 11) which has no template concept.
      */
     private function _ensureAgentDefaultsTemplate()
     {
+        if ($this->_hasChanAgent()) return TRUE;
         $contenido = file($this->AGENT_FILE);
         if (!is_array($contenido)) {
             return FALSE;
@@ -652,7 +650,33 @@ class Agentes
     }
 
     /**
-     * Reload Asterisk app_agent_pool module after agents.conf changes
+     * Detect if Asterisk uses chan_agent (Asterisk 11) or app_agent_pool (Asterisk 12+).
+     * Result is cached after first detection.
+     */
+    private function _hasChanAgent()
+    {
+        if ($this->_detectedChanAgent !== NULL) {
+            return $this->_detectedChanAgent;
+        }
+        $astman = $this->_get_AGI_AsteriskManager();
+        if (is_null($astman)) {
+            $this->_detectedChanAgent = FALSE; // default to app_agent_pool
+            return FALSE;
+        }
+        $r = $astman->Command('core show version');
+        $astman->disconnect();
+        $version = isset($r['data']) ? $r['data'] : '';
+        if (preg_match('/Asterisk (\d+)/', $version, $m)) {
+            $major = (int)$m[1];
+            $this->_detectedChanAgent = ($major < 12);
+        } else {
+            $this->_detectedChanAgent = FALSE;
+        }
+        return $this->_detectedChanAgent;
+    }
+
+    /**
+     * Reload Asterisk agent module after agents.conf changes
      */
     private function _reloadAsterisk()
     {
@@ -660,8 +684,8 @@ class Agentes
         if (is_null($astman)) {
             return FALSE;
         } else {
-            // Reload app_agent_pool module (Asterisk 12+ replacement for chan_agent)
-            $strReload = $astman->Command("module reload app_agent_pool.so");
+            $module = $this->_hasChanAgent() ? 'chan_agent.so' : 'app_agent_pool.so';
+            $strReload = $astman->Command("module reload $module");
             $astman->disconnect();
             return TRUE;
         }

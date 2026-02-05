@@ -40,6 +40,7 @@ class Agente
     // Relationships with other known objects
     private $_log;
     private $_tuberia;
+    private $_compat = NULL; // AsteriskCompat instance for version-aware behavior
 
     private $_listaAgentes;
 
@@ -171,12 +172,13 @@ class Agente
         $this->number = $iNumero;
     }
 
-    private function _nul($i) { return is_null($i) ? '(ninguno)' : "$i"; }
-    // "(none)"
+    public function setCompat($compat) { $this->_compat = $compat; }
+
+    private function _nul($i) { return is_null($i) ? '(ninguno/none)' : "$i"; }
 
     public function dump($log)
     {
-        $s = "----- AGENTE -----\n";
+        $s = "----- AGENTE / AGENT -----\n";
         $s .= ("\tid_agent...........".$this->id_agent)."\n";
         $s .= ("\tname...............".$this->name)."\n";
         $s .= ("\testatus............".$this->estatus)."\n";
@@ -184,8 +186,8 @@ class Agente
         $s .= ("\tnumber.............".$this->number)."\n";
         $s .= ("\tchannel............".$this->channel)."\n";
         if ($this->type != 'Agent')
-            $s .= ("\tcolas dinámicas....[".implode(', ', $this->colas_dinamicas))."]\n";
-        $s .= ("\testado de colas....[".$this->_strestadocolas())."]\n";
+            $s .= ("\tcolas dinámicas/dynamic queues....[".implode(', ', $this->colas_dinamicas))."]\n";
+        $s .= ("\testado de colas/queue status....[".$this->_strestadocolas())."]\n";
         $s .= ("\testado_consola.....".$this->estado_consola)."\n";
         if (!is_null($this->logging_inicio))
             $s .= ("\tlogging_inicio.....".$this->logging_inicio)."\n";
@@ -200,17 +202,17 @@ class Agente
         $s .= ("\tlogin_channel......".$this->_nul($this->login_channel))."\n";
         $s .= ("\textension..........".$this->_nul($this->extension))."\n";
         $s .= ("\tnum_pausas.........".$this->num_pausas)."\n";
-        $s .= ("\ten_pausa...........".($this->en_pausa ? 'SI' : 'NO'))."\n";
-        $s .= ("\treservado..........".($this->reservado ? 'SI' : 'NO'))."\n";
+        $s .= ("\ten_pausa/paused.....".($this->en_pausa ? 'SI/YES' : 'NO'))."\n";
+        $s .= ("\treservado/reserved..".($this->reservado ? 'SI/YES' : 'NO'))."\n";
         $s .= ("\tmax_inactivo.......".$this->_nul($this->max_inactivo))."\n";
         $s .= ("\ttimeout_inactivo...".$this->timeout_inactivo)."\n";
 
-        $s .= ("\tllamada............".(is_null($this->_llamada)
-            ? '(ninguna)'
+        $s .= ("\tllamada/call........".(is_null($this->_llamada)
+            ? '(ninguna/none)'
             : $this->_llamada->__toString()
             ))."\n";
-        $s .= ("\tllamada_agendada...".(is_null($this->llamada_agendada)
-            ? '(ninguna)'
+        $s .= ("\tllamada_agendada/scheduled_call...".(is_null($this->llamada_agendada)
+            ? '(ninguna/none)'
             : $this->llamada_agendada->__toString()
         ));
         $log->output($s);
@@ -419,11 +421,10 @@ class Agente
 
     public function asyncQueuePause($ami, $nstate, $queue = NULL, $reason = '')
     {
-        // For Agent type, queue member interface is Local/XXXX@agents, not Agent/XXXX
-        // Para tipo Agent, la interfaz del miembro de cola es Local/XXXX@agents, no Agent/XXXX
+        // For Agent type, derive the correct queue interface from AsteriskCompat
         $sInterface = $this->channel;
-        if ($this->type == 'Agent' && preg_match('|^Agent/(\d+)$|', $this->channel, $regs)) {
-            $sInterface = 'Local/'.$regs[1].'@agents';
+        if ($this->type == 'Agent' && !is_null($this->_compat)) {
+            $sInterface = $this->_compat->getAgentQueueInterface($this->number);
         }
         $ami->asyncQueuePause(
             array($this, '_cb_QueuePause'),
@@ -692,37 +693,37 @@ class Agente
 
     /**
      * Initiate agent logoff from Asterisk's perspective
+     * For chan_agent (Asterisk 11): Agentlogoff AMI command
      * For app_agent_pool (Asterisk 12+): Hangup the login channel
      * For dynamic agents (SIP/IAX2/PJSIP): QueueRemove from all queues
-     * Iniciar el logout del agente desde la perspectiva de Asterisk
-     * Para app_agent_pool (Asterisk 12+): Colgar el canal de login
-     * Para agentes dinámicos (SIP/IAX2/PJSIP): QueueRemove de todas las colas
      */
     public function forzarLogoffAgente($ami, $log)
     {
         if ($this->type == 'Agent') {
-            // app_agent_pool: Hangup the AgentLogin channel to logout
-            // No Agentlogoff AMI command exists in app_agent_pool
-            // app_agent_pool: Colgar el canal AgentLogin para hacer logout
-            // No existe comando AMI Agentlogoff en app_agent_pool
-            if (!is_null($this->_login_channel)) {
-                $ami->asyncHangup(
-                    array($this, '_cb_HangupLogoff'),
+            if (!is_null($this->_compat) && $this->_compat->hasChanAgent()) {
+                // chan_agent (Asterisk 11): use Agentlogoff AMI command
+                $ami->asyncAgentlogoff(
+                    array($this, '_cb_Agentlogoff'),
                     array($log),
-                    $this->_login_channel);
-            } elseif (!is_null($this->_extension)) {
-                // Fallback to extension if login_channel not tracked
-                // Alternativa a la extensión si login_channel no está rastreado
-                $ami->asyncHangup(
-                    array($this, '_cb_HangupLogoff'),
-                    array($log),
-                    $this->_extension);
+                    $this->number);
             } else {
-                $this->_log->output('WARN: '.__METHOD__.': no channel to hangup for agent '.$this->number);
+                // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel
+                if (!is_null($this->_login_channel)) {
+                    $ami->asyncHangup(
+                        array($this, '_cb_HangupLogoff'),
+                        array($log),
+                        $this->_login_channel);
+                } elseif (!is_null($this->_extension)) {
+                    $ami->asyncHangup(
+                        array($this, '_cb_HangupLogoff'),
+                        array($log),
+                        $this->_extension);
+                } else {
+                    $this->_log->output('WARN: '.__METHOD__.': no hay canal para colgar para el agente '.$this->number.' | EN: no channel to hangup for agent '.$this->number);
+                }
             }
         } else {
-            // Dynamic agents: remove from all queues
-            // Agentes dinámicos: quitar de todas las colas
+            // Dynamic agents (SIP/IAX2/PJSIP): remove from all queues
             foreach ($this->colas_actuales as $q) {
                 $ami->asyncQueueRemove(
                     array($this, '_cb_QueueRemove'),
@@ -732,10 +733,17 @@ class Agente
         }
     }
 
+    public function _cb_Agentlogoff($r, $log)
+    {
+        if ($r['Response'] != 'Success') {
+            $this->_log->output('ERR: no se puede completar Agentlogoff('.$this->number.'): '.$r['Message'].' | EN: cannot complete Agentlogoff('.$this->number.'): '.$r['Message']);
+        }
+    }
+
     public function _cb_HangupLogoff($r, $log)
     {
         if ($r['Response'] != 'Success') {
-            $this->_log->output('ERR: Cannot hangup agent login channel ('.$this->number.'): '.$r['Message']);
+            $this->_log->output('ERR: no se puede colgar canal de login del agente ('.$this->number.'): '.$r['Message'].' | EN: cannot hangup agent login channel ('.$this->number.'): '.$r['Message']);
         }
     }
 

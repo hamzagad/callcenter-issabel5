@@ -135,7 +135,7 @@ class QueueShadow
         }
         $this->_queueflags = NULL;
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.': estado de colas: '.print_r($this->_queues, TRUE));
+            $this->_log->output('DEBUG: '.__METHOD__.': estado de colas | EN: queue status: '.print_r($this->_queues, TRUE));
         }
         if (count($colasSinEventos) > 0) {
             sort($colasSinEventos);
@@ -284,7 +284,7 @@ class QueueShadow
             // The Status update should be done in a next QueueMemberStatus
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Member'].
-                ' en cola '.$params['Queue']);
+                ' en cola '.$params['Queue'].' | EN: member '.$params['Member'].' not found in queue '.$params['Queue']);
         }
     }
 
@@ -307,7 +307,7 @@ class QueueShadow
             // The Status update should be done in a next QueueMemberStatus
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Member'].
-                ' en cola '.$params['Queue']);
+                ' en cola '.$params['Queue'].' | EN: member '.$params['Member'].' not found in queue '.$params['Queue']);
         }
     }
 
@@ -348,7 +348,8 @@ class QueueShadow
         if (!($this->_queues[$queue]['eventwhencalled'] && $this->_queues[$queue]['eventmemberstatus'])) {
             if ($this->DEBUG) {
                 $this->_log->output('DEBUG: '.__METHOD__.': cola '.$queue.' no ha recibido eventos que '.
-                    'indiquen activación de eventwhencalled y eventmemberstatus');
+                    'indiquen activación de eventwhencalled y eventmemberstatus | EN: queue '.$queue.' has not received events '.
+                    'indicating activation of eventwhencalled and eventmemberstatus');
             }
             return NULL;
         }
@@ -377,7 +378,7 @@ class QueueShadow
             }
         }
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: a punto de devolver '.print_r($iNumLlamadasColocar, true));
+            $this->_log->output('DEBUG: a punto de devolver | EN: about to return: '.print_r($iNumLlamadasColocar, true));
         }
         return $iNumLlamadasColocar;
     }

@@ -31,6 +31,7 @@ class ECCPConn
     private $_log;
     private $_ami;
     private $_astVersion;
+    private $_compat = NULL; // AsteriskCompat instance for version-aware behavior
     private $_db;
     private $_tuberia;
 
@@ -75,6 +76,11 @@ class ECCPConn
     {
         $this->_ami = $astConn;
         $this->_astVersion = $astVersion;
+        if (is_array($astVersion)) {
+            $this->_compat = new AsteriskCompat($astVersion);
+        } else {
+            $this->_compat = NULL;
+        }
     }
 
     function setDbConn($dbConn)
@@ -112,8 +118,8 @@ class ECCPConn
                 if ($this->DEBUG) {
                     $iTimestampRecibido = (double)$request['received'];
                     $proc_start = microtime(TRUE);
-                    $this->_log->output('DEBUG: '.__METHOD__.': retraso '.
-                        '(sec) hasta procesar: '.($proc_start - $iTimestampRecibido));
+                    $this->_log->output('DEBUG: '.__METHOD__.': retraso (sec) hasta procesar: '.($proc_start - $iTimestampRecibido).
+                        ' | EN: DEBUG: '.__METHOD__.': delay (sec) until processing: '.($proc_start - $iTimestampRecibido));
                 }
 
                 // Se procede normalmente...
@@ -129,8 +135,8 @@ class ECCPConn
                 $iTimestampInicio = microtime(TRUE);
                 $sRequerimiento = (string)$comando->getName();
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': procesando requerimiento '.
-                        $sRequerimiento.' params: '.print_r($comando, TRUE));
+                    $this->_log->output('DEBUG: '.__METHOD__.': procesando requerimiento '.$sRequerimiento.' params: '.print_r($comando, TRUE).
+                        ' | EN: DEBUG: '.__METHOD__.': processing request '.$sRequerimiento.' params: '.print_r($comando, TRUE));
                 }
                 if (!isset($this->_peticionesAttr[$sRequerimiento])) {
                     $this->_log->output('ERR: (interno) no existe implementación para método: '.$sRequerimiento.' | EN: no implementation exists for method: '.$sRequerimiento);
@@ -202,9 +208,8 @@ class ECCPConn
 
                 $iTimestampFinal = microtime(TRUE);
                 if ($this->DEBUG || (($iTimestampFinal - $iTimestampInicio) >= 1.0)) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': requerimiento '.
-                        $comando->getName().' procesado luego de (sec): '.
-                        ($iTimestampFinal - $iTimestampInicio));
+                    $this->_log->output('DEBUG: '.__METHOD__.': requerimiento '.$comando->getName().' procesado luego de (sec): '.($iTimestampFinal - $iTimestampInicio).
+                        ' | EN: DEBUG: '.__METHOD__.': request '.$comando->getName().' processed after (sec): '.($iTimestampFinal - $iTimestampInicio));
                 }
             }
             $response->addAttribute('id', (string)$request['id']);
@@ -217,13 +222,12 @@ class ECCPConn
 
     private function _stdManejoExcepcionDB($e, $s)
     {
-        $this->_log->output('ERR: '.__METHOD__.": $s: ".implode(' - ', $e->errorInfo));
-        $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
+        $this->_log->output('ERR: '.__METHOD__.": $s: ".implode(' - ', $e->errorInfo).' | EN: ERR: '.__METHOD__.": $s: ".implode(' - ', $e->errorInfo));
+        $this->_log->output("ERR: traza de pila | EN: stack trace: \n".$e->getTraceAsString());
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
             // Codes corresponding to database connection loss
-            $this->_log->output('WARN: '.__METHOD__.
-                ': conexión a DB parece ser inválida, se cierra...'.' DB connection appears to be invalid, closing...');
+            $this->_log->output('WARN: '.__METHOD__.': conexión a DB parece ser inválida, se cierra... | EN: WARN: '.__METHOD__.': DB connection appears to be invalid, closing...');
             $this->multiplexSrv->setDBConn(NULL);
         }
     }
@@ -1520,13 +1524,18 @@ class ECCPConn
         // Abrir la conexión a la base de datos, si se tienen todos los parámetros
         if (count($dbParams) < 4) {
             $this->_log->output('ERR: archivo '.$sNombreConfig.
-                ' de parámetros FreePBX no tiene todos los parámetros requeridos para conexión.');
+                ' de parámetros FreePBX no tiene todos los parámetros requeridos para conexión.'.
+                ' | EN: ERR: file '.$sNombreConfig.
+                ' of FreePBX parameters does not have all required parameters for connection.');
             return NULL;
         }
         if ($dbParams['AMPDBENGINE'] != 'mysql' && $dbParams['AMPDBENGINE'] != 'mysqli') {
             $this->_log->output('ERR: archivo '.$sNombreConfig.
                 ' de parámetros FreePBX especifica AMPDBENGINE='.$dbParams['AMPDBENGINE'].
-                ' que no ha sido probado.');
+                ' que no ha sido probado.'.
+                ' | EN: ERR: file '.$sNombreConfig.
+                ' of FreePBX parameters specifies AMPDBENGINE='.$dbParams['AMPDBENGINE'].
+                ' which has not been tested.');
             return NULL;
         }
         try {
@@ -1536,8 +1545,8 @@ class ECCPConn
             $dbConn->setAttribute(PDO::ATTR_EMULATE_PREPARES, FALSE);
             return $dbConn;
         } catch (PDOException $e) {
-            $this->_log->output("ERR: no se puede conectar a DB de FreePBX - ".
-                $e->getMessage());
+            $this->_log->output("ERR: no se puede conectar a DB de FreePBX - ".$e->getMessage().
+                " | EN: ERR: cannot connect to FreePBX DB - ".$e->getMessage());
         	return NULL;
         }
     }
@@ -1562,7 +1571,7 @@ class ECCPConn
                 $listaExtensiones[$tupla['extension']] = $tupla['dial'];
             }
         } catch (PDOException $e) {
-        	$this->_log->output('ERR: (internal) Cannot list extensions - '.$e->getMessage());
+        	$this->_log->output('ERR: (interno) No se pueden listar extensiones - '.$e->getMessage().' | EN: ERR: (internal) Cannot list extensions - '.$e->getMessage());
         }
         $oDB = NULL;
         return $listaExtensiones;
@@ -1610,22 +1619,38 @@ class ECCPConn
         $r = NULL;
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
-            // app_agent_pool (Asterisk 12+): Originate call to agent-login context
-            // The agent-login context runs AgentLogin() application
             $this->_tuberia->AMIEventProcess_agregarIntentoLoginAgente($sAgente, $sExtension, $iTimeout);
-            $r = $this->_ami->Originate(
-                $sExtension,                    // channel (SIP/1064)
-                $agentFields['number'],         // exten (agent number)
-                'agent-login',                  // context (runs AgentLogin app)
-                1,                              // priority
-                NULL,                           // application (use context instead)
-                NULL,                           // data
-                30000,                          // timeout in ms
-                $sAgente.' Login',              // CallerID
-                NULL, NULL,
-                TRUE,                           // async
-                'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente     // action-id
-                );
+            if (!is_null($this->_compat) && $this->_compat->hasChanAgent()) {
+                // chan_agent (Asterisk 11): Originate directly to AgentLogin application
+                // Asterisk prompts for the password configured in agents.conf
+                $r = $this->_ami->Originate(
+                    $sExtension,                    // channel (SIP/1064)
+                    NULL, NULL, NULL,               // exten, context, priority (not used)
+                    'AgentLogin',                   // application
+                    $agentFields['number'],         // data (agent number)
+                    30000,                          // timeout in ms
+                    $sAgente.' Login',              // CallerID
+                    NULL, NULL,
+                    TRUE,                           // async
+                    'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente
+                    );
+            } else {
+                // app_agent_pool (Asterisk 12+): Originate call to agent-login context
+                // The agent-login context runs AgentLogin() which does NOT prompt for password
+                $r = $this->_ami->Originate(
+                    $sExtension,                    // channel (SIP/1064)
+                    $agentFields['number'],         // exten (agent number)
+                    'agent-login',                  // context (runs AgentLogin app)
+                    1,                              // priority
+                    NULL,                           // application (use context instead)
+                    NULL,                           // data
+                    30000,                          // timeout in ms
+                    $sAgente.' Login',              // CallerID
+                    NULL, NULL,
+                    TRUE,                           // async
+                    'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente
+                    );
+            }
             if ($r['Response'] != 'Success') {
                 $this->_tuberia->AMIEventProcess_cancelarIntentoLoginAgente($sAgente);
                 return FALSE;
@@ -1652,6 +1677,9 @@ class ECCPConn
                 if (count($listaColas[$sAgente][0]) > 0) {
                     $this->_log->output('WARN: '.__METHOD__.': agente '.$sAgente.
                         ' que intenta logonearse ya está en colas: ['.
+                        implode(' ', $listaColas[$sAgente][0]).']'.
+                        ' | EN: WARN: '.__METHOD__.': agent '.$sAgente.
+                        ' attempting to login is already in queues: ['.
                         implode(' ', $listaColas[$sAgente][0]).']');
                 }
                 foreach ($listaColas[$sAgente][0] as $cola) {
@@ -1659,7 +1687,9 @@ class ECCPConn
                     $r = $this->_ami->QueueRemove($cola, $sAgente);
                     if ($r['Response'] != 'Success') {
                         $this->_log->output('WARN: '.__METHOD__.': falla al quitar agente '.
-                            $sAgente.' de cola '.$cola.': '.print_r($r, TRUE));
+                            $sAgente.' de cola '.$cola.': '.print_r($r, TRUE).
+                            ' | EN: WARN: '.__METHOD__.': failure removing agent '.
+                            $sAgente.' from queue '.$cola.': '.print_r($r, TRUE));
                     }
                 }
                 foreach ($listaColas[$sAgente][2] as $cola => $penalty) {
@@ -1667,7 +1697,9 @@ class ECCPConn
                     $r = $this->_ami->QueueAdd($cola, $sAgente, $penalty, $name);
                     if ($r['Response'] != 'Success') {
                         $this->_log->output('WARN: '.__METHOD__.': falla al ingresar agente '.
-                            $sAgente.' a cola '.$cola.': '.print_r($r, TRUE));
+                            $sAgente.' a cola '.$cola.': '.print_r($r, TRUE).
+                            ' | EN: WARN: '.__METHOD__.': failure adding agent '.
+                            $sAgente.' to queue '.$cola.': '.print_r($r, TRUE));
                     } else $bIngresoCola = TRUE;
                 }
                 if (!$bIngresoCola) {
@@ -1732,19 +1764,30 @@ class ECCPConn
 
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
-            // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
-            // There is no Agentlogoff AMI command in app_agent_pool
-            $sCanalLogin = NULL;
-            if (!is_null($infoAgente)) {
-                $sCanalLogin = $infoAgente['login_channel'];
-                if (is_null($sCanalLogin)) {
-                    $sCanalLogin = $infoAgente['extension'];
+            if (!is_null($this->_compat) && $this->_compat->hasChanAgent()) {
+                // chan_agent (Asterisk 11): use Agentlogoff AMI command
+                $r = $this->_ami->Agentlogoff($agentFields['number']);
+                // If agent hasn't entered password yet, Agentlogoff has no effect
+                // so also hangup the channel directly
+                if (!is_null($infoAgente) && $infoAgente['estado_consola'] == 'logging') {
+                    $sCanalExt = $infoAgente['login_channel'];
+                    if (is_null($sCanalExt)) $sCanalExt = $infoAgente['extension'];
+                    if (!is_null($sCanalExt)) $this->_ami->Hangup($sCanalExt);
                 }
-            }
-            if (!is_null($sCanalLogin)) {
-                $this->_ami->Hangup($sCanalLogin);
             } else {
-                $this->_log->output('WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
+                // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
+                $sCanalLogin = NULL;
+                if (!is_null($infoAgente)) {
+                    $sCanalLogin = $infoAgente['login_channel'];
+                    if (is_null($sCanalLogin)) {
+                        $sCanalLogin = $infoAgente['extension'];
+                    }
+                }
+                if (!is_null($sCanalLogin)) {
+                    $this->_ami->Hangup($sCanalLogin);
+                } else {
+                    $this->_log->output('WARN: '.__METHOD__.': no se encontró canal de login para agente '.$sAgente.' | EN: WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
+                }
             }
         } else {
             // SIP/IAX2/PJSIP: Close client channel if connected
@@ -2057,7 +2100,7 @@ class ECCPConn
 
         if (!is_null($sAgentStatus)) {
             if ($sAgentStatus != 'offline' && is_null($sExtension)) {
-                $this->_log->output("ERR: (internal) estado inconsistente de agente (status=$sAgentStatus extension=null)\n".
+                $this->_log->output("ERR: (interno) estado inconsistente de agente (status=$sAgentStatus extension=null) | EN: ERR: (internal) inconsistent agent state (status=$sAgentStatus extension=null)\n".
                     "\tinfoSeguimiento => ".print_r($infoSeguimiento, TRUE).
                     "\tinfoLlamada => ".print_r($infoLlamada, TRUE));
             }
@@ -2123,6 +2166,8 @@ class ECCPConn
         $r = $this->_ami->MixMonitorMute($infoLlamada['channel'], true);
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: No se puede callar la grabacion para '.$sAgente.
+                ' ('.$infoLlamada['channel'].') - '.$r['Message'].
+                ' | EN: ERR: Cannot mute recording for '.$sAgente.
                 ' ('.$infoLlamada['channel'].') - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_mixmonitormuteResponse, 500, 'Cannot mute agent call');
             return $xml_response;
@@ -2164,6 +2209,8 @@ class ECCPConn
             $r = $this->_ami->MixMonitorMute($chan, false);
             if ($r['Response'] != 'Success') {
                 $this->_log->output('ERR: No se puede restaurar la grabacion para '.$sAgente.
+                    ' ('.$chan.') - '.$r['Message'].
+                    ' | EN: ERR: Cannot restore recording for '.$sAgente.
                     ' ('.$chan.') - '.$r['Message']);
             } else {
                 $c++;
@@ -2216,39 +2263,40 @@ class ECCPConn
                     $isAttendedTransfer = !empty($transferDest);
                 }
 
-                if ($isAttendedTransfer) {
+                if ($isAttendedTransfer && !is_null($this->_compat) && $this->_compat->hasAppAgentPool()) {
                     // ========================================================================
-                    // ATTENDED TRANSFER COMPLETION
+                    // ATTENDED TRANSFER COMPLETION (app_agent_pool only)
                     // Redirect agent's login_channel to atxfer-complete context.
                     // This causes agent to leave consultation bridge (Atxfer completes),
                     // then re-enter AgentLogin to stay logged in.
+                    // On chan_agent (Ast 11), attended transfer works natively.
                     // ========================================================================
-                    $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION START ==========');
-                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+                    $this->_log->output('DEBUG: ========== INICIO DE TRANSFERENCIA ATENDIDA | EN: ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino de transferencia/Transfer Target: '.$transferDest);
 
                     // Get agent's login_channel
                     $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
                     if (is_null($infoAgente) || empty($infoAgente['login_channel'])) {
-                        $this->_log->output('WARN: No login_channel found for agent, falling back to normal hangup');
+                        $this->_log->output('WARN: No se encontró login_channel para el agente, usando hangup normal | EN: No login_channel found for agent, falling back to normal hangup');
                         $hangchannel = $infoLlamada['actualchannel'];
-                        $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                        $this->_log->output('DEBUG: ========== TRANSFERENCIA ATENDIDA FALLIDA | EN: ATTENDED TRANSFER COMPLETION FAILED ==========');
                     } else {
                         $loginChannel = $infoAgente['login_channel'];
                         // Extract agent number (e.g., "1001" from "Agent/1001")
                         $agentNumber = substr($sAgente, strpos($sAgente, '/') + 1);
 
-                        $this->_log->output('DEBUG: Agent login_channel: '.$loginChannel);
-                        $this->_log->output('DEBUG: Agent number: '.$agentNumber);
+                        $this->_log->output('DEBUG: login_channel del agente | EN: Agent login_channel: '.$loginChannel);
+                        $this->_log->output('DEBUG: Número de agente | EN: Agent number: '.$agentNumber);
 
                         // Signal AMIEventProcess to suppress the upcoming Agentlogoff event
                         // The agent will re-enter AgentLogin via the atxfer-complete context
-                        $this->_log->output('DEBUG: Signaling AMIEventProcess to suppress Agentlogoff for '.$sAgente);
+                        $this->_log->output('DEBUG: Señalando a AMIEventProcess para suprimir Agentlogoff para '.$sAgente.' | EN: Signaling AMIEventProcess to suppress Agentlogoff for '.$sAgente);
                         $this->_tuberia->msg_AMIEventProcess_prepararAtxferComplete($sAgente);
 
                         // Redirect agent's channel to atxfer-complete context
                         // This causes agent to leave consultation bridge (Atxfer completes),
                         // then the context runs AgentLogin to keep agent logged in
-                        $this->_log->output('DEBUG: Redirecting '.$loginChannel.' to atxfer-complete/'.$agentNumber);
+                        $this->_log->output('DEBUG: Redirigiendo '.$loginChannel.' a atxfer-complete/'.$agentNumber.' | EN: Redirecting '.$loginChannel.' to atxfer-complete/'.$agentNumber);
                         $r = $this->_ami->Redirect(
                             $loginChannel,        // Channel: agent's login_channel
                             '',                   // ExtraChannel: not used
@@ -2256,19 +2304,19 @@ class ECCPConn
                             'atxfer-complete',    // Context: atxfer-complete context
                             1                     // Priority
                         );
-                        $this->_log->output('DEBUG: Redirect result: '.print_r($r, true));
+                        $this->_log->output('DEBUG: Resultado de Redirect/Redirect result: '.print_r($r, true));
 
                         if ($r['Response'] == 'Success') {
-                            $this->_log->output('INFO: Attended transfer completion initiated - agent redirected to atxfer-complete');
+                            $this->_log->output('INFO: Transferencia atendida iniciada - agente redirigido a atxfer-complete | EN: Attended transfer completion initiated - agent redirected to atxfer-complete');
                             // Release agent from call tracking
                             $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
 
                             $xml_hangupResponse->addChild('success');
                             return $xml_response;
                         } else {
-                            $this->_log->output('WARN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
+                            $this->_log->output('WARN: Redirect falló: '.$r['Message'].', usando hangup normal | EN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
                             $hangchannel = $infoLlamada['actualchannel'];
-                            $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                            $this->_log->output('DEBUG: ========== TRANSFERENCIA ATENDIDA FALLIDA | EN: ATTENDED TRANSFER COMPLETION FAILED ==========');
                         }
                     }
                 } else {
@@ -2297,8 +2345,8 @@ class ECCPConn
                     // hang up the agent's channel (not the customer's) to complete
                     // the transfer and connect customer to colleague.
                     // ========================================================================
-                    $this->_log->output('DEBUG: ========== CALLBACK AGENT ATTENDED TRANSFER COMPLETION START ==========');
-                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+                    $this->_log->output('DEBUG: ========== INICIO DE TRANSFERENCIA ATENDIDA AGENTE CALLBACK | EN: CALLBACK AGENT ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino de transferencia/Transfer Target: '.$transferDest);
 
                     // Use agentchannel for callback agents to complete the transfer
                     // If agentchannel doesn't have unique ID (no hyphen), get the actual agent channel
@@ -2307,25 +2355,25 @@ class ECCPConn
                         // Try using actualAgentChannel if available
                         if (isset($infoLlamada['actualAgentChannel']) && !empty($infoLlamada['actualAgentChannel'])) {
                             $hangchannel = $infoLlamada['actualAgentChannel'];
-                            $this->_log->output('DEBUG: Using actualAgentChannel: '.$hangchannel);
+                            $this->_log->output('DEBUG: Usando actualAgentChannel | EN: Using actualAgentChannel: '.$hangchannel);
                         } else {
                             // Fallback: try to construct the channel from current agent info
                             $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
                             if (!is_null($infoAgente) && !empty($infoAgente['channel']) && strpos($infoAgente['channel'], '-') !== false) {
                                 $hangchannel = $infoAgente['channel'];
-                                $this->_log->output('DEBUG: Using agent channel from infoSeguimiento: '.$hangchannel);
+                                $this->_log->output('DEBUG: Usando canal del agente de infoSeguimiento | EN: Using agent channel from infoSeguimiento: '.$hangchannel);
                             } else {
                                 // Last resort: use the agentchannel as-is and hope Asterisk can match it
-                                $this->_log->output('DEBUG: Using agentchannel without unique ID: '.$hangchannel);
+                                $this->_log->output('DEBUG: Usando agentchannel sin ID único | EN: Using agentchannel without unique ID: '.$hangchannel);
                             }
                         }
                     }
-                    $this->_log->output('DEBUG: Callback agent attended transfer - hanging up channel: '.$hangchannel);
+                    $this->_log->output('DEBUG: Transferencia atendida agente callback - colgando canal: '.$hangchannel.' | EN: Callback agent attended transfer - hanging up channel: '.$hangchannel);
 
                     // Release agent from call tracking
                     $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
 
-                    $this->_log->output('INFO: Callback agent attended transfer completion - will hangup agent channel');
+                    $this->_log->output('INFO: Transferencia atendida de agente callback completada - se colgará canal del agente | EN: Callback agent attended transfer completion - will hangup agent channel');
                 } elseif (strpos($hangchannel, '-') === false) {
                     // No attended transfer - normal hangup, use actualchannel
                     $hangchannel = $infoLlamada['actualchannel'];
@@ -2352,6 +2400,8 @@ class ECCPConn
         $r = $this->_ami->Hangup($hangchannel);
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: No se puede colgar la llamada para '.$sAgente.
+                ' ('.$hangchannel.') - '.$r['Message'].
+                ' | EN: ERR: Cannot hang up call for '.$sAgente.
                 ' ('.$hangchannel.') - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_hangupResponse, 500, 'Cannot hangup agent call');
             return $xml_response;
@@ -2914,12 +2964,12 @@ LEER_STATS_CAMPANIA;
 
             // Fecha debe estar en el futuro
             if ($horario['date_init'] < date('Y-m-d')) {
-                $this->_log->output('ERR: al agendar llamada: fecha de inicio anterior a fecha actual');
+                $this->_log->output('ERR: al agendar llamada: fecha de inicio anterior a fecha actual | EN: ERR: when scheduling call: start date before current date');
                 $errcode = 400; $errdesc = 'Bad request: date_init before current date';
                 return FALSE;
             }
         } elseif (!is_null($horario)) {
-            $this->_log->output('ERR: (internal) al agendar llamada: horario no es un arreglo');
+            $this->_log->output('ERR: (internal) al agendar llamada: horario no es un arreglo | EN: ERR: (internal) when scheduling call: schedule is not an array');
             return FALSE;
         }
 
@@ -2938,7 +2988,9 @@ LEER_STATS_CAMPANIA;
             $recordset->closeCursor();
             if ($tuplaCheck['N'] <= 0) {
                 $this->_log->output('WARN: '.__METHOD__.': llamada '.$calltype.' con callid='.$callid.
-                    ' no se encuentra para agent='.$sAgente.', se ignoran valores...');
+                    ' no se encuentra para agent='.$sAgente.', se ignoran valores...'.
+                    ' | EN: WARN: '.__METHOD__.': call '.$calltype.' with callid='.$callid.
+                    ' not found for agent='.$sAgente.', ignoring values...');
                 $calltype = NULL;
                 $callid = NULL;
             }
@@ -3087,6 +3139,9 @@ SQL_INSERTAR_AGENDAMIENTO;
         } catch (PDOException $e) {
             $this->_log->output('ERR: '.__METHOD__.
                 ': no se puede realizar inserción de llamada agendada: '.
+                implode(' - ', $e->errorInfo).
+                ' | EN: ERR: '.__METHOD__.
+                ': cannot perform scheduled call insertion: '.
                 implode(' - ', $e->errorInfo));
             $errcode = 500; $errdesc = 'Failed to insert scheduled call';
         	$this->_db->rollBack();
@@ -3144,7 +3199,9 @@ SQL_INSERTAR_AGENDAMIENTO;
             1);                 // priority
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.': al transferir llamada: no se puede transferir '.
-                $sCanalRemoto.' a '.$sExtension.' - '.$r['Message']);
+                $sCanalRemoto.' a '.$sExtension.' - '.$r['Message'].
+                ' | EN: ERR: '.__METHOD__.': when transferring call: cannot transfer '.
+                $sCanalRemoto.' to '.$sExtension.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call');
             return $xml_response;
         } else {
@@ -3189,18 +3246,18 @@ SQL_INSERTAR_AGENDAMIENTO;
         $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
 
         // DEBUG: log agent info
-        $this->_log->output('DEBUG: '.__METHOD__.': infoAgente = '.print_r($infoAgente, true));
+        $this->_log->output('DEBUG: '.__METHOD__.': infoAgente/agentInfo = '.print_r($infoAgente, true));
 
         // For Agent type (app_agent_pool), use login_channel which is the actual SIP/PJSIP phone
         // login_channel exists for Agent type agents who are logged in via AgentLogin
         if (!is_null($infoAgente) && !empty($infoAgente['login_channel'])) {
             $transferChannel = $infoAgente['login_channel'];
-            $this->_log->output('DEBUG: '.__METHOD__.': Using login_channel: '.$transferChannel);
+            $this->_log->output('DEBUG: '.__METHOD__.': Usando login_channel | EN: Using login_channel: '.$transferChannel);
         } else {
             $transferChannel = isset($infoLlamada['actualAgentChannel'])
                 ? $infoLlamada['actualAgentChannel']
                 : $infoLlamada['agentchannel'];
-            $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel: '.$transferChannel);
+            $this->_log->output('DEBUG: '.__METHOD__.': Usando canal alternativo | EN: Using fallback channel: '.$transferChannel);
         }
         $r = $this->_ami->Atxfer(
             $transferChannel,
@@ -3209,7 +3266,9 @@ SQL_INSERTAR_AGENDAMIENTO;
             1);                 // priority
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.': al transferir llamada: no se puede transferir '.
-                $transferChannel.' a '.$sExtension.' - '.$r['Message']);
+                $transferChannel.' a '.$sExtension.' - '.$r['Message'].
+                ' | EN: ERR: '.__METHOD__.': when transferring call: cannot transfer '.
+                $transferChannel.' to '.$sExtension.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call');
             return $xml_response;
         } else {
@@ -3338,7 +3397,7 @@ SQL_INSERTAR_AGENDAMIENTO;
         // Obtener la información de la llamada atendida por el agente
         $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
         if ($this->DEBUG) {
-            $this->_log->output("DEBUG: unhold - infoLlamada: ".print_r($infoLlamada, 1));
+            $this->_log->output("DEBUG: unhold - infoLlamada/callInfo: ".print_r($infoLlamada, 1));
         }
         if (is_null($infoLlamada) || is_null($infoLlamada['callid'])) {
             $this->_agregarRespuestaFallo($xml_unholdResponse, 417, 'Agent not in call');
@@ -3348,7 +3407,7 @@ SQL_INSERTAR_AGENDAMIENTO;
         // Si el agente no estaba en hold, se devuelve éxito sin hacer nada más
         if (is_null($infoSeguimiento['id_audit_hold'])) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: unhold - agent not on hold, id_audit_hold is NULL");
+                $this->_log->output("DEBUG: unhold - agente no en hold, id_audit_hold es NULL | EN: agent not on hold, id_audit_hold is NULL");
             }
             $xml_unholdResponse->addChild('success');
             return $xml_response;
@@ -3356,7 +3415,7 @@ SQL_INSERTAR_AGENDAMIENTO;
 
         // Check if call is on hold and park_exten is available
         if ($this->DEBUG) {
-            $this->_log->output("DEBUG: unhold - checking park_exten, isset: ".isset($infoLlamada['park_exten']));
+            $this->_log->output("DEBUG: unhold - verificando/checking park_exten, isset: ".isset($infoLlamada['park_exten']));
         }
         if (isset($infoLlamada['park_exten']) && !is_null($infoLlamada['park_exten'])) {
             $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
@@ -3369,7 +3428,7 @@ SQL_INSERTAR_AGENDAMIENTO;
             }
 
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: intentando recuperar llamada:\n".
+                $this->_log->output("DEBUG: intentando recuperar llamada | EN: attempting to retrieve call:\n".
                     "\tChannel      =>  $sCanalOrigen\n".
                     "\tExten        =>  {$infoLlamada['park_exten']}\n".
                     "\tContext      =>  from-internal\n".
@@ -3395,10 +3454,11 @@ SQL_INSERTAR_AGENDAMIENTO;
                 $sActionID
                 );
             if ($r['Response'] != 'Success') {
-                $this->_log->output('ERR: al terminar hold: no se puede retomar llamada - '.$r['Message']);
+                $this->_log->output('ERR: al terminar hold: no se puede retomar llamada - '.$r['Message'].
+                    ' | EN: ERR: when ending hold: cannot resume call - '.$r['Message']);
             }
             if ($this->DEBUG) {
-                $this->_log->output('DEBUG: Originate para recuperar llamada devuelve: '.print_r($r, 1));
+                $this->_log->output('DEBUG: Originate para recuperar llamada devuelve/Originate to retrieve call returns: '.print_r($r, 1));
             }
         }
 
@@ -3701,7 +3761,7 @@ LEER_ULTIMA_SESION;
                 }
             }
         } else {
-            $this->_log->output('ERR: lost synch with Asterisk AMI ("core show channel" response lacks "data").');
+            $this->_log->output('ERR: se perdió sincronización con Asterisk AMI (respuesta de "core show channel" carece de "data") | EN: ERR: lost synch with Asterisk AMI ("core show channel" response lacks "data").');
             return $this->_generarRespuestaFallo(500, 'No AMI connection');
         }
         return $xml_response;

@@ -210,9 +210,9 @@ class Llamada
         $this->_log = $log;
     }
 
-    private function _nul($i) { return is_null($i) ? '(ninguno)' : "$i"; }
+    private function _nul($i) { return is_null($i) ? '(ninguno/none)' : "$i"; }
     private function _nultime($i) { return is_null($i) ? '----/--/-- --:--:--' : date('Y/m/d H:i:s', $i); }
-    private function _agentecorto($a) { return is_null($a) ? '(ninguno)' : $a->__toString(); }
+    private function _agentecorto($a) { return is_null($a) ? '(ninguno/none)' : $a->__toString(); }
 
     public function __toString()
     {
@@ -225,7 +225,7 @@ class Llamada
 
     public function dump($log)
     {
-        $s = "----- LLAMADA -----\n";
+        $s = "----- LLAMADA / CALL -----\n";
         $s .= "\ttipo_llamada.................".$this->tipo_llamada."\n";
         $s .= "\tid_llamada...................".$this->_nul($this->id_llamada)."\n";
         $s .= "\tphone........................".$this->_nul($this->phone)."\n";
@@ -241,7 +241,7 @@ class Llamada
         if (!is_null($this->failure_cause_txt))
             $s .= "\tfailure_cause_txt............".$this->_nul($this->failure_cause_txt)."\n";
         $s .= "\tactionid.....................".$this->_nul($this->actionid)."\n";
-        if ($this->_waiting_id_current_call) $s .= "\tESPERANDO id_current_call\n";
+        if ($this->_waiting_id_current_call) $s .= "\tESPERANDO/WAITING id_current_call\n";
         $s .= "\tid_current_call..............".$this->_nul($this->id_current_call)."\n";
         $s .= "\tduration.....................".$this->_nul($this->duration)."\n";
         if ($this->_stillborn) $s .= "\tSTILLBORN\n";
@@ -252,13 +252,13 @@ class Llamada
         $s .= "\ttimestamp_hangup.............".$this->_nultime($this->timestamp_hangup)."\n";
         $s .= "\tduration_wait................".$this->_nul($this->duration_wait)."\n";
         $s .= "\tduration_answer..............".$this->_nul($this->duration_answer)."\n";
-        $s .= "\tesperando_contestar..........".($this->esperando_contestar ? 'SI' : 'NO')."\n";
-        $s .= "\trequest_hold.................".($this->request_hold ? 'SI' : 'NO')."\n";
+        $s .= "\tesperando_contestar/waiting_answer..".($this->esperando_contestar ? 'SI/YES' : 'NO')."\n";
+        $s .= "\trequest_hold.................".($this->request_hold ? 'SI/YES' : 'NO')."\n";
         $s .= "\tid_queue_call_entry..........".$this->_nul($this->id_queue_call_entry)."\n";
         $s .= "\t_queuenumber.................".$this->_nul($this->_queuenumber)."\n";
         $s .= "\tagente.......................".$this->_agentecorto($this->agente)."\n";
         $s .= "\tagente_agendado..............".$this->_agentecorto($this->agente_agendado)."\n";
-        $s .= "\tcampania.....................".(is_null($this->campania) ? '(ninguna)' : $this->campania->__toString())."\n";
+        $s .= "\tcampania/campaign............".(is_null($this->campania) ? '(ninguna/none)' : $this->campania->__toString())."\n";
 
         $s .= "\tAuxChannels..................".print_r($this->AuxChannels, TRUE)."\n";
         $s .= "\t_actualizacionesPendientes...".print_r($this->_actualizacionesPendientes, TRUE)."\n";
@@ -300,7 +300,7 @@ class Llamada
         case 'mutedchannels':   return $this->_mutedchannels;
         case 'park_exten':      return $this->_park_exten;
         default:
-            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s);
+            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s.' | EN: property not implemented: '.$s);
             die(__METHOD__.' - propiedad no implementada: '.$s."\n");
         }
     }
@@ -487,7 +487,7 @@ class Llamada
             $this->_waiting_id_current_call = FALSE;
             break;
         default:
-            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s);
+            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s.' | EN: property not implemented: '.$s);
             die(__METHOD__.' - propiedad no implementada: '.$s."\n");
         }
     }
@@ -628,9 +628,12 @@ class Llamada
         $this->_tuberia->enviarRespuesta($sFuente, $bExito);
         if (!$bExito) {
             $this->_log->output('ERR: '.__METHOD__.
-                "campania {$this->tipo_llamada} ID={$this->campania->id} ".
+                " campania {$this->tipo_llamada} ID={$this->campania->id} ".
                 (($this->tipo_llamada == 'outgoing') ? " cola {$this->campania->queue} " : '').
-                "no se puede llamar a número: ".print_r($r, TRUE));
+                "no se puede llamar a número: ".print_r($r, TRUE).
+                " | EN: campaign {$this->tipo_llamada} ID={$this->campania->id} ".
+                (($this->tipo_llamada == 'outgoing') ? " queue {$this->campania->queue} " : '').
+                "cannot call number");
             if ($this->status == 'Placing') $this->status = 'Failure';
 
             // Notificar el progreso de la llamada
@@ -717,7 +720,7 @@ class Llamada
             $this->status = $sStatus;
         if (!in_array($this->status, array('Placing', 'Ringing', 'Dialing', 'Failure'))) {
             $this->_log->output("WARN: ".__METHOD__." llamada recibe OriginateResponse con status=".
-                $this->status." inesperado, se asume Ringing");
+                $this->status." inesperado, se asume Ringing | EN: call received OriginateResponse with unexpected status=".$this->status.", assuming Ringing");
             $this->status = 'Ringing';
         }
 
@@ -728,7 +731,7 @@ class Llamada
         /*
         if ($this->DEBUG) {
             // Desactivado porque rellena el log
-            $this->_log->output("DEBUG: llamada identificada es: {$this->actionid} : ".
+            $this->_log->output("DEBUG: llamada identificada es/identified call is: {$this->actionid} : ".
                 print_r($this, TRUE));
         }
         */
@@ -968,7 +971,7 @@ class Llamada
         // Consistency check
         if ($this->agente->estado_consola != 'logged-in') {
             $this->_log->output("WARN: llamada ha sido asignada a agente en estado ".
-                $this->agente->estado_consola.'. Esto no debería haber pasado: ');
+                $this->agente->estado_consola.'. Esto no debería haber pasado | EN: call has been assigned to agent in state '.$this->agente->estado_consola.'. This should not have happened: ');
             $this->dump($this->_log);
         }
     }

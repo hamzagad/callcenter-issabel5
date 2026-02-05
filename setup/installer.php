@@ -135,8 +135,25 @@ if (file_exists($path_script_db))
     $pDB->disconnect();
 }
 
-instalarContextosEspeciales();
-instalarAgentDefaultsTemplate();
+// Detect Asterisk major version for conditional installation
+$output = shell_exec('asterisk -rx "core show version" 2>/dev/null');
+$astMajor = 18; // default
+if (preg_match('/Asterisk (\d+)/', $output, $m)) {
+    $astMajor = (int)$m[1];
+}
+fputs(STDERR, "INFO: Detected Asterisk $astMajor for installer decisions\n");
+
+instalarContextosEspeciales($astMajor);
+
+if ($astMajor >= 12) {
+    // app_agent_pool: install [agent-defaults] template and convert agents to section format
+    instalarAgentDefaultsTemplate();
+    convertirAgentsConf($astMajor);
+} else {
+    // chan_agent: convert agents to legacy format with passwords from database
+    fputs(STDERR, "INFO: Skipping [agent-defaults] template (chan_agent on Asterisk $astMajor)\n");
+    convertirAgentsConf($astMajor);
+}
 
 exit($return);
 
@@ -252,7 +269,7 @@ VERIFICAR_LONGITUD;
  * EN: Function that installs some special contexts required for some
  * CallCenter functionalities.
  */
-function instalarContextosEspeciales()
+function instalarContextosEspeciales($astMajor = 18)
 {
 	$sArchivo = '/etc/asterisk/extensions_custom.conf';
     $sInicioContenido = "; BEGIN ISSABEL CALL-CENTER CONTEXTS DO NOT REMOVE THIS LINE\n";
@@ -277,8 +294,9 @@ function instalarContextosEspeciales()
     	fputs(STDERR, "ERR: no se puede localizar correctamente segmento de contextos de Call Center | EN: ERR: cannot correctly locate Call Center contexts segment\n");
     } else {
     	$contenido[] = $sInicioContenido;
-        $contenido[] =
-'
+
+        // [llamada_agendada] works on all versions
+        $sContextos = '
 [llamada_agendada]
 exten => _X.,1,NoOP("Issabel CallCenter: AGENTCHANNEL=${AGENTCHANNEL}")
 exten => _X.,n,NoOP("Issabel CallCenter: QUEUE_MONITOR_FORMAT=${QUEUE_MONITOR_FORMAT}")
@@ -288,7 +306,16 @@ exten => _X.,n,MixMonitor(${MIXMON_DIR}${CALLFILENAME}.${MIXMON_FORMAT},,${MIXMO
 exten => _X.,n,Set(CDR(userfield)=audio:${CALLFILENAME}.${MIXMON_FORMAT})
 exten => _X.,n(skiprecord),Dial(${AGENTCHANNEL},300,tw)
 exten => h,1,Macro(hangupcall,)
+';
 
+        // app_agent_pool contexts (Asterisk 12+):
+        // [agent-login]: login via context (no Asterisk password prompt)
+        // [atxfer-complete]: re-enter AgentLogin after attended transfer
+        // [agents]: AgentRequest() for incoming queue calls
+        // On Asterisk 11 (chan_agent), login is done via direct Originate to
+        // the AgentLogin application which prompts for the agents.conf password
+        if ($astMajor >= 12) {
+            $sContextos .= '
 ; app_agent_pool contexts (Asterisk 12+)
 [agent-login]
 exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
@@ -304,8 +331,12 @@ exten => _X.,1,NoOp(Issabel CallCenter: Attended transfer completion - agent ${E
 exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
  same => n,AgentRequest(${EXTEN})
  same => n,Macro(hangupcall,)
-
 ';
+        } else {
+            fputs(STDERR, "INFO: Skipping app_agent_pool contexts (chan_agent on Asterisk $astMajor)\n");
+        }
+
+        $contenido[] = $sContextos;
         $contenido[] = $sFinalContenido;
         file_put_contents($sArchivo, $contenido);
         chown($sArchivo, 'asterisk'); chgrp($sArchivo, 'asterisk');
@@ -344,5 +375,151 @@ function instalarAgentDefaultsTemplate()
     chown($sArchivo, 'asterisk');
     chgrp($sArchivo, 'asterisk');
     fputs(STDERR, "INFO: Created [agent-defaults] template in agents.conf | Es: INFO: Plantilla [agent-defaults] creada en agents.conf\n");
+}
+
+/**
+ * Convert existing agents.conf entries to the correct format for the detected
+ * Asterisk version. Handles upgrade (Ast 11->13/18) and downgrade scenarios.
+ *
+ * chan_agent (Ast 11):       agent => number,password,name
+ * app_agent_pool (Ast 12+): [number](agent-defaults)\nfullname=name
+ *
+ * Reads agent passwords from the call_center database to populate the
+ * chan_agent format, since app_agent_pool entries do not store passwords.
+ */
+function convertirAgentsConf($astMajor)
+{
+    $sArchivo = '/etc/asterisk/agents.conf';
+    if (!file_exists($sArchivo)) return;
+
+    $contenido = file($sArchivo);
+    if (!is_array($contenido)) return;
+
+    $bUsaChanAgent = ($astMajor < 12);
+
+    // Collect existing agents from the file in both formats
+    $agentesEncontrados = array(); // number => name
+    $formatoActual = 'unknown';
+    $currentAgentId = NULL;
+    $currentAgentName = '';
+    $bTieneFormatoChanAgent = FALSE;
+    $bTieneFormatoAppAgentPool = FALSE;
+
+    foreach ($contenido as $sLinea) {
+        $sLinea = trim($sLinea);
+        // app_agent_pool format: [number](agent-defaults)
+        if (preg_match('/^\[(\d+)\](\(agent-defaults\))?$/', $sLinea, $regs)) {
+            if ($currentAgentId !== NULL) {
+                $agentesEncontrados[$currentAgentId] = $currentAgentName;
+            }
+            $currentAgentId = $regs[1];
+            $currentAgentName = '';
+            $bTieneFormatoAppAgentPool = TRUE;
+            continue;
+        }
+        if ($currentAgentId !== NULL && preg_match('/^fullname\s*=\s*(.*)$/', $sLinea, $regs)) {
+            $currentAgentName = $regs[1];
+            continue;
+        }
+        if ($currentAgentId !== NULL && preg_match('/^\[/', $sLinea)) {
+            $agentesEncontrados[$currentAgentId] = $currentAgentName;
+            $currentAgentId = NULL;
+        }
+        // chan_agent format: agent => number,password,name
+        if (preg_match('/^agent\s*=>\s*(\d+),([^,]*),(.*)$/', $sLinea, $regs)) {
+            $agentesEncontrados[$regs[1]] = $regs[3];
+            $bTieneFormatoChanAgent = TRUE;
+        }
+    }
+    if ($currentAgentId !== NULL) {
+        $agentesEncontrados[$currentAgentId] = $currentAgentName;
+    }
+
+    if (count($agentesEncontrados) == 0) {
+        fputs(STDERR, "INFO: No agent entries found in agents.conf, nothing to convert\n");
+        return;
+    }
+
+    // Check if conversion is needed
+    if ($bUsaChanAgent && !$bTieneFormatoAppAgentPool) {
+        fputs(STDERR, "INFO: agents.conf already in chan_agent format, no conversion needed\n");
+        return;
+    }
+    if (!$bUsaChanAgent && !$bTieneFormatoChanAgent) {
+        fputs(STDERR, "INFO: agents.conf already in app_agent_pool format, no conversion needed\n");
+        return;
+    }
+
+    fputs(STDERR, "INFO: Converting agents.conf entries to ".
+        ($bUsaChanAgent ? 'chan_agent' : 'app_agent_pool')." format\n");
+
+    // For chan_agent format, we need passwords from the database
+    $agentPasswords = array();
+    if ($bUsaChanAgent) {
+        try {
+            $pDB = new paloDB('mysql://root:'.MYSQL_ROOT_PASSWORD.'@localhost/call_center');
+            $result = $pDB->fetchTable("SELECT number, password FROM agent WHERE estatus = 'A'", TRUE);
+            if (is_array($result)) {
+                foreach ($result as $row) {
+                    $agentPasswords[$row['number']] = $row['password'];
+                }
+            }
+            $pDB->disconnect();
+        } catch (Exception $e) {
+            fputs(STDERR, "WARN: Cannot read agent passwords from database: ".$e->getMessage()."\n");
+        }
+    }
+
+    // Rebuild agents.conf: keep header/comments/general/template, replace agent entries
+    $contenidoNuevo = array();
+    $bEnSeccionAgente = FALSE;
+    $bYaAgregados = FALSE;
+
+    foreach ($contenido as $sLinea) {
+        $sLineaTrim = trim($sLinea);
+
+        // Skip existing agent entries (both formats)
+        if (preg_match('/^\[(\d+)\](\(agent-defaults\))?$/', $sLineaTrim)) {
+            $bEnSeccionAgente = TRUE;
+            continue;
+        }
+        if ($bEnSeccionAgente) {
+            if (preg_match('/^\[/', $sLineaTrim)) {
+                $bEnSeccionAgente = FALSE;
+                // Fall through to process this line normally
+            } else {
+                continue; // Skip lines within agent section
+            }
+        }
+        if (preg_match('/^agent\s*=>\s*\d+,/', $sLineaTrim)) {
+            continue; // Skip chan_agent format lines
+        }
+
+        $contenidoNuevo[] = $sLinea;
+    }
+
+    // Append all agents in the correct format at the end
+    foreach ($agentesEncontrados as $number => $name) {
+        if ($bUsaChanAgent) {
+            $pass = isset($agentPasswords[$number]) ? $agentPasswords[$number] : '';
+            $contenidoNuevo[] = "agent => {$number},{$pass},{$name}\n";
+            fputs(STDERR, "INFO:   Converted agent {$number} to chan_agent format\n");
+        } else {
+            $contenidoNuevo[] = "\n[{$number}](agent-defaults)\n";
+            $contenidoNuevo[] = "fullname={$name}\n";
+            fputs(STDERR, "INFO:   Converted agent {$number} to app_agent_pool format\n");
+        }
+    }
+
+    $hArchivo = fopen($sArchivo, 'w');
+    if (!$hArchivo) {
+        fputs(STDERR, "ERR: Cannot write agents.conf\n");
+        return;
+    }
+    foreach ($contenidoNuevo as $sLinea) fwrite($hArchivo, $sLinea);
+    fclose($hArchivo);
+    chown($sArchivo, 'asterisk');
+    chgrp($sArchivo, 'asterisk');
+    fputs(STDERR, "INFO: agents.conf conversion complete (".count($agentesEncontrados)." agents)\n");
 }
 ?>
