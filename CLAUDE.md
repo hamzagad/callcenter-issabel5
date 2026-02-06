@@ -78,14 +78,13 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 
 - `setup/installer.php` - Database schema creation and migrations
 - `setup/dialer_process/dialer/dialerd` - Main daemon entry point
-- `setup/dialer_process/dialer/AMIEventProcess.class.php` - Asterisk event handler (3,847 lines)
-- `setup/dialer_process/dialer/ECCPConn.class.php` - ECCP protocol (3,300 lines)
-- `modules/agent_console/index.php` - Agent console (85KB)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` - Asterisk event handler
+- `setup/dialer_process/dialer/ECCPConn.class.php` - ECCP protocol 
+- `modules/agent_console/index.php` - Agent console
 - `menu.xml` - Issabel menu integration
 
 ## Development Notes
 
-- Testing and development is done on the live system, don't modify the repo before I test and confirm
 - Dialer runs as `asterisk` user (refuses to run as root)
 - Dialer logs: `/opt/issabel/dialer/dialerd.log`
 - WebServer logs: `/var/log/httpd/`
@@ -97,9 +96,11 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - MySQL root password can be found in /etc/issabel.conf (mysqlrootpwd)
 - Asterisk conf files: `/etc/asterisk/`
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
-- **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
 - Always use English language for the added code, comments, variables, and functions
-- Always provide the test steps, and I will provide the logs after testing, don't use tail -f
+- **IMPORTANT**: Don't modify the repo before I test and confirm, Testing and development is done on the live system
+- **IMPORTANT**: Always check your modifications will not affect any other functionality
+- **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
+- **IMPORTANT**: Always provide the test steps, and I will provide the logs after testing, don't use tail -f
 
 ---
 
