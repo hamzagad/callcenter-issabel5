@@ -2329,11 +2329,26 @@ Uniqueid: 1429642067.241008
 
         if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
             !is_null($llamada->agente) && $llamada->agente->channel != $sChannel) {
-            /* Si la llamada ya ha sido enlazada previamente, y ahora se enlaza
-             * a un canal distinto del agente original, se asume que ha sido
-             * transferida a una extensión fuera de monitoreo, y ya no debe de
-             * monitorearse. Ya que Asterisk no ejecuta un Hangup en este caso,
-             * se lo debe simular.
+
+            // For Agent type (app_agent_pool), Asterisk swaps the Local/XXXX@agents
+            // channel with the agent's physical SIP extension in the bridge after
+            // returning from hold. This bridge swap must not be treated as a transfer.
+            if ($llamada->agente->extension == $sChannel) {
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: '.__METHOD__.
+                        ': ignoring app_agent_pool bridge swap for agent '.
+                        $llamada->agente->channel.', extension='.$sChannel.
+                        ' | EN: ignoring app_agent_pool bridge swap for agent '.
+                        $llamada->agente->channel.', extension='.$sChannel);
+                }
+                return FALSE;
+            }
+
+            /* If the call has been previously linked, and now links
+             * to a different channel than the original agent, it is assumed
+             * to have been transferred to an unmonitored extension, and should
+             * no longer be monitored. Since Asterisk does not execute a Hangup
+             * in this case, it must be simulated.
              */
             $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
             if (!is_null($a)) {
