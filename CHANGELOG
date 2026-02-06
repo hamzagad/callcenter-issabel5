@@ -1,3 +1,22 @@
+5.0.0-4
+* REWORKED: Attended transfer functionality for Agent type login got completely
+  reworked, now uses Redirect() instead of Atxfer() with ExtraChannel parameter.
+  This moves both channels to a new dialplan contexts which got added.
+* ADDED: New dialplan contexts to handle the attended transfer functionality, 
+  all scenario handled (cancellation, returning, hanging-up).
+* TODO: Control over the MoH rather than using default while the callee is 
+  waiting the consulting result for attended transfer context 
+  (callcenter-atxfer-hold).
+* ADDED: Added optional `ExtraExten`, `ExtraContext`, `ExtraPriority` 
+  parameters to the Redirect action definition. 
+* Fixed: Attended transfer issue caused agent session to drop.
+  Changed `prepararAtxferComplete` from async message to synchronous RPC. 
+  The async message was not processed before the Redirect fired, so the 
+  Agentlogoff suppression flag was not set in time.
+* CHANGE: The installation script now uses the default Asterisk MoH class for
+  agents rather than Silence, suppressing warnings for different name configs.
+* IMPROVED: custom contexts naming uniformed.
+
 5.0.0-3
 * REWORKED: Asterisk version handling for backward compatibility with Issabel4.
   Now, Call Center module can be installed on both Issabel 4 and 5 from the 

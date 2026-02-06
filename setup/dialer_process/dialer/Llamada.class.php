@@ -137,7 +137,7 @@ class Llamada
 
     /* Real Asterisk channel for the agent. For callback agents (SIP/IAX2/PJSIP),
      * this equals _agentchannel. For Agent type with app_agent_pool, this is
-     * Local/XXXX@callcenter-agents-nnnn;N which is the real channel for AMI commands. */
+     * Local/XXXX@agents-nnnn;N which is the real channel for AMI commands. */
     private $_actualAgentChannel = NULL;
 
     var $phone;     // Número marcado para llamada saliente o Caller-ID para llamada entrante

@@ -1635,12 +1635,12 @@ class ECCPConn
                     'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente
                     );
             } else {
-                // app_agent_pool (Asterisk 12+): Originate call to callcenter-agent-login context
-                // The callcenter-agent-login context runs AgentLogin() which does NOT prompt for password
+                // app_agent_pool (Asterisk 12+): Originate call to agent-login context
+                // The agent-login context runs AgentLogin() which does NOT prompt for password
                 $r = $this->_ami->Originate(
                     $sExtension,                    // channel (SIP/1064)
                     $agentFields['number'],         // exten (agent number)
-                    'callcenter-agent-login',                  // context (runs AgentLogin app)
+                    'agent-login',                  // context (runs AgentLogin app)
                     1,                              // priority
                     NULL,                           // application (use context instead)
                     NULL,                           // data
@@ -2266,7 +2266,7 @@ class ECCPConn
                 if ($isAttendedTransfer && !is_null($this->_compat) && $this->_compat->hasAppAgentPool()) {
                     // ========================================================================
                     // ATTENDED TRANSFER COMPLETION (app_agent_pool only)
-                    // Redirect agent's login_channel to callcenter-atxfer-complete context.
+                    // Redirect agent's login_channel to atxfer-complete context.
                     // This causes agent to leave consultation bridge (Atxfer completes),
                     // then re-enter AgentLogin to stay logged in.
                     // On chan_agent (Ast 11), attended transfer works natively.
@@ -2289,26 +2289,26 @@ class ECCPConn
                         $this->_log->output('DEBUG: Número de agente | EN: Agent number: '.$agentNumber);
 
                         // Signal AMIEventProcess to suppress the upcoming Agentlogoff event
-                        // The agent will re-enter AgentLogin via the callcenter-atxfer-complete context
+                        // The agent will re-enter AgentLogin via the atxfer-complete context
                         // Uses synchronous RPC to ensure the flag is set before Redirect fires
                         $this->_log->output('DEBUG: Señalando a AMIEventProcess para suprimir Agentlogoff para '.$sAgente.' | EN: Signaling AMIEventProcess to suppress Agentlogoff for '.$sAgente);
                         $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
 
-                        // Redirect agent's channel to callcenter-atxfer-complete context
+                        // Redirect agent's channel to atxfer-complete context
                         // This causes agent to leave consultation bridge (Atxfer completes),
                         // then the context runs AgentLogin to keep agent logged in
-                        $this->_log->output('DEBUG: Redirigiendo '.$loginChannel.' a callcenter-atxfer-complete/'.$agentNumber.' | EN: Redirecting '.$loginChannel.' to callcenter-atxfer-complete/'.$agentNumber);
+                        $this->_log->output('DEBUG: Redirigiendo '.$loginChannel.' a atxfer-complete/'.$agentNumber.' | EN: Redirecting '.$loginChannel.' to atxfer-complete/'.$agentNumber);
                         $r = $this->_ami->Redirect(
                             $loginChannel,        // Channel: agent's login_channel
                             '',                   // ExtraChannel: not used
                             $agentNumber,         // Exten: agent number (e.g., 1001)
-                            'callcenter-atxfer-complete',    // Context: callcenter-atxfer-complete context
+                            'atxfer-complete',    // Context: atxfer-complete context
                             1                     // Priority
                         );
                         $this->_log->output('DEBUG: Resultado de Redirect/Redirect result: '.print_r($r, true));
 
                         if ($r['Response'] == 'Success') {
-                            $this->_log->output('INFO: Transferencia atendida iniciada - agente redirigido a callcenter-atxfer-complete | EN: Attended transfer completion initiated - agent redirected to callcenter-atxfer-complete');
+                            $this->_log->output('INFO: Transferencia atendida iniciada - agente redirigido a atxfer-complete | EN: Attended transfer completion initiated - agent redirected to atxfer-complete');
                             // Release agent from call tracking
                             $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
 
@@ -3279,16 +3279,16 @@ SQL_INSERTAR_AGENDAMIENTO;
             $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
 
             // Redirect both channels simultaneously:
-            // - Agent's SIP phone -> callcenter-atxfer-consult (dials the target)
-            // - External caller   -> callcenter-atxfer-hold (music on hold)
+            // - Agent's SIP phone -> atxfer-consult (dials the target)
+            // - External caller   -> atxfer-hold (music on hold)
             $r = $this->_ami->Redirect(
                 $transferChannel,              // Channel: agent's SIP/PJSIP phone
                 $clientChannel,                // ExtraChannel: external caller
                 $sExtension,                   // Exten: target extension number
-                'callcenter-atxfer-consult',      // Context: agent consultation context
+                'atxfer-consult',      // Context: agent consultation context
                 1,                             // Priority
                 's',                           // ExtraExten: hold context uses 's'
-                'callcenter-atxfer-hold',         // ExtraContext: caller MOH context
+                'atxfer-hold',         // ExtraContext: caller MOH context
                 1                              // ExtraPriority
             );
         } else {
@@ -3460,11 +3460,11 @@ SQL_INSERTAR_AGENDAMIENTO;
         if (isset($infoLlamada['park_exten']) && !is_null($infoLlamada['park_exten'])) {
             $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
 
-            // For Agent type agents, convert Agent/XXXX to Local/XXXX@callcenter-agents
+            // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
             // because Agent/XXXX is not a valid channel for Originate
             $sCanalOrigen = $sAgente;
             if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
-                $sCanalOrigen = 'Local/'.$regs[1].'@callcenter-agents';
+                $sCanalOrigen = 'Local/'.$regs[1].'@agents';
             }
 
             if ($this->DEBUG) {

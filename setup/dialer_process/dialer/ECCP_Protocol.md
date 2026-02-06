@@ -96,7 +96,7 @@ The `app_cookie` is returned by the `login` request.
 
 | Type | Channel Format | Queue Member | Login Method |
 |------|---------------|--------------|--------------|
-| Agent (static) | `Agent/9000` | `Local/9000@callcenter-agents` | AgentLogin() via `callcenter-agent-login` context |
+| Agent (static) | `Agent/9000` | `Local/9000@agents` | AgentLogin() via `agent-login` context |
 | SIP (dynamic) | `SIP/1001` | `SIP/1001` | QueueAdd |
 | PJSIP (dynamic) | `PJSIP/1001` | `PJSIP/1001` | QueueAdd |
 | IAX2 (dynamic) | `IAX2/1001` | `IAX2/1001` | QueueAdd |
@@ -429,11 +429,11 @@ The Agent type uses **app_agent_pool** instead of deprecated **chan_agent**:
   fullname=Agent Name
   ```
 
-- Queue members: `Local/XXXX@callcenter-agents` with `StateInterface=Agent:XXXX`
-- Login context: `callcenter-agent-login` (runs `AgentLogin()`)
-- Call delivery context: `callcenter-agents` (runs `AgentRequest()`)
+- Queue members: `Local/XXXX@agents` with `StateInterface=Agent:XXXX`
+- Login context: `agent-login` (runs `AgentLogin()`)
+- Call delivery context: `agents` (runs `AgentRequest()`)
 - Logout: Hangup login channel (no `Agentlogoff` AMI command)
-- QueuePause: Uses `Local/XXXX@callcenter-agents` interface
+- QueuePause: Uses `Local/XXXX@agents` interface
 
 ---
 

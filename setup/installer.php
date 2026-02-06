@@ -309,46 +309,46 @@ exten => h,1,Macro(hangupcall,)
 ';
 
         // app_agent_pool contexts (Asterisk 12+):
-        // [callcenter-agent-login]: login via context (no Asterisk password prompt)
-        // [callcenter-atxfer-complete]: re-enter AgentLogin after attended transfer
-        // [callcenter-agents]: AgentRequest() for incoming queue calls
+        // [agent-login]: login via context (no Asterisk password prompt)
+        // [atxfer-complete]: re-enter AgentLogin after attended transfer
+        // [agents]: AgentRequest() for incoming queue calls
         // On Asterisk 11 (chan_agent), login is done via direct Originate to
         // the AgentLogin application which prompts for the agents.conf password
         if ($astMajor >= 12) {
             $sContextos .= '
 ; app_agent_pool contexts (Asterisk 12+)
-[callcenter-agent-login]
+[agent-login]
 exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
  same => n,AgentLogin(${EXTEN})
  same => n,Macro(hangupcall,)
 
-[callcenter-atxfer-complete]
+[atxfer-complete]
 exten => _X.,1,NoOp(Issabel CallCenter: Attended transfer completion - agent ${EXTEN} re-entering AgentLogin)
  same => n,AgentLogin(${EXTEN},s)
  same => n,Macro(hangupcall,)
 
-[callcenter-agents]
+[agents]
 exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
  same => n,AgentRequest(${EXTEN})
  same => n,Macro(hangupcall,)
 
 ; Attended transfer contexts for Agent type (app_agent_pool)
 ; Used when DTMF hooks are lost after Local channel optimization
-[callcenter-atxfer-hold]
+[atxfer-hold]
 exten => s,1,NoOp(Issabel CallCenter: Attended Transfer - Caller on hold)
  same => n,Answer()
  same => n,MusicOnHold(default)
 
-[callcenter-atxfer-consult]
+[atxfer-consult]
 exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,Set(__ATXFER_HELD_CHAN=${ATXFER_HELD_CHAN})
  same => n,Set(AGENT_NUM=${ATXFER_AGENT_NUM})
- same => n,Dial(Local/${EXTEN}@from-internal,120,gF(callcenter-atxfer-bridge^s^1))
+ same => n,Dial(Local/${EXTEN}@from-internal,120,gF(atxfer-bridge^s^1))
  same => n,NoOp(Issabel CallCenter: Consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
  same => n,Bridge(${ATXFER_HELD_CHAN})
- same => n,Goto(callcenter-atxfer-complete,${AGENT_NUM},1)
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
 
-[callcenter-atxfer-bridge]
+[atxfer-bridge]
 exten => s,1,NoOp(Issabel CallCenter: Transfer complete - bridging target with held caller)
  same => n,Bridge(${ATXFER_HELD_CHAN})
  same => n,Hangup()
