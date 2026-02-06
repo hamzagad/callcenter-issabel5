@@ -355,7 +355,9 @@ class AMIEventProcess extends TuberiaProcess
             // Seen in Asterisk 1.6.2.x
             $astman->add_event_handler('DialBegin', array($this, "msg_Dial"));
             $astman->add_event_handler('QueueCallerJoin', array($this, "msg_Join"));
-            $astman->add_event_handler('QueueCallerLeave', array($this, "msg_Leave")); 
+            $astman->add_event_handler('QueueCallerLeave', array($this, "msg_Leave"));
+            // Asterisk 12+ renamed QueueMemberPaused to QueueMemberPause
+            $astman->add_event_handler('QueueMemberPause', array($this, "msg_QueueMemberPaused")); 
 
             if ($this->DEBUG && $this->_config['dialer']['allevents'])
                 $astman->add_event_handler('*', array($this, 'msg_Default'));
