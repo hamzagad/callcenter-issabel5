@@ -123,10 +123,10 @@ class AMIEventProcess extends TuberiaProcess
         // Registro de manejadores de eventos desde ECCPWorkerProcess
         // Register event handlers from ECCPWorkerProcess
         foreach (array('quitarBreakAgente',
-            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia',
-            'prepararAtxferComplete') as $k)
+            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
-        foreach (array('agregarIntentoLoginAgente', 'infoSeguimientoAgente',
+        foreach (array('prepararAtxferComplete',
+            'agregarIntentoLoginAgente', 'infoSeguimientoAgente',
             'reportarInfoLlamadaAtendida', 'reportarInfoLlamadasCampania',
             'cancelarIntentoLoginAgente', 'reportarInfoLlamadasColaEntrante',
             'pingAgente', 'dumpstatus', 'listarTotalColasTrabajoAgente',
@@ -355,9 +355,9 @@ class AMIEventProcess extends TuberiaProcess
             // Seen in Asterisk 1.6.2.x
             $astman->add_event_handler('DialBegin', array($this, "msg_Dial"));
             $astman->add_event_handler('QueueCallerJoin', array($this, "msg_Join"));
-            $astman->add_event_handler('QueueCallerLeave', array($this, "msg_Leave"));
             // Asterisk 12+ renamed QueueMemberPaused to QueueMemberPause
-            $astman->add_event_handler('QueueMemberPause', array($this, "msg_QueueMemberPaused")); 
+            $astman->add_event_handler('QueueMemberPause', array($this, "msg_QueueMemberPaused"));
+            $astman->add_event_handler('QueueCallerLeave', array($this, "msg_Leave")); 
 
             if ($this->DEBUG && $this->_config['dialer']['allevents'])
                 $astman->add_event_handler('*', array($this, 'msg_Default'));
@@ -1707,12 +1707,18 @@ class AMIEventProcess extends TuberiaProcess
      * Agentlogoff followed by Agentlogin. We need to ignore the Agentlogoff
      * to prevent the ECCP session from being closed.
      */
-    public function msg_prepararAtxferComplete($sFuente, $sDestino,
+    public function rpc_prepararAtxferComplete($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
-        $sAgente = $datos[0];
-        $this->_log->output('DEBUG: '.__METHOD__.' - Estableciendo bandera de finalización atxfer para/Setting atxfer completion flag for '.$sAgente);
+        $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
+            array($this, '_prepararAtxferComplete'), $datos));
+    }
+
+    private function _prepararAtxferComplete($sAgente)
+    {
+        $this->_log->output('DEBUG: '.__METHOD__.' - Setting atxfer completion flag for '.$sAgente);
         $this->_agentesEnAtxferComplete[$sAgente] = time();
+        return TRUE;
     }
 
     public function msg_abortarNuevasLlamadasMarcar($sFuente, $sDestino,
@@ -2252,11 +2258,11 @@ Uniqueid: 1429642067.241008
 
         $bunique = $params['BridgeUniqueid'];
 
-        // Handle Local/XXXX@agents;N channels from app_agent_pool (Asterisk 12+)
+        // Handle Local/XXXX@callcenter-agents;N channels from app_agent_pool (Asterisk 12+)
         // On chan_agent (Asterisk 11), channel is Agent/XXXX and this won't match
         $isLocalAgentChannel = false;
         $originalChannel = $params['Channel'];  // Save original BEFORE conversion
-        if(preg_match("|Local/(\d+)@agents[;-].*|",$params['Channel'],$matches)) {
+        if(preg_match("|Local/(\d+)@callcenter-agents[;-].*|",$params['Channel'],$matches)) {
             $isLocalAgentChannel = true;
             $params['Channel']='Agent/'.$matches[1];
         }
@@ -2330,7 +2336,7 @@ Uniqueid: 1429642067.241008
         if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
             !is_null($llamada->agente) && $llamada->agente->channel != $sChannel) {
 
-            // For Agent type (app_agent_pool), Asterisk swaps the Local/XXXX@agents
+            // For Agent type (app_agent_pool), Asterisk swaps the Local/XXXX@callcenter-agents
             // channel with the agent's physical SIP extension in the bridge after
             // returning from hold. This bridge swap must not be treated as a transfer.
             if ($llamada->agente->extension == $sChannel) {
@@ -2511,21 +2517,21 @@ Uniqueid: 1429642067.241008
         // It is assumed that the possible agent channel is of the form TECH/dddd
         // In particular, the regexp below DOES NOT MATCH Local/xxx@from-internal
         $regexp_channel = '|^([[:alnum:]]+/(\d+))(\-\w+)?$|';
-        // For app_agent_pool: match Local/XXXX@agents pattern
-        $regexp_local_agent = '|^Local/(\d+)@agents(;\d)?$|';
+        // For app_agent_pool: match Local/XXXX@callcenter-agents pattern
+        $regexp_local_agent = '|^Local/(\d+)@callcenter-agents(;\d)?$|';
 
         $r1 = NULL;
         if (preg_match($regexp_channel, $params['Channel1'], $regs)) {
             $r1 = $regs;
         } elseif (preg_match($regexp_local_agent, $params['Channel1'], $regs)) {
-            // Convert Local/1001@agents to Agent/1001 format for lookup
+            // Convert Local/1001@callcenter-agents to Agent/1001 format for lookup
             $r1 = array($params['Channel1'], 'Agent/'.$regs[1], $regs[1]);
         }
         $r2 = NULL;
         if (preg_match($regexp_channel, $params['Channel2'], $regs)) {
             $r2 = $regs;
         } elseif (preg_match($regexp_local_agent, $params['Channel2'], $regs)) {
-            // Convert Local/1001@agents to Agent/1001 format for lookup
+            // Convert Local/1001@callcenter-agents to Agent/1001 format for lookup
             $r2 = array($params['Channel2'], 'Agent/'.$regs[1], $regs[1]);
         }
 
@@ -2944,7 +2950,7 @@ Uniqueid: 1429642067.241008
         /* Verification of agents that are logged in and should have queues,
          * but do not appear in the queue member enumeration. */
         foreach ($this->_listaAgentes as $a) {
-            // Derive queue interface using compat (Agent/XXXX on Ast11, Local/XXXX@agents on Ast12+)
+            // Derive queue interface using compat (Agent/XXXX on Ast11, Local/XXXX@callcenter-agents on Ast12+)
             $sInterface = $a->channel;
             if ($a->type == 'Agent' && !is_null($this->_compat)) {
                 $sInterface = $this->_compat->getAgentQueueInterface($a->number);

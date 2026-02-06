@@ -169,8 +169,9 @@ class AMIClientConn extends MultiplexConn
         'QueueStatus' =>
             array('Queue' => FALSE, 'ActionID' => FALSE),
         'Redirect' =>
-            array('Channel' => TRUE, 'ExtraChannel' => TRUE, 'Exten' => TRUE,
-                'Context' => TRUE, 'Priority' => TRUE),
+            array('Channel' => TRUE, 'ExtraChannel' => FALSE, 'Exten' => TRUE,
+                'Context' => TRUE, 'Priority' => TRUE,
+                'ExtraExten' => FALSE, 'ExtraContext' => FALSE, 'ExtraPriority' => FALSE),
         'SetCDRUserField' =>
             array('UserField' => TRUE, 'Channel' => TRUE, 'Append' => FALSE),
         'SetVar' =>

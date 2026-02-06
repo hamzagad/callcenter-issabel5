@@ -29,7 +29,7 @@
  *
  * Key differences handled:
  *   Asterisk 11 (chan_agent):       Agent/XXXX interface, Agentlogoff AMI cmd
- *   Asterisk 13+ (app_agent_pool): Local/XXXX@agents interface, Hangup to logout
+ *   Asterisk 13+ (app_agent_pool): Local/XXXX@callcenter-agents interface, Hangup to logout
  */
 class AsteriskCompat
 {
@@ -74,12 +74,12 @@ class AsteriskCompat
     /**
      * Get queue member interface for an Agent-type agent.
      * Asterisk 11:  Agent/XXXX
-     * Asterisk 12+: Local/XXXX@agents
+     * Asterisk 12+: Local/XXXX@callcenter-agents
      */
     public function getAgentQueueInterface($agentNumber)
     {
         if ($this->_hasAppAgentPool) {
-            return 'Local/'.$agentNumber.'@agents';
+            return 'Local/'.$agentNumber.'@callcenter-agents';
         }
         return 'Agent/'.$agentNumber;
     }
@@ -99,7 +99,7 @@ class AsteriskCompat
 
     /**
      * Normalize a queue interface string back to canonical Agent/XXXX format.
-     * On Asterisk 12+: Local/XXXX@agents -> Agent/XXXX
+     * On Asterisk 12+: Local/XXXX@callcenter-agents -> Agent/XXXX
      * On Asterisk 11:  Agent/XXXX is already canonical, returned as-is.
      *
      * Returns NULL if the interface does not match an agent pattern.
@@ -107,7 +107,7 @@ class AsteriskCompat
     public function normalizeAgentFromInterface($sInterface)
     {
         if ($this->_hasAppAgentPool) {
-            if (preg_match('|^Local/(\d+)@agents|', $sInterface, $regs)) {
+            if (preg_match('|^Local/(\d+)@callcenter-agents|', $sInterface, $regs)) {
                 return 'Agent/'.$regs[1];
             }
         }
@@ -120,13 +120,13 @@ class AsteriskCompat
 
     /**
      * Check if a given interface string is an agent queue interface
-     * (either Local/XXXX@agents or Agent/XXXX depending on version).
+     * (either Local/XXXX@callcenter-agents or Agent/XXXX depending on version).
      * Returns the agent number if matched, or NULL.
      */
     public function extractAgentNumberFromInterface($sInterface)
     {
         if ($this->_hasAppAgentPool) {
-            if (preg_match('|^Local/(\d+)@agents|', $sInterface, $regs)) {
+            if (preg_match('|^Local/(\d+)@callcenter-agents|', $sInterface, $regs)) {
                 return $regs[1];
             }
         } else {

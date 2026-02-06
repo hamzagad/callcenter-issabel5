@@ -85,7 +85,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 
 ## Development Notes
 
-- Testing and development is done on the live system, don't modify the repo before I ask you
+- Testing and development is done on the live system, don't modify the repo before I test and confirm
 - Dialer runs as `asterisk` user (refuses to run as root)
 - Dialer logs: `/opt/issabel/dialer/dialerd.log`
 - WebServer logs: `/var/log/httpd/`

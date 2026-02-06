@@ -690,9 +690,152 @@ $r = $this->_ami->Originate(
 
 ---
 
+### 10. Attended Transfer Fix for Incoming Campaigns (DTMF Hook Loss)
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php` (Request_agentauth_atxfercall, Request_agentauth_hangcall)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (prepararAtxferComplete changed to synchronous RPC)
+- `setup/dialer_process/dialer/AMIClientConn.class.php` (Redirect action extended with ExtraExten/ExtraContext/ExtraPriority)
+- `/etc/asterisk/extensions_custom.conf` (3 new contexts: issabel-atxfer-hold, issabel-atxfer-consult, issabel-atxfer-bridge)
+- `setup/installer.php` (new contexts for fresh installations)
+
+**Issue**: Attended transfer did not work for incoming campaign calls with Agent type (app_agent_pool). When the agent clicked "Attended Transfer", two DTMF sounds were heard but no transfer occurred. Outgoing campaigns worked but had a race condition causing agent session drop on transfer completion.
+
+**Root Cause Analysis**:
+
+The AMI `Atxfer` action uses DTMF emulation internally: it queues DTMF frames for the `*2` feature code followed by the target extension digits and `#` terminator. These DTMF frames are matched against **bridge DTMF hooks** set by the Queue application's `t` option.
+
+For Agent type (app_agent_pool), Asterisk performs **Local channel optimization**: the `Local/1001@agents;1` intermediary channel is removed and the agent's SIP phone (e.g., `SIP/101`) is swapped directly into the queue bridge. During this swap, the bridge creates a new `bridge_channel` structure for `SIP/101` — but the DTMF hooks that were registered on the original `Local;1` bridge_channel are **not carried over**.
+
+Confirmed via Asterisk debug (bridge_channel.c):
+```
+DTMF feature string on SIP/101-0000017e is now '*2'
+No DTMF feature hooks on SIP/101-0000017e match '*2'
+Playing DTMF stream '*2' out to SIP/120Issabel4-00000181
+```
+
+The DTMF passes through as audio to the external caller instead of triggering the attended transfer feature.
+
+**Why outgoing campaigns worked**: The bridge structure differs between incoming and outgoing calls, and the DTMF hooks happen to survive optimization in the outgoing case.
+
+**Fix - Part 1: Replace Atxfer with Redirect for Agent Type** (`ECCPConn.class.php`)
+
+For Agent type agents, the attended transfer now uses AMI `Redirect` with `ExtraChannel` instead of `Atxfer`. This bypasses the DTMF hook mechanism entirely by explicitly moving both channels to new dialplan contexts:
+
+```php
+// For Agent type (app_agent_pool), use Redirect with ExtraChannel
+if (!is_null($infoAgente) && !empty($infoAgente['login_channel'])) {
+    $transferChannel = $infoAgente['login_channel'];
+    $clientChannel = $infoLlamada['actualchannel'];
+    $agentNumber = substr($sAgente, strpos($sAgente, '/') + 1);
+
+    // Set channel variables for the dialplan
+    $this->_ami->SetVar($transferChannel, 'ATXFER_HELD_CHAN', $clientChannel);
+    $this->_ami->SetVar($transferChannel, 'ATXFER_AGENT_NUM', $agentNumber);
+
+    // Suppress Agentlogoff that fires when agent leaves AgentLogin bridge
+    $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
+
+    // Redirect both channels simultaneously
+    $r = $this->_ami->Redirect(
+        $transferChannel,           // Agent's SIP phone -> consultation
+        $clientChannel,             // External caller -> MOH
+        $sExtension,                // Target extension
+        'issabel-atxfer-consult',   // Agent dials target here
+        1,
+        's',                        // Hold context uses 's' extension
+        'issabel-atxfer-hold',      // Caller hears MOH here
+        1
+    );
+} else {
+    // For non-Agent types or Asterisk 11/13, use Atxfer (DTMF hooks intact)
+    $r = $this->_ami->Atxfer($transferChannel, $sExtension.'#', 'from-internal', 1);
+}
+```
+
+**Fix - Part 2: Extended Redirect AMI Definition** (`AMIClientConn.class.php`)
+
+Added optional `ExtraExten`, `ExtraContext`, `ExtraPriority` parameters to the Redirect action definition. Existing 5-argument Redirect calls are unaffected since new parameters are optional:
+
+```php
+'Redirect' =>
+    array('Channel' => TRUE, 'ExtraChannel' => FALSE, 'Exten' => TRUE,
+        'Context' => TRUE, 'Priority' => TRUE,
+        'ExtraExten' => FALSE, 'ExtraContext' => FALSE, 'ExtraPriority' => FALSE),
+```
+
+**Fix - Part 3: Dialplan Contexts** (`extensions_custom.conf`)
+
+Three new contexts handle the attended transfer flow:
+
+```ini
+; External caller hears MOH while agent consults with target
+[issabel-atxfer-hold]
+exten => s,1,NoOp(Issabel CallCenter: Attended Transfer - Caller on hold)
+ same => n,Answer()
+ same => n,MusicOnHold(default)
+
+; Agent dials target for consultation
+; g option: if target hangs up, agent reconnects with held caller via Bridge()
+; F() option: when agent completes transfer (Hangup), target bridges with held caller
+[issabel-atxfer-consult]
+exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
+ same => n,Set(__ATXFER_HELD_CHAN=${ATXFER_HELD_CHAN})
+ same => n,Set(AGENT_NUM=${ATXFER_AGENT_NUM})
+ same => n,Dial(Local/${EXTEN}@from-internal,120,gF(issabel-atxfer-bridge^s^1))
+ same => n,NoOp(Issabel CallCenter: Consultation ended - reconnecting with caller)
+ same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+
+; Target bridges with held caller after transfer completion
+[issabel-atxfer-bridge]
+exten => s,1,NoOp(Issabel CallCenter: Transfer complete - bridging target with held caller)
+ same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Hangup()
+```
+
+**Fix - Part 4: Race Condition Fix** (`AMIEventProcess.class.php`, `ECCPConn.class.php`)
+
+Changed `prepararAtxferComplete` from async message (`msg_AMIEventProcess_prepararAtxferComplete`) to synchronous RPC (`AMIEventProcess_prepararAtxferComplete`). The async message was not processed before the Redirect fired, so the Agentlogoff suppression flag was not set in time.
+
+```php
+// AMIEventProcess.class.php - Changed from msg handler to RPC handler
+public function rpc_prepararAtxferComplete($sFuente, $sDestino,
+    $sNombreMensaje, $iTimestamp, $datos)
+{
+    $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
+        array($this, '_prepararAtxferComplete'), $datos));
+}
+
+// ECCPConn.class.php - Changed from async to synchronous call
+// BEFORE: $this->_tuberia->msg_AMIEventProcess_prepararAtxferComplete($sAgente);
+// AFTER:
+$this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
+```
+
+**Transfer Flow (Agent Type)**:
+1. Agent clicks "Attended Transfer" to extension 102
+2. ECCPConn sets channel variables (`ATXFER_HELD_CHAN`, `ATXFER_AGENT_NUM`) on agent's SIP phone
+3. ECCPConn sets `prepararAtxferComplete` flag via synchronous RPC (suppresses Agentlogoff)
+4. AMI Redirect moves both channels: SIP/101 → `issabel-atxfer-consult`, caller → `issabel-atxfer-hold`
+5. Agent hears extension 102 ringing, caller hears MOH
+6. When agent clicks "Hangup" to complete: SIP/101 is redirected to `atxfer-complete`, Dial() F() option fires → target bridges with held caller
+7. Agent re-enters AgentLogin via `atxfer-complete` context, session preserved
+
+**Cancellation scenarios**:
+- Target doesn't answer: Dial() returns, Bridge() reconnects agent with held caller, then agent re-enters AgentLogin
+- Target hangs up during consultation: same as above (Dial `g` option)
+- Client hangs up while on hold: Bridge() fails silently, target/agent are cleaned up normally
+
+**Backward Compatibility**:
+- Non-Agent types (SIP/IAX2/PJSIP callback): still use Atxfer (DTMF hooks are intact)
+- Asterisk 11/13: no `login_channel` available → Atxfer path used
+- Existing Redirect calls (blind transfer, hangup handler): unaffected by new optional parameters
+
+---
+
 ## Version History
 
-- **4.0.0.10** - Agent Hold feature bug fixes (stuck state, parking announcement, anonymous CallerID)
+- **4.0.0.11** - Attended transfer fix for incoming campaigns (DTMF hook loss after Local channel optimization)
 - **4.0.0.9** - Real-time agent ringing status in Agents Monitoring module
 - **4.0.0.8** - Attended transfer fix for Agent type (app_agent_pool), callback agent hangup fix
 - **4.0.0.7** - Bug fixes for campaign monitoring display, agent console hangup, statistics sync, and login cancellation
