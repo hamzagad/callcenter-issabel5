@@ -2433,19 +2433,43 @@ Uniqueid: 1429642067.241008
             return FALSE;
         }
 
+        // Detect agent returning from consultation to the original call.
+        // After hold recovery, Channel1 != Channel2 (bridge saved the caller's
+        // channel, not the agent's), so the Channel1==Channel2 check above
+        // does not fire. Instead, detect by: call already linked to same agent
+        // AND agent is in consultation.
+        if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
+            !is_null($llamada->agente) && $llamada->agente->channel == $sChannel &&
+            !is_null($sChannel) && isset($this->_agentesEnConsultation[$sChannel])) {
+            if ($this->DEBUG) {
+                $this->_log->output('DEBUG: '.__METHOD__.
+                    ': agent '.$sChannel.' returned from consultation to original call'.
+                    ' | EN: agent '.$sChannel.' returned from consultation to original call');
+            }
+            unset($this->_agentesEnConsultation[$sChannel]);
+            $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                array('ConsultationEnd', array($sChannel))
+            ));
+            return FALSE;
+        }
+
         /* Se ha detectado llamada que regresa de hold. En el evento ParkedCall
          * se asignó el uniqueid nuevo. */
         if (!is_null($llamada) && $llamada->status == 'OnHold') {
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada ".
                     "que regresa de HOLD {$llamada->actualchannel}, ".
-                    "agentchannel={$sAgentChannel} se quita estado OnHold...".
+                    "agentchannel={$sChannel} actualAgentChannel={$sAgentChannel} se quita estado OnHold...".
                     " | EN: identified call returning from HOLD {$llamada->actualchannel}, ".
-                    "agentchannel={$sAgentChannel} removing OnHold state...");
+                    "agentchannel={$sChannel} actualAgentChannel={$sAgentChannel} removing OnHold state...");
             }
+            // Pass $sChannel (logical name: Agent/1001 or SIP/101) as agentchannel
+            // and $sAgentChannel (actual channel: Local/1001@agents-xxx or SIP/101-xxx)
+            // as actualAgentChannel, consistent with llamadaEnlazadaAgente()
             $llamada->llamadaRegresaHold($this->_ami,
-                $params['local_timestamp_received'], $sAgentChannel,
-                ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1']);
+                $params['local_timestamp_received'], $sChannel,
+                ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
+                $sAgentChannel);
             return FALSE;
         }
 

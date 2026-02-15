@@ -1132,9 +1132,112 @@ if ($estado['onhold']) {
 
 ---
 
+### 14. Stale Channel After Hold Breaks Attended Transfer and Hangup
+
+**Files**:
+- `setup/dialer_process/dialer/Llamada.class.php` (`llamadaRegresaHold()`)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (`msg_Link()`)
+
+**Issue**: Two related bugs caused by hold recovery not properly updating channel tracking fields in `Llamada`:
+
+1. **Callback extension (SIP/IAX2/PJSIP)**: After using Hold then attempting attended transfer, the transfer failed with Error 500 ("Channel specified does not exist"). The `Atxfer` AMI action used the stale `actualAgentChannel` from before hold (e.g., `SIP/101-000000a4`) instead of the new channel created during hold recovery (e.g., `SIP/101-000000a5`).
+
+2. **Agent type (app_agent_pool)**: After using Hold, performing attended transfer, and then clicking Hangup when the consultation call returned, hangup failed with Error 500 ("No such channel"). The `agentchannel` field was overwritten from `Agent/1001` to `Local/1001@agents-0000004d;1` during hold recovery, breaking the `preg_match('|^Agent/\d+$|')` pattern check in the hangup handler that routes to the attended transfer completion path.
+
+**Root Cause**: `llamadaRegresaHold()` received the raw channel from `_identificarCanalAgenteLink()` and stored it in `_agentchannel`, but:
+- For Agent type: overwrote the logical name (`Agent/1001`) with the actual Local channel, breaking pattern matching
+- For both types: never updated `_actualAgentChannel`, leaving it stale from before hold
+
+**Fix - Part 1: Update `llamadaRegresaHold()` signature** (`Llamada.class.php`)
+
+Added `$sActualAgentChannel` parameter to properly update both channel fields, consistent with how `llamadaEnlazadaAgente()` works:
+
+```php
+public function llamadaRegresaHold($ami, $iTimestamp, $sAgentChannel = NULL,
+    $uniqueid_agente = NULL, $sActualAgentChannel = NULL)
+{
+    if (!is_null($sAgentChannel)) $this->_agentchannel = $sAgentChannel;
+    if (!is_null($sActualAgentChannel)) {
+        $this->_actualAgentChannel = $sActualAgentChannel;
+    } elseif (!is_null($sAgentChannel)) {
+        $this->_actualAgentChannel = $sAgentChannel;
+    }
+```
+
+**Fix - Part 2: Pass correct channel values from call site** (`AMIEventProcess.class.php`)
+
+Changed the `llamadaRegresaHold()` call in `msg_Link()` to pass `$sChannel` (logical name: `Agent/1001` or `SIP/101`) as `_agentchannel` and `$sAgentChannel` (actual channel: `Local/1001@agents-xxx` or `SIP/101-xxx`) as `_actualAgentChannel`:
+
+```php
+$llamada->llamadaRegresaHold($this->_ami,
+    $params['local_timestamp_received'], $sChannel,
+    ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
+    $sAgentChannel);
+```
+
+**After fix, channel values are consistent with initial link**:
+
+| Field | Agent type | Callback type |
+|-------|-----------|---------------|
+| `_agentchannel` | `Agent/1001` (logical) | `SIP/101` (logical) |
+| `_actualAgentChannel` | `Local/1001@agents-xxx` (actual) | `SIP/101-xxx` (actual) |
+
+**Impact**:
+- Callback agents can perform attended transfer after using Hold
+- Agent type agents can complete attended transfer (Hangup) after using Hold
+- Channel tracking remains consistent across hold/unhold cycles
+
+---
+
+### 15. ConsultationEnd Not Detected After Hold for Callback Agents
+
+**Files**:
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (`msg_Link()`)
+
+**Issue**: For callback extension agents, if Hold was used before initiating attended transfer, the Hold and Transfer buttons stayed disabled after the consultation call ended (colleague hung up). The `ConsultationEnd` event was never emitted, so the frontend never re-enabled the buttons.
+
+**Root Cause**: The existing consultation end detection (added in section 12) relied on a Bridge event where `Channel1 == Channel2`. This only works when the agent's channel was the **first** to enter the bridge (saved as Channel2 in `msg_BridgeEnter`).
+
+After hold recovery, the bridge is rebuilt with the **caller's channel** entering first (saved as Channel2). When the agent returns from consultation:
+- `Channel1` = `SIP/101-000000e8` (agent, current BridgeEnter)
+- `Channel2` = `SIP/120Issabel4-000000e6` (caller, saved from hold recovery)
+- `Channel1 != Channel2` → ConsultationEnd never fires
+
+Without hold, the agent's channel is typically saved first during the initial bridge creation, so `Channel1 == Channel2` when the agent re-enters after consultation. The hold recovery changes the bridge creation order.
+
+**Fix**: Added a fallback consultation end detection in `msg_Link()` that does not depend on bridge channel ordering. When a Bridge event links an already-linked call back to the same agent AND that agent is in consultation, emit `ConsultationEnd`:
+
+```php
+// Detect agent returning from consultation to the original call.
+// After hold recovery, Channel1 != Channel2 (bridge saved the caller's
+// channel, not the agent's), so the Channel1==Channel2 check above
+// does not fire. Instead, detect by: call already linked to same agent
+// AND agent is in consultation.
+if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
+    !is_null($llamada->agente) && $llamada->agente->channel == $sChannel &&
+    !is_null($sChannel) && isset($this->_agentesEnConsultation[$sChannel])) {
+    unset($this->_agentesEnConsultation[$sChannel]);
+    $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+        array('ConsultationEnd', array($sChannel))
+    ));
+    return FALSE;
+}
+```
+
+This check fires when:
+- The call is already linked to the same agent (`timestamp_link` set, `agente->channel == $sChannel`)
+- The agent is tracked as being in consultation (`_agentesEnConsultation[$sChannel]`)
+- A new Bridge event re-links the agent to the original call
+
+**Impact**:
+- Hold and Transfer buttons correctly re-enable after consultation ends, regardless of whether Hold was used before the transfer
+- The existing `Channel1 == Channel2` detection remains as the primary path for the non-hold case
+
+---
+
 ## Version History
 
-- **4.0.0.14** - Disable Transfer button while call is on hold
+- **4.0.0.15** - Fix stale channel after hold breaking attended transfer/hangup, fix ConsultationEnd not detected after hold
 - **4.0.0.13** - Hold/Transfer button state management during attended transfer consultation
 - **4.0.0.12** - Attended transfer busy tone delay fix for callback agents
 - **4.0.0.11** - Attended transfer fix for incoming campaigns (DTMF hook loss after Local channel optimization)

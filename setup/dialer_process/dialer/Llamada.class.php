@@ -992,7 +992,7 @@ class Llamada
         $this->uniqueid = $uniqueid_nuevo;
     }
 
-    public function llamadaRegresaHold($ami, $iTimestamp, $sAgentChannel = NULL, $uniqueid_agente = NULL)
+    public function llamadaRegresaHold($ami, $iTimestamp, $sAgentChannel = NULL, $uniqueid_agente = NULL, $sActualAgentChannel = NULL)
     {
         /* Para agentes dinámicos, el Originate de recuperación de la llamada
          * ocasiona que se asigne un nuevo canal de agente SIP/xxxx-abcde que
@@ -1001,6 +1001,11 @@ class Llamada
          * a new SIP/xxxx-abcde agent channel to be assigned that
          * must be captured and assigned. */
         if (!is_null($sAgentChannel)) $this->_agentchannel = $sAgentChannel;
+        if (!is_null($sActualAgentChannel)) {
+            $this->_actualAgentChannel = $sActualAgentChannel;
+        } elseif (!is_null($sAgentChannel)) {
+            $this->_actualAgentChannel = $sAgentChannel;
+        }
 
         if (!is_null($this->agente)) {
             $a = $this->agente;
