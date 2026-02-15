@@ -833,8 +833,91 @@ $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
 
 ---
 
+### 11. Attended Transfer Busy Tone Delay Fix for Callback Agents
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php` (Request_agentauth_atxfercall)
+- `/etc/asterisk/extensions_custom.conf` (cbext-atxfer context)
+- `setup/installer.php` (cbext-atxfer context for new installations)
+
+**Issue**: When a callback agent (SIP/IAX2/PJSIP type) initiated an attended transfer and the colleague declined, the agent heard a busy tone for ~20 seconds while the client stayed on hold. Agent type (app_agent_pool) worked fine - only callback type had this issue.
+
+**Root Cause**: The `Atxfer` AMI action routes through `from-internal` context. When the target declines, IssabelPBX's `macro-exten-vm` reaches the `s-BUSY` handler which executes `Busy(20)` - playing 20 seconds of busy tone before hanging up. Only then does Asterisk detect the transfer failed and reconnect the agent.
+
+**Fix - Part 1: Custom Dialplan Context** (`extensions_custom.conf`, `installer.php`)
+
+Created `cbext-atxfer` context that dials the device directly:
+
+```ini
+; Attended transfer context for callback agents (SIP/IAX2/PJSIP)
+; Dials device directly to avoid busy tone delay from from-internal failure handling
+[cbext-atxfer]
+exten => _X.,1,NoOp(Issabel CallCenter: Callback attended transfer routing for ${EXTEN})
+ same => n,Set(CLEAN_EXTEN=${FILTER(0123456789,${EXTEN})})
+ same => n,ExecIf($["${CLEAN_EXTEN}" = ""]?Set(CLEAN_EXTEN=${EXTEN}))
+ same => n,Set(DIAL_DEVICE=${DB(DEVICE/${CLEAN_EXTEN}/dial)})
+ same => n,GotoIf($["${DIAL_DEVICE}" != ""]?direct)
+ same => n(fallback),NoOp(Issabel CallCenter: No device found - routing via from-internal)
+ same => n,Dial(Local/${CLEAN_EXTEN}@from-internal/n,120)
+ same => n,Hangup()
+ same => n(direct),NoOp(Issabel CallCenter: Direct device dial: ${DIAL_DEVICE})
+ same => n,GotoIf($["${DIAL_DEVICE:0:5}" = "PJSIP"]?pjsip)
+ same => n,Dial(${DIAL_DEVICE},120)
+ same => n,Hangup()
+ same => n(pjsip),Set(PJSIP_CONTACTS=${PJSIP_DIAL_CONTACTS(${CLEAN_EXTEN})})
+ same => n,ExecIf($["${PJSIP_CONTACTS}" = ""]?Set(PJSIP_CONTACTS=${DIAL_DEVICE}))
+ same => n,Dial(${PJSIP_CONTACTS},120)
+ same => n,Hangup()
+```
+
+**Error handling**:
+- `FILTER` strips non-digit chars; if result is empty, falls back to raw `EXTEN`
+- `DB(DEVICE/EXT/dial)` returns empty for external numbers → falls through to `from-internal`
+- `PJSIP_DIAL_CONTACTS` returns empty if not registered → falls back to `DIAL_DEVICE`
+- All paths end with `Hangup()` - no busy/congestion tones on failure
+- NoOp logging at each branch for debugging
+
+**Fix - Part 2: Set TRANSFER_CONTEXT** (`ECCPConn.class.php`)
+
+Modified `Request_agentauth_atxfercall()` callback branch to use custom context:
+
+```php
+// Set TRANSFER_CONTEXT to use custom context that dials device directly
+// This avoids the 20-second busy tone delay when target declines
+$this->_ami->SetVar($transferChannel, 'TRANSFER_CONTEXT', 'cbext-atxfer');
+
+$r = $this->_ami->Atxfer(
+    $transferChannel,
+    $sExtension.'#',    // exten
+    'cbext-atxfer',     // context - use custom context to avoid busy tone delay
+    1);                 // priority
+```
+
+**Transfer Flow (Callback Agent)**:
+1. Agent clicks "Attended Transfer" to extension 102
+2. ECCPConn sets `TRANSFER_CONTEXT=cbext-atxfer`
+3. AMI Atxfer dials 102 via cbext-atxfer context
+4. Context looks up `DEVICE/102/dial` → gets `SIP/102` or `PJSIP/102`
+5. Direct Dial() to device - no from-internal routing
+6. If target declines: Dial() returns BUSY immediately, Hangup() fires
+7. Asterisk detects transfer failure → instantly reconnects agent with caller (no busy tone)
+
+**Backward Compatibility**:
+- Agent type (app_agent_pool): unchanged - uses Redirect, not Atxfer
+- External numbers: falls through to `from-internal` (no DEVICE entry)
+- Non-PJSIP: direct Dial() to `SIP/XXX` or `IAX2/XXX`
+- PJSIP: uses `PJSIP_DIAL_CONTACTS()` for proper AOR lookup with fallback
+
+**Impact**:
+- Callback agents no longer hear 20-second busy tone when target declines
+- Transfer failure reconnection is instant
+- Agent type transfers continue to work unchanged
+- External numbers still route through from-internal
+
+---
+
 ## Version History
 
+- **4.0.0.12** - Attended transfer busy tone delay fix for callback agents
 - **4.0.0.11** - Attended transfer fix for incoming campaigns (DTMF hook loss after Local channel optimization)
 - **4.0.0.9** - Real-time agent ringing status in Agents Monitoring module
 - **4.0.0.8** - Attended transfer fix for Agent type (app_agent_pool), callback agent hangup fix

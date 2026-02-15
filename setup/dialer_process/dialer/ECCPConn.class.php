@@ -3299,10 +3299,14 @@ SQL_INSERTAR_AGENDAMIENTO;
                 : $infoLlamada['agentchannel'];
             $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel (Atxfer): '.$transferChannel);
 
+            // Set TRANSFER_CONTEXT to use custom context that dials device directly
+            // This avoids the 20-second busy tone delay when target declines
+            $this->_ami->SetVar($transferChannel, 'TRANSFER_CONTEXT', 'cbext-atxfer');
+
             $r = $this->_ami->Atxfer(
                 $transferChannel,
                 $sExtension.'#',    // exten
-                'from-internal',    // context
+                'cbext-atxfer',     // context - use custom context to avoid busy tone delay
                 1);                 // priority
         }
 

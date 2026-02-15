@@ -295,8 +295,9 @@ function instalarContextosEspeciales($astMajor = 18)
     } else {
     	$contenido[] = $sInicioContenido;
 
-        // [llamada_agendada] works on all versions
+        // [llamada_agendada] - Scheduled callback context (works on all versions)
         $sContextos = '
+; Scheduled call context for callback campaigns
 [llamada_agendada]
 exten => _X.,1,NoOP("Issabel CallCenter: AGENTCHANNEL=${AGENTCHANNEL}")
 exten => _X.,n,NoOP("Issabel CallCenter: QUEUE_MONITOR_FORMAT=${QUEUE_MONITOR_FORMAT}")
@@ -308,6 +309,31 @@ exten => _X.,n(skiprecord),Dial(${AGENTCHANNEL},300,tw)
 exten => h,1,Macro(hangupcall,)
 ';
 
+        // Callback agent attended transfer context (SIP/IAX2/PJSIP types)
+        // Dials device directly to avoid 20-second busy tone delay when target declines
+        $sContextos .= '
+; Attended transfer context for callback agents (SIP/IAX2/PJSIP)
+; Dials device directly to avoid busy tone delay from from-internal failure handling
+[cbext-atxfer]
+exten => _X.,1,NoOp(Issabel CallCenter: Callback attended transfer routing for ${EXTEN})
+ same => n,Set(CLEAN_EXTEN=${FILTER(0123456789,${EXTEN})})
+ same => n,ExecIf($["${CLEAN_EXTEN}" = ""]?Set(CLEAN_EXTEN=${EXTEN}))
+ same => n,Set(DIAL_DEVICE=${DB(DEVICE/${CLEAN_EXTEN}/dial)})
+ same => n,GotoIf($["${DIAL_DEVICE}" != ""]?direct)
+ same => n(fallback),NoOp(Issabel CallCenter: No device found for ${CLEAN_EXTEN} - routing via from-internal)
+ same => n,Dial(Local/${CLEAN_EXTEN}@from-internal/n,120)
+ same => n,Hangup()
+ same => n(direct),NoOp(Issabel CallCenter: Direct device dial: ${DIAL_DEVICE})
+ same => n,GotoIf($["${DIAL_DEVICE:0:5}" = "PJSIP"]?pjsip)
+ same => n,Dial(${DIAL_DEVICE},120)
+ same => n,Hangup()
+ same => n(pjsip),Set(PJSIP_CONTACTS=${PJSIP_DIAL_CONTACTS(${CLEAN_EXTEN})})
+ same => n,ExecIf($["${PJSIP_CONTACTS}" = ""]?Set(PJSIP_CONTACTS=${DIAL_DEVICE}))
+ same => n,NoOp(Issabel CallCenter: PJSIP dial: ${PJSIP_CONTACTS})
+ same => n,Dial(${PJSIP_CONTACTS},120)
+ same => n,Hangup()
+';
+
         // app_agent_pool contexts (Asterisk 12+):
         // [agent-login]: login via context (no Asterisk password prompt)
         // [atxfer-complete]: re-enter AgentLogin after attended transfer
@@ -317,6 +343,7 @@ exten => h,1,Macro(hangupcall,)
         if ($astMajor >= 12) {
             $sContextos .= '
 ; app_agent_pool contexts (Asterisk 12+)
+; Agent type login, request, and attended transfer contexts
 [agent-login]
 exten => _X.,1,NoOp(Issabel CallCenter: Agent Login for ${EXTEN})
  same => n,AgentLogin(${EXTEN})
