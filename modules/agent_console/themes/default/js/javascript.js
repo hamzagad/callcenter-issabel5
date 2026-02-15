@@ -603,6 +603,10 @@ function do_transfer()
 		verificar_error_session(respuesta);
         if (respuesta['action'] == 'error') {
         	mostrar_mensaje_error(respuesta['message']);
+        } else if (respuesta['consultation']) {
+        	// Attended transfer consultation started - disable Hold/Transfer buttons
+        	$('#btn_hold').button('disable');
+        	$('#btn_transfer').button('disable');
         }
 
         // El cambio de estado de la interfaz se delega a la revisión
@@ -878,6 +882,16 @@ function manejarRespuestaStatus(respuesta)
 			break;
 		case 'waitingexit':
 			estadoCliente.waitingcall = false;
+			break;
+		case 'consultationstart':
+			// Attended transfer consultation started - disable Hold/Transfer
+			$('#btn_hold').button('disable');
+			$('#btn_transfer').button('disable');
+			break;
+		case 'consultationend':
+			// Attended transfer consultation ended - re-enable buttons
+			$('#btn_hold').button('enable');
+			$('#btn_transfer').button('enable');
 			break;
 		}
 	}

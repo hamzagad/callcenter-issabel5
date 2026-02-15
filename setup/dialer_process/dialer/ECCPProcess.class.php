@@ -49,7 +49,7 @@ class ECCPProcess extends TuberiaProcess
         // Registration of event handlers
         foreach (array('actualizarConfig', 'emitirEventos',) as $k)
             $this->_tuberia->registrarManejador('SQLWorkerProcess', $k, array($this, "msg_$k"));
-        foreach (array('recordingMute', 'recordingUnmute') as $k)
+        foreach (array('recordingMute', 'recordingUnmute', 'emitirEventos') as $k)
             $this->_tuberia->registrarManejador('AMIEventProcess', $k, array($this, "msg_$k"));
         foreach (array('eccpresponse') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
@@ -86,9 +86,6 @@ class ECCPProcess extends TuberiaProcess
     public function msg_emitirEventos($sFuente, $sDestino, $sNombreMensaje,
         $iTimestamp, $datos)
     {
-        if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
-        }
         list($eventos) = $datos;
 
         $this->_lanzarEventos($eventos);
@@ -152,11 +149,13 @@ class ECCPProcess extends TuberiaProcess
     private function _lanzarEventos(&$eventos)
     {
         foreach ($eventos as $ev) {
-            if (!is_null($ev)) call_user_func_array(
-                array(
-                    $this->_multiplex,
-                    'notificarEvento_'.$ev[0]),
-                $ev[1]);
+            if (!is_null($ev)) {
+                call_user_func_array(
+                    array(
+                        $this->_multiplex,
+                        'notificarEvento_'.$ev[0]),
+                    $ev[1]);
+            }
         }
     }
 

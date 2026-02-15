@@ -372,6 +372,7 @@ exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,Set(AGENT_NUM=${ATXFER_AGENT_NUM})
  same => n,Dial(Local/${EXTEN}@from-internal,120,gF(atxfer-bridge^s^1))
  same => n,NoOp(Issabel CallCenter: Consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
+ same => n,UserEvent(ConsultationEnd,Agent: Agent/${AGENT_NUM})
  same => n,Bridge(${ATXFER_HELD_CHAN})
  same => n,Goto(atxfer-complete,${AGENT_NUM},1)
 

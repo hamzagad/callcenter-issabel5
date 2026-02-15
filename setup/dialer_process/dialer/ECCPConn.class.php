@@ -3278,6 +3278,9 @@ SQL_INSERTAR_AGENDAMIENTO;
             // Uses synchronous RPC to ensure the flag is set before Redirect fires.
             $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
 
+            // Mark agent as in consultation so ConsultationEnd can be detected
+            $this->_tuberia->msg_AMIEventProcess_marcarConsultationIniciada($sAgente);
+
             // Redirect both channels simultaneously:
             // - Agent's SIP phone -> atxfer-consult (dials the target)
             // - External caller   -> atxfer-hold (music on hold)
@@ -3298,16 +3301,22 @@ SQL_INSERTAR_AGENDAMIENTO;
                 ? $infoLlamada['actualAgentChannel']
                 : $infoLlamada['agentchannel'];
             $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel (Atxfer): '.$transferChannel);
+            $this->_log->output('DEBUG: '.__METHOD__.': infoLlamada = '.print_r($infoLlamada, true));
 
             // Set TRANSFER_CONTEXT to use custom context that dials device directly
             // This avoids the 20-second busy tone delay when target declines
             $this->_ami->SetVar($transferChannel, 'TRANSFER_CONTEXT', 'cbext-atxfer');
 
+            // Mark agent as in consultation so msg_Link can detect return
+            $this->_tuberia->msg_AMIEventProcess_marcarConsultationIniciada($sAgente);
+
+            $this->_log->output('DEBUG: '.__METHOD__.': Sending Atxfer to ext='.$sExtension.' context=cbext-atxfer channel='.$transferChannel);
             $r = $this->_ami->Atxfer(
                 $transferChannel,
                 $sExtension.'#',    // exten
                 'cbext-atxfer',     // context - use custom context to avoid busy tone delay
                 1);                 // priority
+            $this->_log->output('DEBUG: '.__METHOD__.': Atxfer result = '.print_r($r, true));
         }
 
         if ($r['Response'] != 'Success') {
@@ -3320,6 +3329,8 @@ SQL_INSERTAR_AGENDAMIENTO;
         }
 
         $xml_transferResponse->addChild('success');
+        // Flag attended transfer so front-end disables buttons during consultation
+        $xml_transferResponse->addChild('consultation', 'true');
         return $xml_response;
     }
 

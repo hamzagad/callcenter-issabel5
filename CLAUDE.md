@@ -87,7 +87,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 
 - Dialer runs as `asterisk` user (refuses to run as root)
 - Dialer logs: `/opt/issabel/dialer/dialerd.log`
-- WebServer logs: `/var/log/httpd/`
+- WebServer logs: `/var/log/httpd/ssl_error_log`
 - Asterisk logs: `/var/log/asterisk/`
 - PID file: `/opt/issabel/dialer/dialerd.pid`
 - Uses PDO for database access in dialer, mysqli in web modules
@@ -97,10 +97,10 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Asterisk conf files: `/etc/asterisk/`
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
 - Always use English language for the added code, comments, variables, and functions
-- **IMPORTANT**: Don't modify the repo before I test and confirm, Testing and development is done on the live system
+- **IMPORTANT**: Always modify the live system, not this repo
 - **IMPORTANT**: Always check your modifications will not affect any other functionality
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
-- **IMPORTANT**: Always provide the test steps, and I will provide the logs after testing, don't use tail -f
+- **IMPORTANT**: Always provide the test steps, and provide the grep command to collect the required logs
 
 ---
 

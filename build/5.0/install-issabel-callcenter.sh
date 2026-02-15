@@ -159,6 +159,9 @@ else
     service issabeldialer start
 fi
 
+# Reload Asterisk
+asterisk -rx'core reload' 2>/dev/null || true
+
 # Clean up cloned repository if installed from GitHub
 if [ "$LOCAL_INSTALL" = false ]; then
     rm -rf /usr/src/callcenter

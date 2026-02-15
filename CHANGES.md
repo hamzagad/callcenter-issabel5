@@ -915,8 +915,160 @@ $r = $this->_ami->Atxfer(
 
 ---
 
+### 12. Hold/Transfer Button State During Attended Transfer Consultation
+**Files**:
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (consultation tracking, Channel1=Channel2 detection, UserEvent handler)
+- `setup/dialer_process/dialer/ECCPConn.class.php` (consultation flag in atxfercall response)
+- `setup/dialer_process/dialer/ECCPProxyConn.class.php` (ConsultationStart/End event notifications)
+- `setup/dialer_process/dialer/ECCPProcess.class.php` (emitirEventos handler for AMIEventProcess)
+- `modules/agent_console/libs/paloSantoConsola.class.php` (consultationstart/end event parsing, consultation return from transferirLlamada)
+- `modules/agent_console/index.php` (consultation events in checkStatus, consultation flag in transfer response)
+- `modules/agent_console/themes/default/js/javascript.js` (consultationstart/end handlers, button disable on consultation response)
+- `/etc/asterisk/extensions_custom.conf` (UserEvent in atxfer-consult context for Agent type)
+
+**Issue**: During an attended transfer, the Hold and Transfer buttons remained enabled while the agent was consulting with the target. If the consultation call was rejected or hung up by the colleague, the buttons should re-enable when the agent returns to the original caller. Instead, the buttons stayed in their original state throughout.
+
+**Root Cause**: No mechanism existed to communicate the consultation call state (start/end) from the dialer to the agent console UI. The ECCP protocol had no events for consultation status, and the transfer AJAX response didn't indicate that a consultation was in progress.
+
+**Fix - Part 1: Consultation Tracking** (`AMIEventProcess.class.php`)
+
+Added `_agentesEnConsultation` array to track agents currently in attended transfer consultation:
+
+```php
+private $_agentesEnConsultation = array();
+```
+
+Added `msg_marcarConsultationIniciada` handler that sets the flag and emits a `ConsultationStart` event:
+
+```php
+public function _marcarConsultationIniciada($sAgente)
+{
+    $this->_agentesEnConsultation[$sAgente] = time();
+    $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+        array('ConsultationStart', array($sAgente))
+    ));
+}
+```
+
+**Fix - Part 2: Consultation End Detection - Callback Type** (`AMIEventProcess.class.php`)
+
+For callback agents using Atxfer, when the consultation fails and the agent returns to the original bridge, Asterisk fires a `Bridge` event where `Channel1 == Channel2` (both are the agent's channel). This is detected early in `msg_Link`:
+
+```php
+if ($params['Channel1'] == $params['Channel2'] && !is_null($sChannel)) {
+    if (isset($this->_agentesEnConsultation[$sChannel])) {
+        unset($this->_agentesEnConsultation[$sChannel]);
+        $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+            array('ConsultationEnd', array($sChannel))
+        ));
+        return FALSE;
+    }
+    return FALSE;
+}
+```
+
+**Fix - Part 3: Consultation End Detection - Agent Type** (`AMIEventProcess.class.php`, `extensions_custom.conf`)
+
+For Agent type using Redirect-based transfer, consultation end is detected via Asterisk UserEvent emitted from the `atxfer-consult` dialplan context:
+
+```ini
+; In atxfer-consult context, after Dial() returns (target declined/hung up):
+same => n,UserEvent(ConsultationEnd,Agent: Agent/${AGENT_NUM})
+```
+
+```php
+public function msg_UserEvent($sEvent, $params, $sServer, $iPort)
+{
+    if (!isset($params['UserEvent'])) return FALSE;
+    if ($params['UserEvent'] == 'ConsultationEnd' && isset($params['Agent'])) {
+        $sAgente = trim($params['Agent']);
+        if (isset($this->_agentesEnConsultation[$sAgente])) {
+            unset($this->_agentesEnConsultation[$sAgente]);
+            $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                array('ConsultationEnd', array($sAgente))
+            ));
+        }
+    }
+    return FALSE;
+}
+```
+
+**Fix - Part 4: ECCP Event Pipeline** (`ECCPProcess.class.php`, `ECCPProxyConn.class.php`)
+
+Registered `emitirEventos` handler for messages from `AMIEventProcess` (previously only registered for `SQLWorkerProcess`):
+
+```php
+foreach (array('recordingMute', 'recordingUnmute', 'emitirEventos') as $k)
+    $this->_tuberia->registrarManejador('AMIEventProcess', $k, array($this, "msg_$k"));
+```
+
+Added `notificarEvento_ConsultationStart()` and `notificarEvento_ConsultationEnd()` methods to send XML events to connected ECCP clients.
+
+**Fix - Part 5: Immediate Button Disable via Transfer Response** (`ECCPConn.class.php`, `paloSantoConsola.class.php`, `index.php`, `javascript.js`)
+
+Because the `ConsultationStart` ECCP event may arrive between checkStatus polls (timing issue), the consultation flag is also returned directly in the transfer AJAX response:
+
+```php
+// ECCPConn.class.php - Add consultation flag to atxfercall response
+$xml_transferResponse->addChild('consultation', 'true');
+
+// paloSantoConsola.class.php - Parse consultation flag
+if ($bAtxfer && isset($respuesta->consultation) && (string)$respuesta->consultation == 'true') {
+    return 'consultation';
+}
+
+// index.php - Include in JSON response
+} elseif ($bExito === 'consultation') {
+    $respuesta['consultation'] = true;
+}
+
+// javascript.js - Disable buttons on consultation response
+} else if (respuesta['consultation']) {
+    $('#btn_hold').button('disable');
+    $('#btn_transfer').button('disable');
+}
+```
+
+**Fix - Part 6: checkStatus Event Handlers** (`paloSantoConsola.class.php`, `index.php`, `javascript.js`)
+
+Added `consultationstart` and `consultationend` event parsing and handling throughout the event pipeline:
+
+```javascript
+// javascript.js
+case 'consultationstart':
+    $('#btn_hold').button('disable');
+    $('#btn_transfer').button('disable');
+    break;
+case 'consultationend':
+    $('#btn_hold').button('enable');
+    $('#btn_transfer').button('enable');
+    break;
+```
+
+**Event Flow (Callback Type)**:
+1. Agent clicks Attended Transfer → ECCPConn sends `msg_marcarConsultationIniciada`
+2. Transfer response includes `consultation=true` → JS disables buttons immediately
+3. Target declines → Asterisk fires Bridge event with Channel1=Channel2
+4. `msg_Link` detects consultation end → emits `ConsultationEnd` event
+5. Event reaches JS via checkStatus → buttons re-enabled
+
+**Event Flow (Agent Type)**:
+1. Agent clicks Attended Transfer → ECCPConn sends `msg_marcarConsultationIniciada`
+2. Transfer response includes `consultation=true` → JS disables buttons immediately
+3. Target declines → `atxfer-consult` Dial() returns → UserEvent(ConsultationEnd) fires
+4. `msg_UserEvent` detects consultation end → emits `ConsultationEnd` event
+5. Event reaches JS via checkStatus → buttons re-enabled
+
+**Impact**:
+- Hold and Transfer buttons are disabled during attended transfer consultation for both Agent and callback types
+- Buttons are re-enabled when the consultation call is rejected or hung up by the colleague
+- Dual delivery mechanism (transfer response + ECCP event) ensures reliable button state change regardless of timing
+
+---
+
 ## Version History
 
+- **4.0.0.13** - Hold/Transfer button state management during attended transfer consultation
 - **4.0.0.12** - Attended transfer busy tone delay fix for callback agents
 - **4.0.0.11** - Attended transfer fix for incoming campaigns (DTMF hook loss after Local channel optimization)
 - **4.0.0.9** - Real-time agent ringing status in Agents Monitoring module

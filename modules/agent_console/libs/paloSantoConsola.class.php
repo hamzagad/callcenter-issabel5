@@ -776,6 +776,10 @@ class PaloSantoConsola
                 $this->errMsg = _tr('Unable to transfer call').' - '.$this->_formatoErrorECCP($respuesta);
                 return FALSE;
             }
+            // Return 'consultation' if dialer indicates callback attended transfer
+            if ($bAtxfer && isset($respuesta->consultation) && (string)$respuesta->consultation == 'true') {
+                return 'consultation';
+            }
             return TRUE;
         } catch (Exception $e) {
             $this->errMsg = '(internal) transfercall: '.$e->getMessage();
@@ -1098,6 +1102,9 @@ class PaloSantoConsola
                         $evento[$k] = isset($evt->$k) ? (string) $evt->$k : NULL;
                     foreach (array('campaign_id', 'call_id') as $k)
                         $evento[$k] = isset($evt->$k) ? (int) $evt->$k : NULL;
+                    break;
+                case 'consultationstart':
+                case 'consultationend':
                     break;
                 }
                 $listaEventos[] = $evento;

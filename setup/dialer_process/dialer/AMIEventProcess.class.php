@@ -45,6 +45,7 @@ class AMIEventProcess extends TuberiaProcess
     // Incoming queue info, which may include an incoming campaign
     private $_listaLlamadas;
     private $_agentesEnAtxferComplete = array(); // Agents completing attended transfer (suppress Agentlogoff)
+    private $_agentesEnConsultation = array();   // Agents in attended transfer consultation (callback type)
 
     // Estimación de la versión de Asterisk que se usa
     // Estimation of the Asterisk version being used
@@ -123,7 +124,8 @@ class AMIEventProcess extends TuberiaProcess
         // Registro de manejadores de eventos desde ECCPWorkerProcess
         // Register event handlers from ECCPWorkerProcess
         foreach (array('quitarBreakAgente',
-            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia') as $k)
+            'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia',
+            'marcarConsultationIniciada') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
         foreach (array('prepararAtxferComplete',
             'agregarIntentoLoginAgente', 'infoSeguimientoAgente',
@@ -347,7 +349,8 @@ class AMIEventProcess extends TuberiaProcess
                 'QueueStatusComplete', 'Leave', 'Reload', 'Agents', 'AgentsComplete',
                 'AgentCalled', 'AgentDump', 'AgentConnect', 'AgentComplete',
                 'QueueMemberPaused', 'ParkedCall', /*'ParkedCallTimeOut',*/
-                'ParkedCallGiveUp', 'QueueCallerAbandon', 'BridgeEnter'
+                'ParkedCallGiveUp', 'QueueCallerAbandon', 'BridgeEnter',
+                'UserEvent'
             ) as $k)
                 $astman->add_event_handler($k, array($this, "msg_$k"));
 
@@ -1721,6 +1724,38 @@ class AMIEventProcess extends TuberiaProcess
         return TRUE;
     }
 
+    public function msg_marcarConsultationIniciada($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        call_user_func_array(array($this, '_marcarConsultationIniciada'), $datos);
+    }
+
+    private function _marcarConsultationIniciada($sAgente)
+    {
+        $this->_log->output('DEBUG: '.__METHOD__.' - Marking consultation started for '.$sAgente);
+        $this->_agentesEnConsultation[$sAgente] = time();
+        // Emit event to front-end to disable Hold/Transfer buttons
+        $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+            array('ConsultationStart', array($sAgente))
+        ));
+    }
+
+    public function msg_UserEvent($sEvent, $params, $sServer, $iPort)
+    {
+        if (!isset($params['UserEvent'])) return FALSE;
+
+        if ($params['UserEvent'] == 'ConsultationEnd' && isset($params['Agent'])) {
+            $sAgente = trim($params['Agent']);
+            if (isset($this->_agentesEnConsultation[$sAgente])) {
+                unset($this->_agentesEnConsultation[$sAgente]);
+                $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                    array('ConsultationEnd', array($sAgente))
+                ));
+            }
+        }
+        return FALSE;
+    }
+
     public function msg_abortarNuevasLlamadasMarcar($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
@@ -2329,6 +2364,21 @@ Uniqueid: 1429642067.241008
 
         // Recuperar el agente local y el canal remoto
         list($sAgentNum, $sAgentChannel, $sChannel, $sRemChannel) = $this->_identificarCanalAgenteLink($params);
+
+        // Detect agent returning from attended transfer consultation (callback type).
+        // When Channel1=Channel2, the agent re-entered the original bridge after
+        // the consultation call was rejected/hung up. The llamada lookup by uniqueid
+        // would fail here because both uniqueids are the agent's, not the call's.
+        if ($params['Channel1'] == $params['Channel2'] && !is_null($sChannel)) {
+            if (isset($this->_agentesEnConsultation[$sChannel])) {
+                unset($this->_agentesEnConsultation[$sChannel]);
+                $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                    array('ConsultationEnd', array($sChannel))
+                ));
+                return FALSE;
+            }
+            return FALSE;
+        }
 
         if (is_null($llamada)) $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid1']);
         if (is_null($llamada)) $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid2']);

@@ -1159,9 +1159,11 @@ function manejarSesionActiva_transfer($module_name, $smarty, $sDirLocalPlantilla
         $respuesta['message'] = _tr('Invalid or missing extension to transfer');
     } else {
         $bExito = $oPaloConsola->transferirLlamada($sTransferExt, in_array(getParameter('atxfer'), array('true', 'checked')));
-        if (!$bExito) {
+        if ($bExito === FALSE) {
             $respuesta['action'] = 'error';
             $respuesta['message'] = _tr('Error while transferring call').' - '.$oPaloConsola->errMsg;
+        } elseif ($bExito === 'consultation') {
+            $respuesta['consultation'] = true;
         }
     }
 
@@ -1601,6 +1603,14 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
                     $respuestaEventos['waitingcall'] = construirRespuesta_waitingexit();
                 }
                 break;
+            case 'consultationstart':
+                if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
+                $respuestaEventos['consultation'] = array('event' => 'consultationstart');
+                break;
+            case 'consultationend':
+                if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
+                $respuestaEventos['consultation'] = array('event' => 'consultationend');
+                break;
             }
         } // while(...)
 
@@ -1609,6 +1619,7 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
         if (isset($respuestaEventos['hold'])) $respuesta[] = $respuestaEventos['hold'];
         if (isset($respuestaEventos['llamada'])) $respuesta[] = $respuestaEventos['llamada'];
         if (isset($respuestaEventos['waitingcall'])) $respuesta[] = $respuestaEventos['waitingcall'];
+        if (isset($respuestaEventos['consultation'])) $respuesta[] = $respuestaEventos['consultation'];
 
         // Acumular todos los eventos que no deben de ser únicos
         if (isset($respuestaEventos['other'])) $respuesta = array_merge($respuesta, $respuestaEventos['other']);
