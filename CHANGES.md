@@ -1066,8 +1066,75 @@ case 'consultationend':
 
 ---
 
+### 13. Disable Transfer Button While Call Is On Hold
+**Files**:
+- `modules/agent_console/themes/default/js/javascript.js` (holdenter/holdexit handlers, agentlinked guard, initialize_client_state)
+- `modules/agent_console/index.php` (backend guard in transfer handler)
+
+**Issue**: The Transfer button remained enabled while a call was on hold. Agents could attempt to transfer a parked call, which is not a valid operation. Additionally, refreshing the page while on hold would re-enable the Transfer button.
+
+**Fix - Part 1: Frontend Hold Event Handlers** (`javascript.js`)
+
+Disable Transfer button when entering hold and re-enable when exiting:
+
+```javascript
+case 'holdenter':
+    estadoCliente.onhold = true;
+    $('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
+    $('#btn_transfer').button('disable');
+    break;
+case 'holdexit':
+    estadoCliente.onhold = false;
+    $('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
+    $('#btn_transfer').button('enable');
+    break;
+```
+
+**Fix - Part 2: Agentlinked Guard** (`javascript.js`)
+
+The `agentlinked` event enables all buttons (Hold, Transfer, Hangup). On page refresh, events are processed in order: `holdenter` first, then `agentlinked`. Without a guard, `agentlinked` would re-enable Transfer even though the call is on hold:
+
+```javascript
+case 'agentlinked':
+    $('#btn_hangup').button('enable');
+    $('#btn_hold').button('enable');
+    if (!estadoCliente.onhold) {
+        $('#btn_transfer').button('enable');
+    }
+```
+
+**Fix - Part 3: Page Refresh State** (`javascript.js`)
+
+Added hold check in `initialize_client_state()` to disable Transfer before the first checkStatus cycle:
+
+```javascript
+if (estadoCliente.onhold) {
+    $('#btn_transfer').button('disable');
+}
+```
+
+**Fix - Part 4: Backend Guard** (`index.php`)
+
+Added server-side validation to reject transfer requests while on hold:
+
+```php
+if ($estado['onhold']) {
+    $respuesta['action'] = 'error';
+    $respuesta['message'] = _tr('Cannot transfer while call is on hold');
+}
+```
+
+**Impact**:
+- Transfer button is disabled while call is on hold
+- Transfer button is re-enabled when hold ends
+- Page refresh preserves the correct button state
+- Backend rejects transfer attempts during hold as a safety net
+
+---
+
 ## Version History
 
+- **4.0.0.14** - Disable Transfer button while call is on hold
 - **4.0.0.13** - Hold/Transfer button state management during attended transfer consultation
 - **4.0.0.12** - Attended transfer busy tone delay fix for callback agents
 - **4.0.0.11** - Attended transfer fix for incoming campaigns (DTMF hook loss after Local channel optimization)

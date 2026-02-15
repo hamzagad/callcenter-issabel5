@@ -254,6 +254,11 @@ function initialize_client_state(nuevoEstado)
 	estadoCliente.callid = nuevoEstado.callid;
 	estadoCliente.waitingcall = nuevoEstado.waitingcall;
 
+	// Disable Transfer button if currently on hold
+	if (estadoCliente.onhold) {
+		$('#btn_transfer').button('disable');
+	}
+
 	// Lanzar el callback que actualiza el estado de la llamada
     setTimeout(do_checkstatus, 1);
 
@@ -795,13 +800,15 @@ function manejarRespuestaStatus(respuesta)
 			break;
 		case 'holdenter':
 			estadoCliente.onhold = true;
-			// Update button text to "End Hold"
+			// Update button text to "End Hold" and disable Transfer while on hold
 			$('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
+			$('#btn_transfer').button('disable');
 			break;
 		case 'holdexit':
 			estadoCliente.onhold = false;
-			// Update button text to "Hold"
+			// Update button text to "Hold" and re-enable Transfer
 			$('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
+			$('#btn_transfer').button('enable');
 			break;
 		case 'agentlinked':
 			// El agente ha recibido una llamada
@@ -810,7 +817,9 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.callid = respuesta[i].callid;
 			$('#btn_hangup').button('enable');
 			$('#btn_hold').button('enable');
-			$('#btn_transfer').button('enable');
+			if (!estadoCliente.onhold) {
+				$('#btn_transfer').button('enable');
+			}
 			$('#issabel-callcenter-cronometro').text(respuesta[i].cronometro);
 			$('#issabel-callcenter-llamada-info')
 			    .css('color', '')

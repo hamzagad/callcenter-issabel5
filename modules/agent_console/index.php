@@ -1154,7 +1154,10 @@ function manejarSesionActiva_transfer($module_name, $smarty, $sDirLocalPlantilla
         'message'   =>  '(no message)',
     );
     $sTransferExt = getParameter('extension');
-    if (is_null($sTransferExt) || !ctype_digit($sTransferExt)) {
+    if ($estado['onhold']) {
+        $respuesta['action'] = 'error';
+        $respuesta['message'] = _tr('Cannot transfer while call is on hold');
+    } elseif (is_null($sTransferExt) || !ctype_digit($sTransferExt)) {
         $respuesta['action'] = 'error';
         $respuesta['message'] = _tr('Invalid or missing extension to transfer');
     } else {
