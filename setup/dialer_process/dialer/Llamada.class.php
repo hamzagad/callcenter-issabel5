@@ -147,6 +147,7 @@ class Llamada
     private $_waiting_id_current_call = FALSE;  // Se pone a VERDADERO cuando se espera el id_current_call
                                                 // Set to TRUE when waiting for id_current_call
     var $request_hold = FALSE;  // Se asigna a VERDADERO al invocar requerimiento hold, y se verifica en Unlink
+    var $atxfer_hold = FALSE;   // TRUE when hold is initiated during atxfer state - Bridge() will retrieve, not AgentRequest
                                 // Set to TRUE when invoking hold request, and verified in Unlink
     private $_park_exten = NULL;// Extensión de lote de parqueo de llamada enviada a hold
                                 // Extension of parking lot for call sent to hold
@@ -980,6 +981,11 @@ class Llamada
     {
         if (!$this->request_hold) return;
 
+        // Debug: Log park_exten assignment
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] llamadaEnviadaHold called - parkexten=$parkexten uniqueid_nuevo=$uniqueid_nuevo" .
+            " request_hold=" . ($this->request_hold ? 'TRUE' : 'FALSE'));
+
         $this->status = 'OnHold';
         $this->request_hold = FALSE;
         $this->_park_exten = $parkexten;
@@ -1279,7 +1285,9 @@ class Llamada
     {
         $callable = array($this, '_cb_Park');
         $call_params = array($sFuente, $ami, $timestamp);
-        //$this->_log->output('DEBUG: '.__METHOD__.": asyncPark({$this->actualchannel}, {$this->agentchannel})");
+        // Debug: Log asyncPark call
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] asyncPark called for actualchannel={$this->actualchannel} agentchannel={$this->agentchannel}");
         // Don't pass AnnounceChannel to suppress parking slot announcement to customer
         $ami->asyncPark(
             $callable, $call_params,
@@ -1288,7 +1296,12 @@ class Llamada
 
     public function _cb_Park($r, $sFuente, $ami, $timestamp)
     {
-        //$this->_log->output('DEBUG: '.__METHOD__.': r='.print_r($r, TRUE));
+        // Debug: Log Park response
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] _cb_Park response received - Response={$r['Response']}" .
+            (isset($r['Message']) ? " Message={$r['Message']}" : "") .
+            " request_hold=" . ($this->request_hold ? 'TRUE' : 'FALSE') .
+            " park_exten=" . ($this->_park_exten ?? 'NULL'));
         $this->_tuberia->enviarRespuesta($sFuente,
             ($r['Response'] == 'Success')
                 ? array(0, '')

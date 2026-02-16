@@ -3473,47 +3473,76 @@ SQL_INSERTAR_AGENDAMIENTO;
             $this->_log->output("DEBUG: unhold - verificando/checking park_exten, isset: ".isset($infoLlamada['park_exten']));
         }
         if (isset($infoLlamada['park_exten']) && !is_null($infoLlamada['park_exten'])) {
-            $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
 
-            // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
-            // because Agent/XXXX is not a valid channel for Originate
-            $sCanalOrigen = $sAgente;
+            // Check if agent is in atxfer hold-wait state (Agent type only)
+            $isAtxferHoldWait = FALSE;
             if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
-                $sCanalOrigen = 'Local/'.$regs[1].'@agents';
+                $isAtxferHoldWait = $this->_tuberia->AMIEventProcess_esAgenteEnAtxferComplete($sAgente);
             }
 
-            if ($this->DEBUG) {
-                $this->_log->output("DEBUG: intentando recuperar llamada | EN: attempting to retrieve call:\n".
-                    "\tChannel      =>  $sCanalOrigen\n".
-                    "\tExten        =>  {$infoLlamada['park_exten']}\n".
-                    "\tContext      =>  from-internal\n".
-                    "\tActionID     =>  $sActionID");
-            }
+            if ($isAtxferHoldWait && !empty($infoSeguimiento['login_channel'])) {
+                // Agent is in Wait() in atxfer-consult holdwait - use Redirect + Bridge
+                $agentChannel = $infoSeguimiento['login_channel'];
+                $this->_log->output("DEBUG_HOLD: Using Redirect for atxfer hold recovery - "
+                    . "agent=$sAgente channel=$agentChannel parked_chan={$infoLlamada['actualchannel']}");
 
-            // Sacar la llamada del parqueo y redirigirla al agente pausado
-            // Set CallerID to show original caller info when retrieving from hold
-            $sCallerID = NULL;
-            if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
-                $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
-            }
+                // Set channel variables for atxfer-unhold context
+                $this->_ami->SetVar($agentChannel, 'ATXFER_PARKED_CHAN', $infoLlamada['actualchannel']);
 
-            $r = $this->_ami->Originate(
-                $sCanalOrigen,               // channel
-                $infoLlamada['park_exten'],  // extension
-                'from-internal',        // context
-                '1',                    // priority
-                NULL, NULL, NULL,       // Application, Data, Timeout
-                $sCallerID,             // CallerID
-                NULL, NULL,             // Variable, Account
-                TRUE,                   // async
-                $sActionID
-                );
-            if ($r['Response'] != 'Success') {
-                $this->_log->output('ERR: al terminar hold: no se puede retomar llamada - '.$r['Message'].
-                    ' | EN: ERR: when ending hold: cannot resume call - '.$r['Message']);
-            }
-            if ($this->DEBUG) {
-                $this->_log->output('DEBUG: Originate para recuperar llamada devuelve/Originate to retrieve call returns: '.print_r($r, 1));
+                // Redirect agent from Wait() to atxfer-unhold
+                // Redirect params: Channel, ExtraChannel, Exten, Context, Priority
+                $r = $this->_ami->Redirect($agentChannel, NULL, 's', 'atxfer-unhold', '1');
+                if ($r['Response'] != 'Success') {
+                    $this->_log->output('ERR: Redirect for atxfer unhold failed: '.$r['Message'].
+                        ' | EN: ERR: Redirect for atxfer unhold failed: '.$r['Message']);
+                }
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: Redirect for atxfer unhold returns: '.print_r($r, 1));
+                }
+            } else {
+                // Normal hold recovery - use Originate via AgentRequest
+                $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
+
+                // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
+                // because Agent/XXXX is not a valid channel for Originate
+                $sCanalOrigen = $sAgente;
+                if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
+                    $sCanalOrigen = 'Local/'.$regs[1].'@agents';
+                }
+
+                if ($this->DEBUG) {
+                    $this->_log->output("DEBUG: intentando recuperar llamada | EN: attempting to retrieve call:\n".
+                        "\tChannel      =>  $sCanalOrigen\n".
+                        "\tExten        =>  {$infoLlamada['park_exten']}\n".
+                        "\tContext      =>  from-internal\n".
+                        "\tActionID     =>  $sActionID");
+                }
+
+                // Sacar la llamada del parqueo y redirigirla al agente pausado
+                // Set CallerID to show original caller info when retrieving from hold
+                $sCallerID = NULL;
+                if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
+                    $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
+                }
+
+                $r = $this->_ami->Originate(
+                    $sCanalOrigen,               // channel
+                    $infoLlamada['park_exten'],  // extension
+                    'from-internal',        // context
+                    '1',                    // priority
+                    NULL, NULL, NULL,       // Application, Data, Timeout
+                    $sCallerID,             // CallerID
+                    NULL, NULL,             // Variable, Account
+                    TRUE,                   // async
+                    $sActionID
+                    );
+                if ($r['Response'] != 'Success') {
+                    $this->_log->output('ERR: al terminar hold: no se puede retomar llamada - '.$r['Message'].
+                        ' | EN: ERR: when ending hold: cannot resume call - '.$r['Message']);
+                }
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: Originate para recuperar llamada devuelve/Originate to retrieve call returns: '.print_r($r, 1));
+                }
             }
         }
 

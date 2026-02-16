@@ -133,7 +133,8 @@ class AMIEventProcess extends TuberiaProcess
             'cancelarIntentoLoginAgente', 'reportarInfoLlamadasColaEntrante',
             'pingAgente', 'dumpstatus', 'listarTotalColasTrabajoAgente',
             'infoSeguimientoAgentesCola', 'reportarInfoLlamadaAgendada',
-            'iniciarBreakAgente', 'iniciarHoldAgente') as $k)
+            'iniciarBreakAgente', 'iniciarHoldAgente',
+            'esAgenteEnAtxferComplete') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "rpc_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
@@ -1460,6 +1461,26 @@ class AMIEventProcess extends TuberiaProcess
             return;
         }
 
+        // Debug: Log hold state before initiating
+        if (!is_null($a) && !is_null($a->llamada)) {
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] Hold initiating - Agent={$sAgente} call actualchannel=" . $a->llamada->actualchannel .
+                " status=" . $a->llamada->status .
+                " request_hold=" . ($a->llamada->request_hold ? 'TRUE' : 'FALSE') .
+                " park_exten=" . ($a->llamada->park_exten ?? 'NULL'));
+        }
+
+        // If agent is Agent type and in atxfer state, set ATXFER_ON_HOLD on
+        // the agent's SIP channel so dialplan keeps agent in Wait() instead of AgentLogin
+        $bIsAgent = ($a->type == 'Agent');
+        $bIsAtxfer = isset($this->_agentesEnAtxferComplete[$sAgente]);
+        $sLoginChan = $a->login_channel;
+        if ($bIsAgent && $bIsAtxfer && !empty($sLoginChan)) {
+            $this->_ami->SetVar($sLoginChan, 'ATXFER_ON_HOLD', 'yes');
+            $a->llamada->atxfer_hold = TRUE;
+            $this->_log->output("DEBUG_HOLD: Set ATXFER_ON_HOLD=yes on {$sLoginChan} and atxfer_hold flag (agent in atxfer state)");
+        }
+
         $a->setHold($this->_ami, $idHold, $idAuditHold);
         $a->llamada->mandarLlamadaHold($this->_ami, $sFuente, $timestamp);
 
@@ -1724,6 +1745,14 @@ class AMIEventProcess extends TuberiaProcess
         return TRUE;
     }
 
+    public function rpc_esAgenteEnAtxferComplete($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        list($sAgente) = $datos;
+        $this->_tuberia->enviarRespuesta($sFuente,
+            isset($this->_agentesEnAtxferComplete[$sAgente]));
+    }
+
     public function msg_marcarConsultationIniciada($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
@@ -1746,6 +1775,9 @@ class AMIEventProcess extends TuberiaProcess
 
         if ($params['UserEvent'] == 'ConsultationEnd' && isset($params['Agent'])) {
             $sAgente = trim($params['Agent']);
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] ConsultationEnd UserEvent received for agent=$sAgente" .
+                " was_in_consultation=" . (isset($this->_agentesEnConsultation[$sAgente]) ? 'YES' : 'NO'));
             if (isset($this->_agentesEnConsultation[$sAgente])) {
                 unset($this->_agentesEnConsultation[$sAgente]);
                 $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
@@ -2390,6 +2422,18 @@ Uniqueid: 1429642067.241008
             // channel with the agent's physical SIP extension in the bridge after
             // returning from hold. This bridge swap must not be treated as a transfer.
             if ($llamada->agente->extension == $sChannel) {
+                // Check if call is returning from hold (via Bridge() in atxfer-unhold)
+                if ($llamada->status == 'OnHold') {
+                    $this->_log->output('DEBUG: '.__METHOD__.
+                        ': Agent type hold recovery via bridge swap for agent '.
+                        $llamada->agente->channel.', extension='.$sChannel);
+                    $llamada->llamadaRegresaHold($this->_ami,
+                        $params['local_timestamp_received'], $sChannel,
+                        ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
+                        $sAgentChannel);
+                    return FALSE;
+                }
+                // Normal bridge swap - ignore
                 if ($this->DEBUG) {
                     $this->_log->output('DEBUG: '.__METHOD__.
                         ': ignoring app_agent_pool bridge swap for agent '.
@@ -2437,10 +2481,18 @@ Uniqueid: 1429642067.241008
         // After hold recovery, Channel1 != Channel2 (bridge saved the caller's
         // channel, not the agent's), so the Channel1==Channel2 check above
         // does not fire. Instead, detect by: call already linked to same agent
-        // AND agent is in consultation.
+        // AND agent is in consultation AND call is NOT on hold.
+        // OnHold check is critical: if agent had a stale consultation state
+        // (e.g. from a previous successful transfer where ConsultationEnd UserEvent
+        // never fired), hold recovery must take precedence over consultation detection.
         if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
             !is_null($llamada->agente) && $llamada->agente->channel == $sChannel &&
-            !is_null($sChannel) && isset($this->_agentesEnConsultation[$sChannel])) {
+            !is_null($sChannel) && isset($this->_agentesEnConsultation[$sChannel]) &&
+            $llamada->status != 'OnHold') {
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] ConsultationEnd via Link detected for agent=$sChannel" .
+                " call actualchannel=" . $llamada->actualchannel .
+                " call status=" . $llamada->status);
             if ($this->DEBUG) {
                 $this->_log->output('DEBUG: '.__METHOD__.
                     ': agent '.$sChannel.' returned from consultation to original call'.
@@ -2792,6 +2844,17 @@ Uniqueid: 1429642067.241008
                 ' re-entering AgentLogin after attended transfer completion');
             // Clear the atxfer flag
             unset($this->_agentesEnAtxferComplete[$sAgente]);
+            // Clear stale consultation state - when the agent completes a transfer
+            // by hanging up during Dial(), the ConsultationEnd UserEvent in the
+            // dialplan never fires (agent channel is in hangup state). Clear it here.
+            if (isset($this->_agentesEnConsultation[$sAgente])) {
+                $this->_log->output('DEBUG: '.__METHOD__.': clearing stale consultation state for '.$sAgente.
+                    ' after attended transfer completion');
+                unset($this->_agentesEnConsultation[$sAgente]);
+                $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                    array('ConsultationEnd', array($sAgente))
+                ));
+            }
         }
 
         if (is_null($a) || $a->estado_consola == 'logged-out') {
@@ -3442,6 +3505,13 @@ Uniqueid: 1429642067.241008
 
     public function msg_ParkedCall($sEvent, $params, $sServer, $iPort)
     {
+        // Debug: Log ParkedCall event entry
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] ParkedCall event received - ParkeeChannel=" .
+            (isset($params['ParkeeChannel']) ? $params['ParkeeChannel'] :
+             (isset($params['Channel']) ? $params['Channel'] : 'NULL')) .
+            " ParkingSpace=" . (isset($params['ParkingSpace']) ? $params['ParkingSpace'] :
+             (isset($params['Exten']) ? $params['Exten'] : 'NULL')));
 /*
     [Event] => ParkedCall
     [Privilege] => call,all
@@ -3477,11 +3547,18 @@ Uniqueid: 1429642067.241008
 
         $llamada = $this->_listaLlamadas->buscar('actualchannel', $sCanalLlamada);
         if (is_null($llamada)) {
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] ParkedCall - Call NOT FOUND by actualchannel=$sCanalLlamada");
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: ".__METHOD__.": llamada no encontrada para canal: $sCanalLlamada | EN: call not found for channel: $sCanalLlamada");
             }
             return;
         }
+
+        // Debug: Log call found in ParkedCall
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] ParkedCall - Found call! actualchannel={$llamada->actualchannel}" .
+            " status={$llamada->status} request_hold=" . ($llamada->request_hold ? 'TRUE' : 'FALSE'));
 
         // Asterisk ParkedCall event uses ParkingSpace (not Exten) and ParkeeUniqueid (not Uniqueid)
         $parkingSpace = isset($params['ParkingSpace']) ? $params['ParkingSpace'] :
@@ -3542,21 +3619,23 @@ Uniqueid: 1429642067.241008
         if (is_null($llamada)) return;
 
         if ($llamada->status == 'OnHold') {
-            if ($this->DEBUG) {
-                $this->_log->output('DEBUG: '.__METHOD__.': llamada colgada mientras estaba en HOLD. | EN: call hung up while on HOLD.');
-            }
-            // First clear the hold state and close the hold audit record
+            // Clear the hold state and close the hold audit record
             $llamada->llamadaRegresaHold($this->_ami, $params['local_timestamp_received']);
 
-            // Then finalize the call since the customer has hung up
-            // This will:
-            // - Update the call status in the database
-            // - Delete the current_call record
-            // - Disassociate the agent from the call (quitarLlamadaAtendida)
-            // - Emit AgentUnlinked event so UI updates
-            $llamada->llamadaFinalizaSeguimiento(
-                $params['local_timestamp_received'],
-                $this->_config['dialer']['llamada_corta']);
+            if ($llamada->atxfer_hold) {
+                // Bridge() in atxfer-unhold is retrieving the call from parking.
+                // Do NOT finalize - the call is being reconnected, not hung up.
+                $llamada->atxfer_hold = FALSE;
+                $this->_log->output('DEBUG: '.__METHOD__.': atxfer hold recovery - skipping finalization (Bridge will reconnect)');
+            } else {
+                // Genuine caller hangup while on hold - finalize the call
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: '.__METHOD__.': llamada colgada mientras estaba en HOLD. | EN: call hung up while on HOLD.');
+                }
+                $llamada->llamadaFinalizaSeguimiento(
+                    $params['local_timestamp_received'],
+                    $this->_config['dialer']['llamada_corta']);
+            }
         }
     }
 

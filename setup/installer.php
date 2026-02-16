@@ -374,7 +374,22 @@ exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,NoOp(Issabel CallCenter: Consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
  same => n,UserEvent(ConsultationEnd,Agent: Agent/${AGENT_NUM})
  same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
  same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+ same => n(holdwait),Set(ATXFER_ON_HOLD=)
+ same => n,UserEvent(AtxferHoldWait,Agent: Agent/${AGENT_NUM})
+ same => n,Wait(300)
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+
+[atxfer-unhold]
+exten => s,1,NoOp(Issabel CallCenter: Agent retrieving call from hold via Bridge)
+ same => n,Bridge(${ATXFER_PARKED_CHAN})
+ same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+ same => n(holdwait),Set(ATXFER_ON_HOLD=)
+ same => n,UserEvent(AtxferHoldWait,Agent: Agent/${AGENT_NUM})
+ same => n,Wait(300)
+ same => n,Goto(atxfer-unhold,s,1)
 
 [atxfer-bridge]
 exten => s,1,NoOp(Issabel CallCenter: Transfer complete - bridging target with held caller)

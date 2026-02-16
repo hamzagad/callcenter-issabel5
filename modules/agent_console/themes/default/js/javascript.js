@@ -758,7 +758,6 @@ function do_checkstatus()
 
 function manejarRespuestaStatus(respuesta)
 {
-    //console.log(respuesta);
 	for (var i in respuesta) {
 		if (respuesta[i].txt_estado_agente_inicial != null)
 			$('#issabel-callcenter-estado-agente-texto').text(respuesta[i].txt_estado_agente_inicial);
@@ -850,7 +849,6 @@ function manejarRespuestaStatus(respuesta)
 
 			apply_form_styles();
 		    $('#btn_guardar_formularios').button('enable');
-            console.log(respuesta[i]);
             if (!respuesta[i].urlopentype3){
                 respuesta[i].urlopentype3 = "DELETE";
             }

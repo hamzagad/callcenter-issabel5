@@ -1235,8 +1235,182 @@ This check fires when:
 
 ---
 
+### 16. Agent Type Hold Recovery Fix for Post-Attended-Transfer Calls
+
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php` (Request_agentauth_unhold - Redirect-based unhold for atxfer case)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (rpc_iniciarHoldAgente, rpc_esAgenteEnAtxferComplete, msg_Link, msg_Agentlogin, msg_ParkedCallGiveUp)
+- `setup/dialer_process/dialer/Llamada.class.php` (atxfer_hold property)
+- `/etc/asterisk/extensions_custom.conf` (atxfer-consult holdwait, atxfer-unhold context)
+- `setup/installer.php` (dialplan template update - pending)
+
+**Issue 1**: After an Agent type attended transfer consultation failed (colleague declined/hung up) and the agent was re-bridged to the customer via `Bridge()` in `atxfer-consult`, pressing Hold then End Hold caused ~5 second delay before the call resumed. The dialer repeatedly attempted `Originate(Local/1001@agents)` which failed because the agent pool device state remained UNAVAILABLE (Status=5) for ~5 seconds after `Bridge()` ended.
+
+**Root Cause**: When the agent pressed Hold during the post-consultation bridge:
+1. Call was parked → `Bridge()` ended → agent went to `atxfer-complete` → `AgentLogin`
+2. `AgentLogin` caused agent pool device state to go UNAVAILABLE for ~5 seconds
+3. End Hold triggered `Originate(Local/1001@agents)` → `AgentRequest`
+4. `AgentRequest` failed repeatedly with OriginateResponse: Failure until device state updated
+
+**Issue 2**: After Issue 1 fix, when `Bridge()` retrieved the parked call, `ParkedCallGiveUp` event fired and the call disappeared from agent console ("No active call") while audio still worked between agent and caller.
+
+**Root Cause**: When `Bridge()` in `atxfer-unhold` "stole" the parked channel from parking, Asterisk fired `ParkedCallGiveUp` before `BridgeEnter`. The `msg_ParkedCallGiveUp` handler treated this as "caller hung up while on hold" and called both `llamadaRegresaHold` AND `llamadaFinalizaSeguimiento` → `AgentUnlinked` event sent to frontend → call disappeared.
+
+**Issue 3**: After a **successful** attended transfer (colleague accepted), the next incoming call had broken hold functionality. End Hold worked but the button stayed stuck at "End Hold". Clicking Hangup disconnected the call but the agent console stayed stuck at "connected to call".
+
+**Root Cause**: During successful attended transfer, when the agent hung up during `Dial()` in `atxfer-consult`, the `UserEvent(ConsultationEnd)` never fired because the agent's channel was in hangup state. The `_agentesEnConsultation` array entry was never cleared. On the next call:
+1. Agent pressed Hold → call parked, Originate succeeded
+2. BridgeEnter fired → `msg_Link` checked `_agentesEnConsultation` → found stale entry
+3. `msg_Link` treated this as "ConsultationEnd via Link" instead of hold recovery
+4. Hold recovery code was skipped (`return FALSE`) → call stayed in `OnHold` status → frontend never got `holdexit` event → button stuck
+
+**Fix - Part 1: Redirect-Based Unhold for Atxfer Case** (`ECCPConn.class.php`)
+
+Keep the agent in `Wait()` instead of `AgentLogin` after `Bridge()` ends during hold. Use `Redirect` + `Bridge()` to retrieve the parked call directly, bypassing `AgentRequest`:
+
+```php
+// Check if agent is in atxfer hold-wait state (Agent type only)
+$isAtxferHoldWait = FALSE;
+if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
+    $isAtxferHoldWait = $this->_tuberia->AMIEventProcess_esAgenteEnAtxferComplete($sAgente);
+}
+
+if ($isAtxferHoldWait && !empty($infoSeguimiento['login_channel'])) {
+    // Agent is in Wait() in atxfer-consult holdwait - use Redirect + Bridge
+    $agentChannel = $infoSeguimiento['login_channel'];
+    $this->_ami->SetVar($agentChannel, 'ATXFER_PARKED_CHAN', $infoLlamada['actualchannel']);
+    $r = $this->_ami->Redirect($agentChannel, NULL, 's', 'atxfer-unhold', '1');
+} else {
+    // Original Originate mechanism for normal hold
+    // ... existing code ...
+}
+```
+
+**Fix - Part 2: Dialplan Changes** (`extensions_custom.conf`)
+
+Modified `atxfer-consult` to check `ATXFER_ON_HOLD` variable after `Bridge()` and go to holdwait instead of atxfer-complete:
+
+```ini
+[atxfer-consult]
+exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
+ same => n,Set(__ATXFER_HELD_CHAN=${ATXFER_HELD_CHAN})
+ same => n,Set(AGENT_NUM=${ATXFER_AGENT_NUM})
+ same => n,Dial(Local/${EXTEN}@from-internal,120,gF(issabel-atxfer-bridge^s^1))
+ same => n,NoOp(Issabel CallCenter: Consultation ended - reconnecting with caller)
+ same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+ same => n(holdwait),Set(ATXFER_ON_HOLD=)
+ same => n,UserEvent(AtxferHoldWait,Agent: Agent/${AGENT_NUM})
+ same => n,Wait(300)
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+```
+
+Added new `atxfer-unhold` context that retrieves parked call via `Bridge()`:
+
+```ini
+[atxfer-unhold]
+exten => s,1,NoOp(Issabel CallCenter: Agent retrieving call from hold via Bridge)
+ same => n,Bridge(${ATXFER_PARKED_CHAN})
+ same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
+ same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+ same => n(holdwait),Set(ATXFER_ON_HOLD=)
+ same => n,UserEvent(AtxferHoldWait,Agent: Agent/${AGENT_NUM})
+ same => n,Wait(300)
+ same => n,Goto(atxfer-unhold,s,1)
+```
+
+**Fix - Part 3: Hold Initiation** (`AMIEventProcess.class.php`)
+
+Set `ATXFER_ON_HOLD=yes` channel variable and `atxfer_hold` flag when Agent type presses Hold during atxfer bridge:
+
+```php
+$bIsAgent = ($a->type == 'Agent');
+$bIsAtxfer = isset($this->_agentesEnAtxferComplete[$sAgente]);
+$sLoginChan = $a->login_channel;
+if ($bIsAgent && $bIsAtxfer && !empty($sLoginChan)) {
+    $this->_ami->SetVar($sLoginChan, 'ATXFER_ON_HOLD', 'yes');
+    $a->llamada->atxfer_hold = TRUE;
+}
+```
+
+**Fix - Part 4: New RPC to Check Atxfer State** (`AMIEventProcess.class.php`)
+
+Added synchronous RPC `esAgenteEnAtxferComplete` so ECCPConn can check if agent is in atxfer hold-wait:
+
+```php
+public function rpc_esAgenteEnAtxferComplete($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
+{
+    list($sAgente) = $datos;
+    $this->_tuberia->enviarRespuesta($sFuente,
+        isset($this->_agentesEnAtxferComplete[$sAgente]));
+}
+```
+
+**Fix - Part 5: ParkedCallGiveUp Fix** (`AMIEventProcess.class.php`, `Llamada.class.php`)
+
+Skip `llamadaFinalizaSeguimiento` when `atxfer_hold` flag is set (Bridge will reconnect, not caller hangup):
+
+```php
+// Llamada.class.php - add property
+var $atxfer_hold = FALSE;
+
+// AMIEventProcess.class.php - msg_ParkedCallGiveUp
+if ($llamada->status == 'OnHold') {
+    $llamada->llamadaRegresaHold($this->_ami, $params['local_timestamp_received']);
+    if ($llamada->atxfer_hold) {
+        $llamada->atxfer_hold = FALSE;
+        // Bridge will reconnect - don't finalize
+    } else {
+        $llamada->llamadaFinalizaSeguimiento(...);
+    }
+}
+```
+
+**Fix - Part 6: Clear Stale Consultation State** (`AMIEventProcess.class.php`)
+
+Clear `_agentesEnConsultation` when agent re-logs after successful transfer:
+
+```php
+// In msg_Agentlogin after clearing _agentesEnAtxferComplete
+if (isset($this->_agentesEnConsultation[$sAgente])) {
+    unset($this->_agentesEnConsultation[$sAgente]);
+    $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+        array('ConsultationEnd', array($sAgente))
+    ));
+}
+```
+
+**Fix - Part 7: Hold Recovery Priority** (`AMIEventProcess.class.php`)
+
+Modified consultation end detection in `msg_Link` to check `$llamada->status != 'OnHold'` so hold recovery takes precedence over stale consultation state:
+
+```php
+if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
+    !is_null($llamada->agente) && $llamada->agente->channel == $sChannel &&
+    !is_null($sChannel) && isset($this->_agentesEnConsultation[$sChannel]) &&
+    $llamada->status != 'OnHold') {
+    // ConsultationEnd via Link - only if NOT on hold
+}
+```
+
+**Event Flow After Fix**:
+1. **Hold during atxfer**: ATXFER_ON_HOLD=yes set → customer parked → Bridge() ends → dialplan checks variable → agent enters Wait(300)
+2. **Unhold**: ECCPConn detects atxfer state → sets ATXFER_PARKED_CHAN → Redirects agent to atxfer-unhold → Bridge() retrieves customer
+3. **BridgeEnter**: msg_Link fires → detects hold recovery → llamadaRegresaHold called → hold state cleared
+4. **Successful transfer + next call hold**: msg_Agentlogin clears stale _agentesEnConsultation → next call's hold recovery works properly
+
+**Impact**:
+- End Hold works immediately after atxfer consultation fails (no 5-second delay)
+- Call remains visible in agent console after hold recovery (no "No active call")
+- Hold works correctly on calls after successful attended transfer (no stuck button)
+- Agent type hold/unhold cycles work reliably in all atxfer scenarios
+
+---
+
 ## Version History
 
+- **4.0.0.16** - Agent type hold recovery fix for post-attended-transfer calls
 - **4.0.0.15** - Fix stale channel after hold breaking attended transfer/hangup, fix ConsultationEnd not detected after hold
 - **4.0.0.13** - Hold/Transfer button state management during attended transfer consultation
 - **4.0.0.12** - Attended transfer busy tone delay fix for callback agents
