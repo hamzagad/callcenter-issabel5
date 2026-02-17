@@ -1,3 +1,59 @@
+5.0.0-10
+* IMPROVED: Hangup button clicking during attended Transfer Consultation for 
+  agent type now terminates only the consultation call only and reconnect 
+  the agent to the customer. This required a new dialplan custom context
+  addition atxfer-cancel-consult.
+* ADDED: Agent console now can distinguish agent type login from callback 
+  extension type login.
+* ISSUE: Attended transfer functionality for agent type login requires full
+  rework. Now attended transfer is disabled in the UI for agent type.
+* TODO: Fix and improve the logic of attended transfer, unify the attended 
+  transfer dialplan, handle too much scenarios where atxfer manipulate the 
+  channel state and agent status.
+* Attended Transfer Re-enabling Requirements:
+  * Issue: The Hangup button gets disabled after the call reconnect with the 
+    customer (Pressing F5 enables it again)
+  * Issue: Sometimes the call gets disconnected from session or the session get 
+    terminated, reason is unknown and can't be reproduced
+  * Improve: client hangup during an attended transfer consultation should not 
+    terminate the consultation call, this will require Hangup button 
+    handling and Hold, Transfer buttons enabling conditioning by checking 
+    call status
+  * Improve: atxfer-hold context forces the default MoH, should be handled to use
+    the corrosponding MoH based on Queue
+
+5.0.0-9
+* IMPROVED: Attended Transfer Consultation Hangup and Customer Hangup Fixes.
+  Now, customer termination of the call from his end during consultation will
+  terminate the consultation call also.
+* Fixed: Hangup button clicking during attended Transfer Consultation for 
+  agent type now terminates both calls rather than terminating the 
+  consultation call only and losing the customer call tracking.
+
+5.0.0-8
+* FIXED: End Hold button 5s delay after attended transfer attempting.
+  This required adding a new dialplan custom context atxfer-consult, and code
+  modifications to distinguish the normal Hold from the Hold after attempting 
+  attended transfer for minimal side effect.
+  
+5.0.0-7
+* FIXED: Error in agent channel state after using Hold feature.
+* FIXED: Issue of End Hold button stuck after customer hangup during consulting.
+  
+5.0.0-6
+* IMPROVED: Transfer Button is now disabled during Hold.
+  Putting the customer on hold will disable the Transfer button.
+  
+5.0.0-5
+* ADDED: New dialplan contexts to handle the attended transfer for callback
+  extensions. This eliminates the 20s busy tone when colleague declines 
+  attended transfer consultation call. Compatible with both SIP and PJSIP.
+* IMPROVED: Hold/Transfer Button State During Attended Transfer Consultation.
+  Hold/Transfer buttons are disabled when the consultation starts, enabled
+  back on colleague rejection or decline.
+* IMPROVED: Installation script now reloads the asterisk dialplan to ensure
+  new dialplan custom context usage.
+  
 5.0.0-4
 * REWORKED: Attended transfer functionality for Agent type login got completely
   reworked, now uses Redirect() instead of Atxfer() with ExtraChannel parameter.
