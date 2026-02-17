@@ -896,9 +896,17 @@ function manejarRespuestaStatus(respuesta)
 			$('#btn_transfer').button('disable');
 			break;
 		case 'consultationend':
-			// Attended transfer consultation ended - re-enable buttons
-			$('#btn_hold').button('enable');
-			$('#btn_transfer').button('enable');
+			// Consultation ended - re-enable all buttons only if the agent
+			// still has an active call. This covers both: agent cancelling
+			// consultation (reconnects to customer) and customer hanging up
+			// during consultation (buttons should stay disabled).
+			// Use callid (not campaign_id) because incoming queue calls
+			// without a campaign have callid set but campaign_id == null.
+			if (estadoCliente.callid != null) {
+				$('#btn_hangup').button('enable');
+				$('#btn_hold').button('enable');
+				$('#btn_transfer').button('enable');
+			}
 			break;
 		}
 	}

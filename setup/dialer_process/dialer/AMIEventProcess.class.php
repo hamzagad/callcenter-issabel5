@@ -134,7 +134,8 @@ class AMIEventProcess extends TuberiaProcess
             'pingAgente', 'dumpstatus', 'listarTotalColasTrabajoAgente',
             'infoSeguimientoAgentesCola', 'reportarInfoLlamadaAgendada',
             'iniciarBreakAgente', 'iniciarHoldAgente',
-            'esAgenteEnAtxferComplete') as $k)
+            'esAgenteEnAtxferComplete',
+            'esAgenteEnConsultation') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "rpc_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
@@ -1160,6 +1161,14 @@ class AMIEventProcess extends TuberiaProcess
 
         $this->_log->output("INFO: ".__METHOD__." finalizando seguimiento de llamada transferida para agente ".$sAgente." | EN: ending tracking of transferred call for agent ".$sAgente);
 
+        // If call was on hold, clear hold state first so holdexit event is sent
+        // before AgentUnlinked. This ensures frontend properly resets hold state.
+        if ($a->llamada->status == 'OnHold') {
+            $this->_log->output("DEBUG: ".__METHOD__." call was on hold - clearing hold state before finalization");
+            $a->llamada->atxfer_hold = FALSE;
+            $a->llamada->llamadaRegresaHold($this->_ami, microtime(TRUE));
+        }
+
         // Finalize call tracking - this releases the agent
         $a->llamada->llamadaFinalizaSeguimiento(
             microtime(TRUE),
@@ -1751,6 +1760,14 @@ class AMIEventProcess extends TuberiaProcess
         list($sAgente) = $datos;
         $this->_tuberia->enviarRespuesta($sFuente,
             isset($this->_agentesEnAtxferComplete[$sAgente]));
+    }
+
+    public function rpc_esAgenteEnConsultation($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        list($sAgente) = $datos;
+        $this->_tuberia->enviarRespuesta($sFuente,
+            isset($this->_agentesEnConsultation[$sAgente]));
     }
 
     public function msg_marcarConsultationIniciada($sFuente, $sDestino,
@@ -2427,8 +2444,11 @@ Uniqueid: 1429642067.241008
                     $this->_log->output('DEBUG: '.__METHOD__.
                         ': Agent type hold recovery via bridge swap for agent '.
                         $llamada->agente->channel.', extension='.$sChannel);
+                    // Pass NULL for agentchannel to preserve Agent/XXXX identifier.
+                    // The physical SIP channel ($sChannel=SIP/101) must NOT replace
+                    // _agentchannel (Agent/1001) - the hangup handler needs Agent/XXXX.
                     $llamada->llamadaRegresaHold($this->_ami,
-                        $params['local_timestamp_received'], $sChannel,
+                        $params['local_timestamp_received'], NULL,
                         ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
                         $sAgentChannel);
                     return FALSE;
@@ -2507,6 +2527,8 @@ Uniqueid: 1429642067.241008
 
         /* Se ha detectado llamada que regresa de hold. En el evento ParkedCall
          * se asignó el uniqueid nuevo. */
+        /* A call returning from hold has been detected. In the ParkedCall event,
+        * a new uniqueid was assigned. */
         if (!is_null($llamada) && $llamada->status == 'OnHold') {
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada ".
@@ -2531,6 +2553,12 @@ Uniqueid: 1429642067.241008
          * distinguir los dos casos, se verifica el estado de Hold de la
          * llamada.
          */
+        /* If there is no key, it could still be a scheduled call that must be 
+        searched for by channel name. It could also be a call returning from Hold, 
+        which has been assigned a different UniqueID. To distinguish between 
+        the two cases, the call's Hold status is checked..
+         */
+
         $sNuevo_Uniqueid = NULL;
         if (is_null($llamada)) {
             $llamada = $this->_listaLlamadas->buscar('actualchannel', $params["Channel1"]);
@@ -2564,7 +2592,8 @@ Uniqueid: 1429642067.241008
 
         if (!is_null($llamada)) {
             // Se tiene la llamada principal monitoreada
-            if (!is_null($llamada->timestamp_link)) return FALSE;   // Múltiple link se ignora
+            // The main call is being monitored
+            if (!is_null($llamada->timestamp_link)) return FALSE;   // Múltiple link se ignora | EN: Multiple links are ignored
 
             $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
             if (is_null($a)) {
@@ -2594,6 +2623,10 @@ Uniqueid: 1429642067.241008
         } else {
             /* El Link de la pata auxiliar con otro canal puede indicar el
              * ActualChannel requerido para poder manipular la llamada. */
+            /* The Link of the auxiliary leg with another channel can indicate 
+            the ActualChannel required to be able to manipulate the call. 
+            */
+
             $sCanalCandidato = NULL;
             if (is_null($llamada)) {
                 $llamada = $this->_listaLlamadas->buscar('auxchannel', $params['Uniqueid1']);
@@ -2813,6 +2846,11 @@ Uniqueid: 1429642067.241008
                     $this->_log->output('DEBUG: '.__METHOD__.': se ignora Hangup para llamada que se envía a HOLD. | EN: ignoring Hangup for call that is being sent to HOLD.');
                 }
             } else {
+                // If the agent is in attended transfer consultation, redirect
+                // the agent to atxfer-complete to terminate the consultation
+                // call automatically (customer hung up, no point continuing)
+                $this->_terminarConsultaSiClienteCuelga($llamada);
+
                 // Llamada ha sido enlazada al menos una vez
                 // Call has been linked at least once
                 $llamada->llamadaFinalizaSeguimiento(
@@ -2820,6 +2858,64 @@ Uniqueid: 1429642067.241008
                     $this->_config['dialer']['llamada_corta']);
             }
         }
+    }
+
+    /**
+     * When the customer hangs up during an attended transfer consultation,
+     * redirect the agent to atxfer-complete to terminate the consultation call
+     * and re-enter AgentLogin. Without this, the agent is left in atxfer-consult
+     * dialplan with disabled buttons and no way to end the consulting call.
+     */
+    private function _terminarConsultaSiClienteCuelga($llamada)
+    {
+        if (is_null($llamada->agente)) return;
+
+        $sAgente = $llamada->agente->channel;
+        if (!isset($this->_agentesEnConsultation[$sAgente])) return;
+
+        // Only handle Agent type (app_agent_pool) - callback agents use
+        // native Atxfer which handles this differently
+        if ($llamada->agente->type != 'Agent') return;
+
+        $loginChannel = $llamada->agente->login_channel;
+        if (empty($loginChannel)) {
+            $this->_log->output('WARN: '.__METHOD__.': Agent '.$sAgente.
+                ' is in consultation but has no login_channel, cannot redirect'.
+                ' | EN: Agent '.$sAgente.' is in consultation but has no login_channel, cannot redirect');
+            return;
+        }
+
+        $agentNumber = $llamada->agente->number;
+        $this->_log->output('INFO: '.__METHOD__.': Customer hung up while agent '.
+            $sAgente.' is in consultation - redirecting to atxfer-complete to end consulting call'.
+            ' | EN: Customer hung up while agent '.$sAgente.
+            ' is in consultation - redirecting to atxfer-complete to end consulting call');
+
+        // Set the atxfer completion flag to suppress Agentlogoff
+        $this->_prepararAtxferComplete($sAgente);
+
+        // Redirect agent to atxfer-complete to terminate consultation and re-enter AgentLogin
+        $r = $this->_ami->Redirect(
+            $loginChannel,        // Channel: agent's login_channel
+            '',                   // ExtraChannel: not used
+            $agentNumber,         // Exten: agent number (e.g., 1001)
+            'atxfer-complete',    // Context
+            1                     // Priority
+        );
+
+        if ($r['Response'] == 'Success') {
+            $this->_log->output('DEBUG: '.__METHOD__.': Redirect successful for '.$sAgente.
+                ' | EN: Redirect successful for '.$sAgente);
+        } else {
+            $this->_log->output('WARN: '.__METHOD__.': Redirect failed for '.$sAgente.
+                ': '.$r['Message'].' | EN: Redirect failed for '.$sAgente.': '.$r['Message']);
+        }
+
+        // Clear consultation state and emit ConsultationEnd
+        unset($this->_agentesEnConsultation[$sAgente]);
+        $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+            array('ConsultationEnd', array($sAgente))
+        ));
     }
 
     public function msg_Agentlogin($sEvent, $params, $sServer, $iPort)

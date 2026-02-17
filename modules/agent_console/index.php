@@ -667,6 +667,7 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'CALLINFO_CALLTYPE'             =>  '',
         'BTN_HOLD'                      =>  $estado['onhold'] ? _tr('End Hold') : _tr('Hold'),
         'BTN_GUARDAR_FORMULARIOS'       =>  _tr('Save data'),
+        'IS_AGENT_TYPE'                 =>  (strpos($_SESSION['callcenter']['agente'], 'Agent/') === 0),
     ));
     $estadoInicial = array(
         'onhold'            =>  $estado['onhold'],

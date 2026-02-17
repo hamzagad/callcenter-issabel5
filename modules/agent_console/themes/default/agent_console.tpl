@@ -137,6 +137,7 @@
                 class="ui-widget-content ui-corner-all"
                 style="width: 100%" /></td>
             </tr>
+            {if !$IS_AGENT_TYPE}
             <tr>
                 <td>
                     <div align="center" id="transfer_type_radio">
@@ -145,6 +146,7 @@
                     </div>
                 </td>
             </tr>
+            {/if}
         </table>
     </form>
 </div>{* issabel-callcenter-seleccion-transfer *}

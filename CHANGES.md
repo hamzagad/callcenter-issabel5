@@ -1408,8 +1408,198 @@ if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
 
 ---
 
+### 17. Attended Transfer Consultation Hangup and Customer Hangup Fixes
+
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php` (Request_agentauth_hangup - two-path logic)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (_terminarConsultaSiClienteCuelga, rpc_esAgenteEnConsultation)
+- `modules/agent_console/themes/default/js/javascript.js` (consultationend handler)
+- `/etc/asterisk/extensions_custom.conf` (atxfer-cancel-consult context)
+- `setup/installer.php` (atxfer-cancel-consult context for new installations)
+
+**Issue 1**: When the agent clicked Hangup during an attended transfer consultation (before the colleague answered), the consultation call was correctly terminated but the customer call disappeared from the agent console. The customer remained on hold with no way to reconnect.
+
+**Issue 2**: When the customer hung up during an attended transfer consultation, the Hangup button was disabled and the agent could not terminate the ongoing consultation call. Additionally, after the colleague hung up the consultation, Hold and Transfer buttons became incorrectly enabled even though the original caller had already hung up.
+
+**Root Cause - Issue 1**: The Hangup handler had a single code path for attended transfer: it hung up the customer channel and redirected the agent to `atxfer-complete`. This correctly completed the transfer but when used during active consultation (before completing the transfer), it orphaned the customer still on hold.
+
+**Root Cause - Issue 2**:
+1. The `_procesarLlamadaColgada` handler had no logic to detect customer hangup during active consultation and terminate the consulting call
+2. The `consultationend` JS handler re-enabled Hold and Transfer buttons unconditionally, so when the consultation ended after the customer had already hung up, the buttons were incorrectly enabled
+
+**Fix - Part 1: Two-Path Hangup Handler** (`ECCPConn.class.php`)
+
+The hangup handler now distinguishes between two states using a new synchronous RPC `esAgenteEnConsultation`:
+
+**Path A - Active consultation** (Dial() still in progress, agent consulting colleague):
+- Redirect agent's `login_channel` to new `atxfer-cancel-consult` dialplan context
+- Context fires `UserEvent(ConsultationEnd)` then `Bridge(${ATXFER_HELD_CHAN})` to reconnect agent directly to the customer
+- Call tracking is **preserved** (no `_finalizarTransferencia` called)
+- Transfer DB record is cleared (transfer was cancelled)
+
+**Path B - No active consultation** (consultation ended, transfer not completed):
+- Hang up customer channel (parked in `atxfer-hold` with MusicOnHold)
+- Redirect agent to `atxfer-complete` to re-enter AgentLogin
+- Call `_finalizarTransferencia` to finalize call tracking and release agent
+
+```php
+$isInConsultation = $this->_tuberia->AMIEventProcess_esAgenteEnConsultation($sAgente);
+
+if ($isInConsultation) {
+    // Cancel consultation - redirect to atxfer-cancel-consult which
+    // terminates consulting call and Bridge()s agent back to customer
+    $r = $this->_ami->Redirect($loginChannel, '', 's', 'atxfer-cancel-consult', 1);
+    // Clear transfer DB record (transfer was cancelled)
+} else {
+    // Complete transfer path - hang up customer, redirect agent to atxfer-complete
+    $this->_ami->Hangup($infoLlamada['actualchannel']);
+    $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
+    $r = $this->_ami->Redirect($loginChannel, '', $agentNumber, 'atxfer-complete', 1);
+    $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+}
+```
+
+**Fix - Part 2: New Dialplan Context** (`extensions_custom.conf`, `installer.php`)
+
+Added `atxfer-cancel-consult` context that cancels consultation and reconnects agent to the held customer:
+
+```ini
+[atxfer-cancel-consult]
+exten => s,1,NoOp(Issabel CallCenter: Cancelling consultation - reconnecting agent to caller)
+ same => n,UserEvent(ConsultationEnd,Agent: Agent/${ATXFER_AGENT_NUM})
+ same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
+ same => n,Goto(atxfer-complete,${ATXFER_AGENT_NUM},1)
+ same => n(holdwait),Set(ATXFER_ON_HOLD=)
+ same => n,UserEvent(AtxferHoldWait,Agent: Agent/${ATXFER_AGENT_NUM})
+ same => n,Wait(300)
+ same => n,Goto(atxfer-cancel-consult,s,1)
+```
+
+The `UserEvent(ConsultationEnd)` fires before `Bridge()`, which allows the dialer to detect the event and update internal state before the bridge is established.
+
+**Fix - Part 3: New RPC `esAgenteEnConsultation`** (`AMIEventProcess.class.php`)
+
+Added synchronous RPC so ECCPConn can determine the agent's consultation state at the time of the Hangup click:
+
+```php
+public function rpc_esAgenteEnConsultation($sFuente, $sDestino,
+    $sNombreMensaje, $iTimestamp, $datos)
+{
+    list($sAgente) = $datos;
+    $this->_tuberia->enviarRespuesta($sFuente,
+        isset($this->_agentesEnConsultation[$sAgente]));
+}
+```
+
+**Fix - Part 4: Auto-Terminate Consultation on Customer Hangup** (`AMIEventProcess.class.php`)
+
+Added `_terminarConsultaSiClienteCuelga()` called from `_procesarLlamadaColgada` when the customer channel hangs up. If the agent is in active consultation, the agent is redirected to `atxfer-complete` which terminates the Dial() in `atxfer-consult` and re-enters AgentLogin:
+
+```php
+private function _terminarConsultaSiClienteCuelga($llamada)
+{
+    if (is_null($llamada->agente)) return;
+    $sAgente = $llamada->agente->channel;
+    if (!isset($this->_agentesEnConsultation[$sAgente])) return;
+    if ($llamada->agente->type != 'Agent') return;
+
+    $this->_prepararAtxferComplete($sAgente);
+    $r = $this->_ami->Redirect($loginChannel, '', $agentNumber, 'atxfer-complete', 1);
+    unset($this->_agentesEnConsultation[$sAgente]);
+    $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+        array('ConsultationEnd', array($sAgente))
+    ));
+}
+```
+
+**Fix - Part 5: `consultationend` Button State Guard** (`javascript.js`)
+
+The `consultationend` handler now only re-enables buttons if the agent still has an active call (`estadoCliente.callid != null`). `callid` is used instead of `campaign_id` because incoming queue calls have `callid` set but `campaign_id == null`. Also re-enables the Hangup button since `do_hangup()` disables it when clicked:
+
+```javascript
+case 'consultationend':
+    // Use callid (not campaign_id) because incoming queue calls
+    // without a campaign have callid set but campaign_id == null.
+    if (estadoCliente.callid != null) {
+        $('#btn_hangup').button('enable');
+        $('#btn_hold').button('enable');
+        $('#btn_transfer').button('enable');
+    }
+    break;
+```
+
+**Event Flow - Cancel Consultation (Issue 1 fix)**:
+1. Agent clicks Hangup during consultation
+2. ECCPConn checks `esAgenteEnConsultation` → returns true
+3. Redirects `login_channel` to `atxfer-cancel-consult`
+4. Context fires `UserEvent(ConsultationEnd)` → dialer clears tracking
+5. `Bridge(${ATXFER_HELD_CHAN})` retrieves customer from MusicOnHold and connects agent directly
+6. Agent and customer resume their conversation
+
+**Event Flow - Customer Hangup During Consultation (Issue 2 fix)**:
+1. Customer hangs up while agent is consulting colleague
+2. `_procesarLlamadaColgada` → calls `_terminarConsultaSiClienteCuelga`
+3. Agent is redirected to `atxfer-complete` → terminates Dial() in `atxfer-consult`
+4. `ConsultationEnd` event emitted → JS receives it but `callid` is null → buttons stay disabled
+5. Agent session is cleanly finalized
+
+**Impact**:
+- Clicking Hangup during active consultation reconnects agent to customer instead of orphaning them
+- Agent console distinguishes between consultation and post-consultation states
+- Customer hangup during consultation auto-terminates the consulting call
+- Hold and Transfer buttons do not incorrectly enable after customer has already hung up
+
+---
+
+### 18. Disable Attended Transfer Option for Agent Type in UI
+
+**Files**:
+- `modules/agent_console/index.php` (IS_AGENT_TYPE template variable)
+- `modules/agent_console/themes/default/agent_console.tpl` (conditional rendering of radio buttons)
+
+**Issue**: The Transfer dialog showed both "Blind transfer" and "Attended transfer" radio buttons for all agent types. For Agent type (app_agent_pool), attended transfer has a complex implementation with known edge cases. It should only be available for callback extension agents (SIP/IAX2/PJSIP).
+
+**Fix - Part 1: Template Variable** (`index.php`)
+
+Added `IS_AGENT_TYPE` boolean to the Smarty template assignment:
+
+```php
+'IS_AGENT_TYPE' => (strpos($_SESSION['callcenter']['agente'], 'Agent/') === 0),
+```
+
+Agent channel is stored as `Agent/XXXX` for app_agent_pool agents and `SIP/XXXX`, `IAX2/XXXX`, or `PJSIP/XXXX` for callback extension agents.
+
+**Fix - Part 2: Conditional Radio Buttons** (`agent_console.tpl`)
+
+Wrapped the transfer type radio button row in a Smarty `{if}` block:
+
+```smarty
+{if !$IS_AGENT_TYPE}
+<tr>
+    <td>
+        <div align="center" id="transfer_type_radio">
+            <input type="radio" id="transfer_type_blind" .../>
+            <input type="radio" id="transfer_type_attended" .../>
+        </div>
+    </td>
+</tr>
+{/if}
+```
+
+When the radio buttons are absent, `$('#transfer_type_attended').is(':checked')` in `do_transfer()` returns `false`, so transfers always use blind transfer for Agent type. jQuery's `.buttonset()` on a missing element is a no-op, so no JS changes are needed.
+
+**Impact**:
+- Agent type agents only see the extension input when clicking Transfer (no radio buttons)
+- Callback extension agents (SIP/IAX2/PJSIP) continue to see both blind and attended transfer options
+- No backend changes needed; the frontend change is sufficient
+
+---
+
 ## Version History
 
+- **4.0.0.18** - Disable attended transfer UI option for Agent type agents
+- **4.0.0.17** - Attended transfer consultation hangup fix and customer hangup during consultation fix
 - **4.0.0.16** - Agent type hold recovery fix for post-attended-transfer calls
 - **4.0.0.15** - Fix stale channel after hold breaking attended transfer/hangup, fix ConsultationEnd not detected after hold
 - **4.0.0.13** - Hold/Transfer button state management during attended transfer consultation
