@@ -14,6 +14,74 @@ var timer = null;
 //Objeto EventSource, si está soportado por el navegador
 var evtSource = null;
 
+// Shift filter variables (default: full day 00:00-23:59)
+var shiftFromHour = 0;
+var shiftToHour = 23;
+var STORAGE_KEY_SHIFT_FROM = 'agents_monitoring_shift_from';
+var STORAGE_KEY_SHIFT_TO = 'agents_monitoring_shift_to';
+
+function loadShiftPreferences() {
+	var storedFrom = localStorage.getItem(STORAGE_KEY_SHIFT_FROM);
+	var storedTo = localStorage.getItem(STORAGE_KEY_SHIFT_TO);
+
+	if (storedFrom !== null) {
+		shiftFromHour = parseInt(storedFrom, 10);
+		if (isNaN(shiftFromHour) || shiftFromHour < 0 || shiftFromHour > 23) {
+			shiftFromHour = 0;
+		}
+	}
+
+	if (storedTo !== null) {
+		shiftToHour = parseInt(storedTo, 10);
+		if (isNaN(shiftToHour) || shiftToHour < 0 || shiftToHour > 23) {
+			shiftToHour = 23;
+		}
+	}
+}
+
+function saveShiftPreferences() {
+	localStorage.setItem(STORAGE_KEY_SHIFT_FROM, shiftFromHour);
+	localStorage.setItem(STORAGE_KEY_SHIFT_TO, shiftToHour);
+}
+
+function updateShiftRangeIndicator() {
+	var indicator = $('#shiftRangeIndicator');
+	var fromStr = (shiftFromHour < 10 ? '0' : '') + shiftFromHour + ':00';
+	var toStr = (shiftToHour < 10 ? '0' : '') + shiftToHour + ':59';
+
+	if (shiftFromHour > shiftToHour) {
+		indicator.text('Yesterday ' + fromStr + ' - Today ' + toStr);
+	} else {
+		indicator.text('Today ' + fromStr + ' - ' + toStr);
+	}
+}
+
+function applyShiftFilter() {
+	var rawFrom = $('#shiftFromHour').val();
+	var rawTo = $('#shiftToHour').val();
+
+	var newFrom = parseInt(rawFrom, 10);
+	var newTo = parseInt(rawTo, 10);
+
+	if (isNaN(newFrom) || newFrom < 0 || newFrom > 23) newFrom = 0;
+	if (isNaN(newTo) || newTo < 0 || newTo > 23) newTo = 23;
+
+	shiftFromHour = newFrom;
+	shiftToHour = newTo;
+
+	saveShiftPreferences();
+	updateShiftRangeIndicator();
+
+	// Close existing SSE connection before reload
+	if (evtSource != null) {
+		evtSource.close();
+		evtSource = null;
+	}
+
+	// Reload page with shift parameters
+	location.href = 'index.php?menu=' + module_name + '&shift_from=' + shiftFromHour + '&shift_to=' + shiftToHour;
+}
+
 //Redireccionar la página entera en caso de que la sesión se haya perdido
 function verificar_error_session(respuesta)
 {
@@ -33,7 +101,7 @@ function initialize_client_state(nuevoEstado, nuevoEstadoHash)
 	var fechaInicio = new Date();
 	var regexp = /^(queue-\d+)/;
 	for (var k in estadoCliente) {
-		var keys = ['sec_laststatus', 'logintime', 'sec_calls'];
+		var keys = ['sec_laststatus', 'logintime', 'sec_calls', 'sec_breaks'];
 		for (var j = 0; j < keys.length; j++) {
 			var ktimestamp = keys[j];
 			estadoCliente[k]['orig_'+ktimestamp] = estadoCliente[k][ktimestamp];
@@ -51,6 +119,13 @@ function initialize_client_state(nuevoEstado, nuevoEstadoHash)
 			estadoCliente[k]['queuetotal'] = kq[1];
 		}
 	}
+
+	// Initialize shift filter UI
+	loadShiftPreferences();
+	$('#shiftFromHour').val(('0' + shiftFromHour).slice(-2));
+	$('#shiftToHour').val(('0' + shiftToHour).slice(-2));
+	updateShiftRangeIndicator();
+	$('#applyShiftFilter').on('click', applyShiftFilter);
 
 	// Lanzar el callback que actualiza el estado de la llamada
     setTimeout(do_checkstatus, 1);
@@ -81,7 +156,8 @@ function actualizar_valores_cronometro()
 			// Estos totales son en milisegundos
 			totalesCola[kq] = {
 				logintime: 0,
-				sec_calls: 0
+				sec_calls: 0,
+				sec_breaks: 0
 			};
 		}
 
@@ -104,12 +180,20 @@ function actualizar_valores_cronometro()
 		} else {
 			totalesCola[kq]['sec_calls'] += estadoCliente[k]['orig_sec_calls'] * 1000;
 		}
+
+		// Break time increments when agent is on a break-type pause
+		if (estadoCliente[k]['status'] == 'paused' && estadoCliente[k]['isbreakpause']) {
+			totalesCola[kq]['sec_breaks'] += formatoCronometro('#'+k+'-sec_breaks', estadoCliente[k]['sec_breaks']);
+		} else {
+			totalesCola[kq]['sec_breaks'] += estadoCliente[k]['orig_sec_breaks'] * 1000;
+		}
 	}
 
 	// Actualizar totales por cola
 	for (var kq in totalesCola) {
 		formatoMilisegundo('#'+kq+'-logintime', totalesCola[kq]['logintime']);
 		formatoMilisegundo('#'+kq+'-sec_calls', totalesCola[kq]['sec_calls']);
+		formatoMilisegundo('#'+kq+'-sec_breaks', totalesCola[kq]['sec_breaks']);
 	}
 }
 
@@ -141,7 +225,9 @@ function do_checkstatus()
       menu:    module_name,
       rawmode:  'yes',
       action:    'checkStatus',
-      clientstatehash: estadoClienteHash
+      clientstatehash: estadoClienteHash,
+      shift_from: shiftFromHour,
+      shift_to: shiftToHour
     };
   if (window.EventSource) {
     params['serverevents'] = true;
@@ -168,7 +254,7 @@ function do_checkstatus()
 function manejarRespuestaStatus(respuesta)
 {
 	var fechaInicio = new Date();
-	var keys = ['sec_laststatus', 'logintime', 'sec_calls'];
+	var keys = ['sec_laststatus', 'logintime', 'sec_calls', 'sec_breaks'];
 
 	// Intentar recargar la página en caso de error
 	if (respuesta['error'] != null) {
@@ -228,7 +314,9 @@ function manejarRespuestaStatus(respuesta)
 				}
 			}
 			estadoCliente[k]['oncallupdate'] = respuesta[k]['oncallupdate'];
+			estadoCliente[k]['isbreakpause'] = respuesta[k]['isbreakpause'];
 			estadoCliente[k]['num_calls'] = respuesta[k]['num_calls'];
+
 			$('#'+k+'-num_calls').text(estadoCliente[k]['num_calls']);
 		} else {
 			// TODO: no se maneja todavía aparición de agente en nueva cola

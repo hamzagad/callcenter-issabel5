@@ -83,6 +83,15 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         'title'                         =>  _tr('Agent Monitoring'),
     ));
 
+    // Parse shift filter parameters (default: full day 00-23)
+    $shiftFrom = getParameter('shift_from');
+    $shiftTo = getParameter('shift_to');
+    if (is_null($shiftFrom) || $shiftFrom === '') $shiftFrom = 0;
+    if (is_null($shiftTo) || $shiftTo === '') $shiftTo = 23;
+    $shiftFrom = (int)$shiftFrom;
+    $shiftTo = (int)$shiftTo;
+    $shiftRange = calculateShiftDatetimeRange($shiftFrom, $shiftTo);
+
     /*
      * Un agente puede pertenecer a múltiples colas, y puede o no estar
      * atendiendo una llamada, la cual puede haber llegado de como máximo una
@@ -144,7 +153,8 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
     }
     ksort($estadoMonitor);
 
-    $jsonData = construirDatosJSON($estadoMonitor);
+    $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $jsonData = construirDatosJSON($estadoMonitor, $breakData);
 
     $arrData = array();
     $tuplaTotal = NULL;
@@ -194,6 +204,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
                     '<b><span id="'.$jsTotalKey.'-num_calls">'.$tuplaTotal['num_calls'].'</span></b>',
                     '<b><span id="'.$jsTotalKey.'-logintime">'.timestamp_format($tuplaTotal['logintime']).'</span></b>',
                     '<b><span id="'.$jsTotalKey.'-sec_calls">'.timestamp_format($tuplaTotal['sec_calls']).'</span></b>',
+                    '<b><span id="'.$jsTotalKey.'-sec_breaks">'.timestamp_format($tuplaTotal['sec_breaks']).'</span></b>',
                 );
             }
 
@@ -204,12 +215,14 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
                 'logintime'     =>  0,
                 'num_calls'     =>  0,
                 'sec_calls'     =>  0,
+                'sec_breaks'    =>  0,
             );
         }
         $tuplaTotal['num_agents']++;
         $tuplaTotal['logintime'] += $jsonRow['logintime'];
         $tuplaTotal['num_calls'] += $jsonRow['num_calls'];
         $tuplaTotal['sec_calls'] += $jsonRow['sec_calls'];
+        $tuplaTotal['sec_breaks'] += $jsonRow['sec_breaks'];
         $tupla = array(
             ($sPrevQueue == $sQueue) ? '' : $sQueue,
             $jsonRow['agentchannel'],
@@ -218,6 +231,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
             '<span id="'.$jsonKey.'-num_calls">'.$jsonRow['num_calls'].'</span>',
             '<span id="'.$jsonKey.'-logintime">'.timestamp_format($jsonRow['logintime']).'</span>',
             '<span id="'.$jsonKey.'-sec_calls">'.timestamp_format($jsonRow['sec_calls']).'</span>',
+            '<span id="'.$jsonKey.'-sec_breaks">'.timestamp_format($jsonRow['sec_breaks']).'</span>',
         );
         $arrData[] = $tupla;
         $sPrevQueue = $sQueue;
@@ -232,6 +246,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         '<b><span id="'.$jsTotalKey.'-num_calls">'.$tuplaTotal['num_calls'].'</span></b>',
         '<b><span id="'.$jsTotalKey.'-logintime">'.timestamp_format($tuplaTotal['logintime']).'</span></b>',
         '<b><span id="'.$jsTotalKey.'-sec_calls">'.timestamp_format($tuplaTotal['sec_calls']).'</span></b>',
+        '<b><span id="'.$jsTotalKey.'-sec_breaks">'.timestamp_format($tuplaTotal['sec_breaks']).'</span></b>',
     );
 
     // No es necesario emitir el nombre del agente la inicialización JSON
@@ -258,7 +273,23 @@ $(function() {
 });
 </script>
 JSON_INITIALIZE;
-    return $oGrid->fetchGrid(array(
+
+    // Build shift filter HTML
+    $sHoursOptions = '';
+    for ($h = 0; $h < 24; $h++) {
+        $sHourVal = sprintf('%02d', $h);
+        $sHoursOptions .= '<option value="'.$sHourVal.'">'.$sHourVal.':00</option>';
+    }
+    $sShiftFilterHTML = '<div id="shiftFilterPanel" style="margin-bottom: 10px; padding: 8px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;">'
+        . '<label for="shiftFromHour" style="font-weight: bold;">'._tr('Shift From').':</label> '
+        . '<select id="shiftFromHour" style="margin-right: 15px;">'.$sHoursOptions.'</select>'
+        . '<label for="shiftToHour" style="font-weight: bold;">'._tr('Shift To').':</label> '
+        . '<select id="shiftToHour" style="margin-right: 15px;">'.$sHoursOptions.'</select>'
+        . '<button id="applyShiftFilter" type="button" class="ui-button ui-widget ui-state-default ui-corner-all" style="padding: 4px 12px;">'._tr('Apply').'</button>'
+        . '<span id="shiftRangeIndicator" style="margin-left: 15px; font-style: italic; color: #666;"></span>'
+        . '</div>';
+
+    return $sShiftFilterHTML . $oGrid->fetchGrid(array(
             'title'     =>  _tr('Agents Monitoring'),
             'icon'      =>  _tr('images/list.png'),
             'width'     =>  '99%',
@@ -274,6 +305,7 @@ JSON_INITIALIZE;
                 array('name'    =>  _tr('Total calls')),
                 array('name'    =>  _tr('Total login time')),
                 array('name'    =>  _tr('Total talk time')),
+                array('name'    =>  _tr('Total break time')),
             ),
         ), $arrData, $arrLang).
         $sJsonInitialize;
@@ -287,7 +319,76 @@ function timestamp_format($i)
         $i % 60);
 }
 
-function construirDatosJSON(&$estadoMonitor)
+function calculateShiftDatetimeRange($fromHour, $toHour)
+{
+    $today = date('Y-m-d');
+    $yesterday = date('Y-m-d', strtotime('-1 day'));
+    $fromHour = max(0, min(23, (int)$fromHour));
+    $toHour = max(0, min(23, (int)$toHour));
+
+    if ($fromHour > $toHour) {
+        // Overnight shift: yesterday's fromHour to today's toHour
+        $datetimeStart = $yesterday . ' ' . sprintf('%02d:00:00', $fromHour);
+        $datetimeEnd = $today . ' ' . sprintf('%02d:59:59', $toHour);
+    } else {
+        // Same-day shift
+        $datetimeStart = $today . ' ' . sprintf('%02d:00:00', $fromHour);
+        $datetimeEnd = $today . ' ' . sprintf('%02d:59:59', $toHour);
+    }
+    return array('start' => $datetimeStart, 'end' => $datetimeEnd);
+}
+
+function consultarTiempoBreakAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    global $arrConf;
+    $result = array('breakTimes' => array(), 'holdNames' => array());
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    // Default to full day if no shift range provided
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    // Query cumulative completed break time per agent (excluding Hold)
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(UNIX_TIMESTAMP(audit.datetime_end) - UNIX_TIMESTAMP(audit.datetime_init)) AS sec_breaks " .
+           "FROM audit " .
+           "INNER JOIN break ON break.id = audit.id_break " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE break.tipo = 'B' " .
+           "AND audit.datetime_end IS NOT NULL " .
+           "AND audit.datetime_init >= :start " .
+           "AND audit.datetime_init <= :end " .
+           "GROUP BY agent.id";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start' => $datetimeStart, ':end' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result['breakTimes'][$row['agentchannel']] = (int)$row['sec_breaks'];
+    }
+
+    // Query Hold-type break names
+    $sql2 = "SELECT name FROM break WHERE tipo = 'H' AND status = 'A'";
+    $stmt2 = $pDB->query($sql2);
+    while ($row = $stmt2->fetch(PDO::FETCH_ASSOC)) {
+        $result['holdNames'][] = $row['name'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+function construirDatosJSON(&$estadoMonitor, $breakData = array())
 {
     $iTimestampActual = time();
     $jsonData = array();
@@ -335,21 +436,27 @@ function construirDatosJSON(&$estadoMonitor)
                 'oncallupdate'      =>  !is_null($infoAgente['linkstart']),
                 'pausename'         =>  $infoAgente['pausename'],
             );
+
+            // Break time tracking
+            $sec_breaks_completed = isset($breakData['breakTimes'][$sAgentChannel])
+                ? $breakData['breakTimes'][$sAgentChannel] : 0;
+            $isbreakpause = false;
+            if ($infoAgente['agentstatus'] == 'paused' && !is_null($infoAgente['pausename'])) {
+                $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+                $isbreakpause = !in_array($infoAgente['pausename'], $holdNames);
+            }
+            $sec_breaks = $sec_breaks_completed;
+            if ($isbreakpause && !is_null($infoAgente['lastpausestart'])) {
+                $sec_breaks += max(0, $iTimestampActual - strtotime($infoAgente['lastpausestart']));
+            }
+            $jsonData[$jsonKey]['sec_breaks'] = $sec_breaks;
+            $jsonData[$jsonKey]['sec_breaks_completed'] = $sec_breaks_completed;
+            $jsonData[$jsonKey]['isbreakpause'] = $isbreakpause;
         }
     }
     return $jsonData;
 }
 
-// Debug function to log agent monitoring data
-function debug_agent_monitoring($msg, $data = null) {
-    $logfile = '/tmp/agent_monitoring_debug.log';
-    $timestamp = date('Y-m-d H:i:s');
-    $logmsg = "[$timestamp] $msg";
-    if ($data !== null) {
-        $logmsg .= ": " . print_r($data, true);
-    }
-    file_put_contents($logfile, $logmsg . "\n", FILE_APPEND);
-}
 
 function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola)
 {
@@ -368,6 +475,15 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     }
     foreach (array_keys($estadoCliente) as $k)
         $estadoCliente[$k]['oncallupdate'] = ($estadoCliente[$k]['oncallupdate'] == 'true');
+
+    // Parse shift filter parameters (default: full day 00-23)
+    $shiftFrom = getParameter('shift_from');
+    $shiftTo = getParameter('shift_to');
+    if (is_null($shiftFrom) || $shiftFrom === '') $shiftFrom = 0;
+    if (is_null($shiftTo) || $shiftTo === '') $shiftTo = 23;
+    $shiftFrom = (int)$shiftFrom;
+    $shiftTo = (int)$shiftTo;
+    $shiftRange = calculateShiftDatetimeRange($shiftFrom, $shiftTo);
 
     // Modo a funcionar: Long-Polling, o Server-sent Events
     $bSSE = detectSSEMode();
@@ -392,7 +508,8 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
 
     // Acumular inmediatamente las filas que son distintas en estado
     ksort($estadoMonitor);
-    $jsonData = construirDatosJSON($estadoMonitor);
+    $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $jsonData = construirDatosJSON($estadoMonitor, $breakData);
     foreach ($jsonData as $jsonKey => $jsonRow) {
     	if (isset($estadoCliente[$jsonKey])) {
     		if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
@@ -411,23 +528,14 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
 
         // Re-poll full state to catch changes not reflected in events (e.g., ringing status)
         $estadoMonitorActual = $oPaloConsola->listarEstadoMonitoreoAgentes();
-        debug_agent_monitoring("Poll iteration - estadoMonitorActual raw", $estadoMonitorActual);
         if (is_array($estadoMonitorActual)) {
             ksort($estadoMonitorActual);
-            $jsonDataActual = construirDatosJSON($estadoMonitorActual);
-            debug_agent_monitoring("Poll iteration - jsonDataActual (status values)", array_map(function($row) {
-                return ['status' => $row['status'], 'oncallupdate' => $row['oncallupdate']];
-            }, $jsonDataActual));
+            $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+            $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData);
             foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                 if (isset($estadoCliente[$jsonKey])) {
                     if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
                         $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
-                        debug_agent_monitoring("Status change detected for $jsonKey", [
-                            'old_status' => $estadoCliente[$jsonKey]['status'],
-                            'new_status' => $jsonRow['status'],
-                            'old_oncallupdate' => $estadoCliente[$jsonKey]['oncallupdate'],
-                            'new_oncallupdate' => $jsonRow['oncallupdate']
-                        ]);
                         $respuesta[$jsonKey] = $jsonRow;
                         $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
                         $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
@@ -460,15 +568,12 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
             $estadoMonitorActual = $oPaloConsola->listarEstadoMonitoreoAgentes();
             if (is_array($estadoMonitorActual)) {
                 ksort($estadoMonitorActual);
-                $jsonDataActual = construirDatosJSON($estadoMonitorActual);
+                $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData);
                 foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                     if (isset($estadoCliente[$jsonKey])) {
                         if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
                             $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
-                            debug_agent_monitoring("Inner loop status change for $jsonKey", [
-                                'old' => $estadoCliente[$jsonKey]['status'],
-                                'new' => $jsonRow['status']
-                            ]);
                             $respuesta[$jsonKey] = $jsonRow;
                             $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
                             $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
@@ -506,6 +611,10 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 $jsonData[$jsonKey]['status'] = $estadoMonitor[$sQueue][$sCanalAgente]['agentstatus'];
                                 $jsonData[$jsonKey]['sec_laststatus'] = 0;
                                 $jsonData[$jsonKey]['oncallupdate'] = FALSE;
+
+                                // Break time: agent just logged in, no active break
+                                $jsonData[$jsonKey]['isbreakpause'] = false;
+                                $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
 
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
@@ -545,6 +654,15 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 $jsonData[$jsonKey]['sec_laststatus'] = 0;
                                 $jsonData[$jsonKey]['oncallupdate'] = FALSE;
                                 $jsonData[$jsonKey]['logintime'] = $estadoMonitor[$sQueue][$sCanalAgente]['logintime'];
+
+                                // Break time: if agent was on a break-type pause, add its duration
+                                if ($jsonData[$jsonKey]['isbreakpause']
+                                    && !is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart'])) {
+                                    $iBreakDur = $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart']);
+                                    if ($iBreakDur > 0) $jsonData[$jsonKey]['sec_breaks_completed'] += $iBreakDur;
+                                }
+                                $jsonData[$jsonKey]['isbreakpause'] = false;
+                                $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
 
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
@@ -600,6 +718,17 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Nombre de la pausa
                                 $jsonData[$jsonKey]['pausename'] = $evento['pause_name'];
 
+                                // Break time: determine if this is a break-type pause
+                                $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+                                $jsonData[$jsonKey]['isbreakpause'] = ($jsonData[$jsonKey]['status'] == 'paused'
+                                    && !in_array($evento['pause_name'], $holdNames));
+                                $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
+                                if ($jsonData[$jsonKey]['isbreakpause']) {
+                                    // Break just started, duration is 0 at this instant
+                                    $jsonData[$jsonKey]['sec_breaks'] += max(0,
+                                        $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart']));
+                                }
+
                                 // Estado a emitir al cliente
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
                                 unset($respuesta[$jsonKey]['agentname']);
@@ -608,6 +737,23 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                     }
                     break;
                 case 'pauseend':
+                    // Determine if the ended pause was break-type (check before modifying state)
+                    $bBreakPauseEnded = false;
+                    $iBreakPauseDuration = 0;
+                    foreach (array_keys($estadoMonitor) as $sCheckQueue) {
+                        if (isset($estadoMonitor[$sCheckQueue][$sCanalAgente])) {
+                            $sCheckKey = 'queue-'.$sCheckQueue.'-member-'.$sNumeroAgente;
+                            if (isset($jsonData[$sCheckKey]) && $jsonData[$sCheckKey]['isbreakpause']) {
+                                $bBreakPauseEnded = true;
+                                if (!is_null($estadoMonitor[$sCheckQueue][$sCanalAgente]['lastpausestart'])) {
+                                    $iBreakPauseDuration = max(0,
+                                        $iTimestampActual - strtotime($estadoMonitor[$sCheckQueue][$sCanalAgente]['lastpausestart']));
+                                }
+                                break;
+                            }
+                        }
+                    }
+
                     foreach (array_keys($estadoMonitor) as $sQueue) {
                         if (isset($estadoMonitor[$sQueue][$sCanalAgente])) {
                             $jsonKey = 'queue-'.$sQueue.'-member-'.$sNumeroAgente;
@@ -642,6 +788,13 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                         $jsonData[$jsonKey]['logintime'] += $iDuracionSesion;
                                     }
                                 }
+
+                                // Break time: add completed break duration if it was break-type
+                                if ($bBreakPauseEnded && $iBreakPauseDuration > 0) {
+                                    $jsonData[$jsonKey]['sec_breaks_completed'] += $iBreakPauseDuration;
+                                }
+                                $jsonData[$jsonKey]['isbreakpause'] = false;
+                                $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
 
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
@@ -698,6 +851,16 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                     }
                                 }
 
+                                // Break time: recalculate at event time, freeze timer during call
+                                $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
+                                if ($jsonData[$jsonKey]['isbreakpause']
+                                    && !is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart'])
+                                    && is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpauseend'])) {
+                                    $jsonData[$jsonKey]['sec_breaks'] += max(0,
+                                        $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart']));
+                                }
+                                $jsonData[$jsonKey]['isbreakpause'] = false;
+
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
@@ -749,6 +912,22 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                     }
                                 }
 
+                                // Break time: check if agent returns to a break-type pause
+                                if ($jsonData[$jsonKey]['status'] == 'paused') {
+                                    $sPauseName = isset($jsonData[$jsonKey]['pausename']) ? $jsonData[$jsonKey]['pausename'] : null;
+                                    $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+                                    $jsonData[$jsonKey]['isbreakpause'] = !is_null($sPauseName) && !in_array($sPauseName, $holdNames);
+                                } else {
+                                    $jsonData[$jsonKey]['isbreakpause'] = false;
+                                }
+                                $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
+                                if ($jsonData[$jsonKey]['isbreakpause']
+                                    && !is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart'])
+                                    && is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpauseend'])) {
+                                    $jsonData[$jsonKey]['sec_breaks'] += max(0,
+                                        $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart']));
+                                }
+
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
@@ -767,11 +946,6 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                     if (isset($estadoMonitor[$sQueue][$sCanalAgente])) {
                         $jsonKey = 'queue-'.$sQueue.'-member-'.$sNumeroAgente;
                         if (isset($jsonData[$jsonKey]) && $jsonData[$jsonKey]['status'] != $sNewStatus) {
-                            debug_agent_monitoring("agentstatechange event for $jsonKey", [
-                                'old' => $jsonData[$jsonKey]['status'],
-                                'new' => $sNewStatus
-                            ]);
-
                             // Update monitor state
                             $estadoMonitor[$sQueue][$sCanalAgente]['agentstatus'] = $sNewStatus;
 
