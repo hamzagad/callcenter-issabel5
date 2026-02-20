@@ -40,6 +40,7 @@ $arrLangModule=array(
 "CALL" => "CALL",
 "BREAK" => "BREAK",
 "Total break time" => "Total break time",
+"HOLD" => "HOLD",
 "Shift From" => "From",
 "Shift To" => "To",
 "Apply" => "Apply",

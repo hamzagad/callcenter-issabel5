@@ -1184,6 +1184,7 @@ class PaloSantoConsola
                     'lastpauseend'          =>  isset($xml_agent->lastpauseend) ? (string)$xml_agent->lastpauseend : NULL,
                     'linkstart'             =>  NULL,
                     'pausename'             =>  isset($estadoAgente->pauseinfo) ? (string)$estadoAgente->pauseinfo->pausename : NULL,
+                    'onhold'                =>  isset($estadoAgente->onhold) ? (bool)(int)$estadoAgente->onhold : false,
                 );
 
                 // Averiguar a qué colas pertenece el agente

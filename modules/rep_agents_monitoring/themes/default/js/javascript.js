@@ -274,7 +274,8 @@ function manejarRespuestaStatus(respuesta)
 				estadoClienteHash = respuesta[k];
 			}
 		} else if (estadoCliente[k] != null) {
-			if (estadoCliente[k]['status'] != respuesta[k]['status']) {
+			if (estadoCliente[k]['status'] != respuesta[k]['status'] ||
+				estadoCliente[k]['onhold'] != respuesta[k]['onhold']) {
 				// El estado del agente ha cambiado, actualizar icono
 				var statuslabel = $('#'+k+'-statuslabel');
 				statuslabel.empty();
@@ -290,13 +291,19 @@ function manejarRespuestaStatus(respuesta)
 					break;
 				case 'oncall':
 					statuslabel.append('<img src="modules/'+module_name+'/images/call.png" border="0" alt="'+'CALL'+'"/>');
+					if (respuesta[k]['onhold']) statuslabel.append($('<span></span>').text('HOLD'));
 					break;
 				case 'paused':
 					statuslabel.append('<img src="modules/'+module_name+'/images/break.png" border="0" alt="'+'BREAK'+'"/>');
-					if (typeof respuesta[k].pausename == 'string') statuslabel.append($('<span></span>').text(respuesta[k].pausename));
+					if (respuesta[k]['onhold']) {
+						statuslabel.append($('<span></span>').text('HOLD'));
+					} else if (typeof respuesta[k].pausename == 'string') {
+						statuslabel.append($('<span></span>').text(respuesta[k].pausename));
+					}
 					break;
 				}
 				estadoCliente[k]['status'] = respuesta[k]['status'];
+				estadoCliente[k]['onhold'] = respuesta[k]['onhold'];
 			}
 
 			// Actualizar los cronómetros con los nuevos valores

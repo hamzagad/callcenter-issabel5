@@ -177,10 +177,14 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
             break;
         case 'oncall':
             $sEstadoTag = '<img src="modules/'.$module_name.'/images/call.png" border="0" alt="'._tr('CALL').'"/>';
+            if ($jsonRow['onhold'])
+                $sEstadoTag .= '<span>'._tr('HOLD').'</span>';
             break;
         case 'paused':
             $sEstadoTag = '<img src="modules/'.$module_name.'/images/break.png" border="0" alt="'._tr('BREAK').'"/>';
-            if (!is_null($jsonRow['pausename']))
+            if ($jsonRow['onhold'])
+                $sEstadoTag .= '<span>'._tr('HOLD').'</span>';
+            elseif (!is_null($jsonRow['pausename']))
                 $sEstadoTag .= '<span>'.htmlentities($jsonRow['pausename'], ENT_COMPAT, 'UTF-8').'</span>';
             break;
         }
@@ -260,6 +264,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         $estadoCliente[$k] = array(
             'status'        =>  $jsonData[$k]['status'],
             'oncallupdate'  =>  $jsonData[$k]['oncallupdate'],
+            'onhold'        =>  $jsonData[$k]['onhold'],
         );
     }
     $estadoHash = generarEstadoHash($module_name, $estadoCliente);
@@ -561,6 +566,7 @@ function construirDatosJSON(&$estadoMonitor, $breakData = array(), $loginData = 
                 'num_calls_completed'   =>  $num_calls_completed,
                 'oncallupdate'          =>  $is_oncall,
                 'pausename'             =>  $infoAgente['pausename'],
+                'onhold'                =>  $infoAgente['onhold'],
             );
 
             // Break time tracking
@@ -641,10 +647,12 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     foreach ($jsonData as $jsonKey => $jsonRow) {
     	if (isset($estadoCliente[$jsonKey])) {
     		if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
-                $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
+                $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate'] ||
+                $estadoCliente[$jsonKey]['onhold'] != $jsonRow['onhold']) {
                 $respuesta[$jsonKey] = $jsonRow;
                 $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
+                $estadoCliente[$jsonKey]['onhold'] = $jsonRow['onhold'];
                 unset($respuesta[$jsonKey]['agentname']);
             }
     	}
@@ -665,10 +673,12 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
             foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                 if (isset($estadoCliente[$jsonKey])) {
                     if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
-                        $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
+                        $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate'] ||
+                        $estadoCliente[$jsonKey]['onhold'] != $jsonRow['onhold']) {
                         $respuesta[$jsonKey] = $jsonRow;
                         $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
                         $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
+                        $estadoCliente[$jsonKey]['onhold'] = $jsonRow['onhold'];
                         unset($respuesta[$jsonKey]['agentname']);
                     }
                 }
@@ -700,14 +710,17 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                 ksort($estadoMonitorActual);
                 $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
                 $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
-                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $loginData);
+                $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
+                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $loginData, $callData);
                 foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                     if (isset($estadoCliente[$jsonKey])) {
                         if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
-                            $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate']) {
+                            $estadoCliente[$jsonKey]['oncallupdate'] != $jsonRow['oncallupdate'] ||
+                            $estadoCliente[$jsonKey]['onhold'] != $jsonRow['onhold']) {
                             $respuesta[$jsonKey] = $jsonRow;
                             $estadoCliente[$jsonKey]['status'] = $jsonRow['status'];
                             $estadoCliente[$jsonKey]['oncallupdate'] = $jsonRow['oncallupdate'];
+                            $estadoCliente[$jsonKey]['onhold'] = $jsonRow['onhold'];
                             unset($respuesta[$jsonKey]['agentname']);
                         }
                     }
@@ -750,6 +763,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
+                                $estadoCliente[$jsonKey]['onhold'] = $jsonData[$jsonKey]['onhold'];
 
                                 // Estado a emitir al cliente
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
@@ -791,6 +805,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
+                                $estadoCliente[$jsonKey]['onhold'] = $jsonData[$jsonKey]['onhold'];
 
                                 // Estado a emitir al cliente
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
@@ -831,6 +846,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
+                                $estadoCliente[$jsonKey]['onhold'] = $jsonData[$jsonKey]['onhold'];
 
                                 // Nombre de la pausa
                                 $jsonData[$jsonKey]['pausename'] = $evento['pause_name'];
@@ -909,6 +925,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
+                                $estadoCliente[$jsonKey]['onhold'] = $jsonData[$jsonKey]['onhold'];
 
                                 // Estado a emitir al cliente
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
@@ -968,6 +985,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
+                                $estadoCliente[$jsonKey]['onhold'] = $jsonData[$jsonKey]['onhold'];
 
                                 // Estado a emitir al cliente
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
@@ -1028,6 +1046,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
+                                $estadoCliente[$jsonKey]['onhold'] = $jsonData[$jsonKey]['onhold'];
 
                                 // Estado a emitir al cliente
                                 $respuesta[$jsonKey] = $jsonData[$jsonKey];
