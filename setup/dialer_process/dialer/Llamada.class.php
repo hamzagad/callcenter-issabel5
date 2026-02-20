@@ -1301,7 +1301,7 @@ class Llamada
             "] _cb_Park response received - Response={$r['Response']}" .
             (isset($r['Message']) ? " Message={$r['Message']}" : "") .
             " request_hold=" . ($this->request_hold ? 'TRUE' : 'FALSE') .
-            " park_exten=" . ($this->_park_exten ?? 'NULL'));
+            " park_exten=" . (isset($this->_park_exten) ? $this->_park_exten : 'NULL'));
         $this->_tuberia->enviarRespuesta($sFuente,
             ($r['Response'] == 'Success')
                 ? array(0, '')

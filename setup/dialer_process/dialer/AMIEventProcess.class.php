@@ -1476,7 +1476,7 @@ class AMIEventProcess extends TuberiaProcess
                 "] Hold initiating - Agent={$sAgente} call actualchannel=" . $a->llamada->actualchannel .
                 " status=" . $a->llamada->status .
                 " request_hold=" . ($a->llamada->request_hold ? 'TRUE' : 'FALSE') .
-                " park_exten=" . ($a->llamada->park_exten ?? 'NULL'));
+                " park_exten=" . (isset($a->llamada->park_exten) ? $a->llamada->park_exten : 'NULL'));
         }
 
         // If agent is Agent type and in atxfer state, set ATXFER_ON_HOLD on
