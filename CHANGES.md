@@ -1596,8 +1596,191 @@ When the radio buttons are absent, `$('#transfer_type_attended').is(':checked')`
 
 ---
 
+---
+
+### 19. Total Break Time Column in Agents Monitoring
+**Files**:
+- `modules/rep_agents_monitoring/index.php` (consultarTiempoBreakAgentes, construirDatosJSON, grid column, SSE event handler)
+- `modules/rep_agents_monitoring/themes/default/js/javascript.js` (sec_breaks tracking, isbreakpause flag, cronómetro update)
+- `modules/rep_agents_monitoring/lang/*.lang` (BREAK, READY, RINGING, CALL translations)
+- `modules/agent_console/libs/paloSantoConsola.class.php` (pause_class field in agent state)
+
+**Issue**: The Agents Monitoring report had no column to display total break time per agent. Only login time, call time, and call count were shown.
+
+**Fix - Part 1: Database Query** (`index.php`)
+
+Added `consultarTiempoBreakAgentes($datetimeStart, $datetimeEnd)` that queries the `audit` table for break sessions:
+
+```php
+// Queries audit WHERE id_break IS NOT NULL (pause/break sessions)
+// AND tipo_break IN ('B') - only regular breaks, not Hold (tipo 'H')
+// SUM(LEAST(datetime_end, :end) - GREATEST(datetime_init, :start))
+// to clip session durations to the requested time window
+```
+
+Break tipo mapping: `'B'` = regular break (counted), `'H'` = Hold type (excluded from break time).
+
+**Fix - Part 2: JSON Data** (`index.php`)
+
+Added `sec_breaks` (total break seconds) and `isbreakpause` (bool: agent is currently on a break-type pause) to `construirDatosJSON()` output. `isbreakpause` is used by the frontend to determine whether to increment the live break timer.
+
+**Fix - Part 3: Grid Column**
+
+Added "Total break time" column to the monitoring grid, alongside the existing login time and call time columns.
+
+**Fix - Part 4: SSE Event Handler**
+
+Updated the `pausestart`/`pauseend` event handlers to track `isbreakpause` state so the real-time break timer starts/stops correctly when agent status changes.
+
+**Fix - Part 5: Frontend Timer** (`javascript.js`)
+
+Added `sec_breaks` to the cronómetro update loop. Timer only increments when `estadoCliente[k]['isbreakpause']` is true (agent is on a regular break, not on hold).
+
+**Impact**:
+- Supervisors can see total accumulated break time per agent in real-time
+- Break timer increments live when agent is on break and pauses when on call or hold
+- Queue totals row shows summed break time across all agents in the queue
+
+---
+
+### 20. Shift-Based Filtering for Agents Monitoring Stats
+**Files**:
+- `modules/rep_agents_monitoring/index.php` (calculateShiftDatetimeRange, consultarTiempoLoginAgentes, consultarLlamadasAgentes, shift param parsing, shift filter HTML)
+- `modules/rep_agents_monitoring/themes/default/js/javascript.js` (localStorage, shift UI, SSE params)
+- `modules/rep_agents_monitoring/lang/en.lang` (Shift From, Shift To, Apply)
+
+**Issue**: All statistics in Agents Monitoring (break time, login time, talk time, call count) used a hardcoded full-day range (00:00:00–23:59:59 today). There was no way to filter stats to a specific work shift.
+
+**Fix - Part 1: Shift Range Calculation** (`index.php`)
+
+Added `calculateShiftDatetimeRange($fromHour, $toHour)`:
+- Same-day shift (e.g., 08–17): `today HH:00:00` to `today HH:59:59`
+- Overnight shift (e.g., 22–06): `yesterday HH:00:00` to `today HH:59:59`
+
+**Fix - Part 2: Shift-Filtered Login Time Query** (`index.php`)
+
+Added `consultarTiempoLoginAgentes($datetimeStart, $datetimeEnd)` querying the `audit` table (`id_break IS NULL` = login sessions). Uses `GREATEST`/`LEAST` to clip sessions that overlap shift boundaries:
+
+```sql
+SUM(
+    UNIX_TIMESTAMP(LEAST(COALESCE(audit.datetime_end, :active_end), :end))
+    - UNIX_TIMESTAMP(GREATEST(audit.datetime_init, :start))
+) AS logintime
+```
+
+`$sActiveEnd` is calculated in PHP (`date('Y-m-d H:i:s')` capped at shift end) instead of using SQL `NOW()`, so active sessions are counted up to the current moment but not beyond the shift end.
+
+**Fix - Part 3: Shift-Filtered Call Stats Query** (`index.php`)
+
+Added `consultarLlamadasAgentes($datetimeStart, $datetimeEnd)` querying both:
+- `call_entry` table (incoming calls: `datetime_init` within shift, `duration IS NOT NULL`)
+- `calls` table (outgoing calls: `start_time` within shift, `duration IS NOT NULL`)
+
+Results are merged per `agentchannel` in PHP.
+
+**Fix - Part 4: Shift Filter UI** (`index.php`, `javascript.js`, `en.lang`)
+
+Added shift filter bar above the monitoring grid with:
+- From/To hour dropdowns (00–23)
+- Apply button that reloads the page with `shift_from`/`shift_to` URL params
+- Range indicator label (e.g., "Today 08:00 – 17:59" or "Yesterday 22:00 – Today 06:59")
+- Preferences saved to `localStorage` and restored on page load
+
+SSE/checkStatus requests include `shift_from` and `shift_to` parameters so break time DB re-polls use the same shift range throughout the session.
+
+**Default**: 00–23 (full day, behavior identical to previous hardcoded range).
+
+**Impact**:
+- Supervisors can filter all stats to a specific work shift
+- Overnight shifts spanning midnight are supported
+- Shift preference persists across page reloads via localStorage
+
+---
+
+### 21. On-Hold Status Display in Agents Monitoring
+**Files**:
+- `modules/agent_console/libs/paloSantoConsola.class.php` (onhold field from ECCP XML)
+- `modules/rep_agents_monitoring/index.php` (onhold in JSON, HTML rendering, state change detection)
+- `modules/rep_agents_monitoring/themes/default/js/javascript.js` (onhold change detection, HOLD label)
+- `modules/rep_agents_monitoring/lang/en.lang` (HOLD translation)
+
+**Issue**: When an agent put a customer on hold, the Agents Monitoring panel continued to show the call icon without any indication that the call was on hold.
+
+**Fix - Part 1: ECCP Data Capture** (`paloSantoConsola.class.php`)
+
+Added `onhold` field to the agent info array in `listarEstadoMonitoreoAgentes()`:
+
+```php
+'onhold' => isset($estadoAgente->onhold) ? (bool)(int)$estadoAgente->onhold : false,
+```
+
+The ECCP protocol already sends `<onhold>1</onhold>` in agent status XML. This field was previously ignored.
+
+**Fix - Part 2: State Propagation** (`index.php`)
+
+- Added `'onhold' => $infoAgente['onhold']` to `construirDatosJSON()` JSON output
+- HTML status rendering: when `onhold` is true, append `<span>HOLD</span>` after the call/break icon for both `oncall` and `paused` states
+- Added `onhold` to server-side `$estadoCliente` tracking so state changes are detected
+- All 3 re-poll change detection blocks check `onhold` alongside `status` and `oncallupdate`
+
+**Fix - Part 3: Frontend Update** (`javascript.js`)
+
+Updated `manejarRespuestaStatus()` change detection to include `onhold`:
+
+```javascript
+if (estadoCliente[k]['status'] != respuesta[k]['status'] ||
+        estadoCliente[k]['onhold'] != respuesta[k]['onhold']) {
+    // Rebuild status label
+    case 'oncall':
+        // ... call icon ...
+        if (respuesta[k]['onhold']) statuslabel.append($('<span></span>').text('HOLD'));
+        break;
+    case 'paused':
+        // ... break icon ...
+        if (respuesta[k]['onhold']) statuslabel.append($('<span></span>').text('HOLD'));
+        else if (typeof respuesta[k].pausename == 'string') statuslabel.append(...);
+        break;
+}
+```
+
+**Impact**:
+- Agents Monitoring shows call icon + "HOLD" text when agent puts customer on hold
+- Hold state is reflected in real-time via SSE without page reload
+- Both `oncall` and `paused` states support on-hold indication
+
+---
+
+### 22. PHP 5.4 Compatibility Fix (Null Coalescing Operator)
+**Files**:
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` (line ~1479)
+- `setup/dialer_process/dialer/Llamada.class.php` (line ~1304)
+
+**Issue**: Two uses of the null coalescing operator `??` (introduced in PHP 7.0) were found in dialer debug log lines, making the code incompatible with PHP 5.4 installations.
+
+**Fix**: Replaced both occurrences with `isset()` ternary expressions:
+
+```php
+// BEFORE (PHP 7.0+ only):
+" park_exten=" . ($a->llamada->park_exten ?? 'NULL')
+" park_exten=" . ($this->_park_exten ?? 'NULL')
+
+// AFTER (PHP 5.4 compatible):
+" park_exten=" . (isset($a->llamada->park_exten) ? $a->llamada->park_exten : 'NULL')
+" park_exten=" . (isset($this->_park_exten) ? $this->_park_exten : 'NULL')
+```
+
+Both occurrences were inside debug log string concatenation for park extension logging in the hold feature.
+
+**Impact**: Dialer daemon now runs on PHP 5.4 installations without syntax errors in hold-related code paths.
+
+---
+
 ## Version History
 
+- **4.0.0.22** - PHP 5.4 compatibility fix (replace ?? with isset ternary)
+- **4.0.0.21** - On-hold status display in Agents Monitoring
+- **4.0.0.20** - Shift-based filtering for Agents Monitoring stats (break, login, talk time, call count)
+- **4.0.0.19** - Total Break Time column in Agents Monitoring
 - **4.0.0.18** - Disable attended transfer UI option for Agent type agents
 - **4.0.0.17** - Attended transfer consultation hangup fix and customer hangup during consultation fix
 - **4.0.0.16** - Agent type hold recovery fix for post-attended-transfer calls
