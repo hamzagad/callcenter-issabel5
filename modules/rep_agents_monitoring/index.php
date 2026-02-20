@@ -154,7 +154,9 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
     ksort($estadoMonitor);
 
     $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
-    $jsonData = construirDatosJSON($estadoMonitor, $breakData);
+    $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+    $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
+    $jsonData = construirDatosJSON($estadoMonitor, $breakData, $loginData, $callData);
 
     $arrData = array();
     $tuplaTotal = NULL;
@@ -388,7 +390,121 @@ function consultarTiempoBreakAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
     return $result;
 }
 
-function construirDatosJSON(&$estadoMonitor, $breakData = array())
+function consultarTiempoLoginAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    // For active sessions (datetime_end IS NULL), use PHP-calculated current time
+    // capped at the shift end, so active sessions are clipped correctly.
+    $sNow = date('Y-m-d H:i:s');
+    $sActiveEnd = ($sNow < $datetimeEnd) ? $sNow : $datetimeEnd;
+
+    // Query login sessions (id_break IS NULL) overlapping with shift range.
+    // GREATEST/LEAST clips each session to the shift boundaries.
+    // Active sessions use :active_end (PHP now, capped at shift end) instead of NOW().
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(" .
+           "  UNIX_TIMESTAMP(LEAST(COALESCE(audit.datetime_end, :active_end), :end1)) " .
+           "  - UNIX_TIMESTAMP(GREATEST(audit.datetime_init, :start1))" .
+           ") AS logintime " .
+           "FROM audit " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE audit.id_break IS NULL " .
+           "AND audit.datetime_init <= :end2 " .
+           "AND (audit.datetime_end IS NULL OR audit.datetime_end >= :start2) " .
+           "GROUP BY agent.id " .
+           "HAVING logintime > 0";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(
+        ':active_end' => $sActiveEnd,
+        ':start1'     => $datetimeStart,
+        ':end1'       => $datetimeEnd,
+        ':start2'     => $datetimeStart,
+        ':end2'       => $datetimeEnd,
+    ));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result[$row['agentchannel']] = (int)$row['logintime'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+function consultarLlamadasAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    // Incoming calls within shift range (completed only)
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(call_entry.duration) AS sec_calls, COUNT(*) AS num_calls " .
+           "FROM call_entry " .
+           "INNER JOIN agent ON agent.id = call_entry.id_agent " .
+           "WHERE call_entry.datetime_init >= :start1 " .
+           "AND call_entry.datetime_init <= :end1 " .
+           "AND call_entry.duration IS NOT NULL " .
+           "GROUP BY call_entry.id_agent";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start1' => $datetimeStart, ':end1' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $ch = $row['agentchannel'];
+        $result[$ch]['sec_calls'] = (isset($result[$ch]['sec_calls']) ? $result[$ch]['sec_calls'] : 0) + (int)$row['sec_calls'];
+        $result[$ch]['num_calls'] = (isset($result[$ch]['num_calls']) ? $result[$ch]['num_calls'] : 0) + (int)$row['num_calls'];
+    }
+
+    // Outgoing calls within shift range (completed only)
+    $sql2 = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+            "SUM(calls.duration) AS sec_calls, COUNT(*) AS num_calls " .
+            "FROM calls " .
+            "INNER JOIN agent ON agent.id = calls.id_agent " .
+            "WHERE calls.start_time >= :start2 " .
+            "AND calls.start_time <= :end2 " .
+            "AND calls.duration IS NOT NULL " .
+            "GROUP BY calls.id_agent";
+    $stmt2 = $pDB->prepare($sql2);
+    $stmt2->execute(array(':start2' => $datetimeStart, ':end2' => $datetimeEnd));
+    while ($row = $stmt2->fetch(PDO::FETCH_ASSOC)) {
+        $ch = $row['agentchannel'];
+        $result[$ch]['sec_calls'] = (isset($result[$ch]['sec_calls']) ? $result[$ch]['sec_calls'] : 0) + (int)$row['sec_calls'];
+        $result[$ch]['num_calls'] = (isset($result[$ch]['num_calls']) ? $result[$ch]['num_calls'] : 0) + (int)$row['num_calls'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+function construirDatosJSON(&$estadoMonitor, $breakData = array(), $loginData = array(), $callData = array())
 {
     $iTimestampActual = time();
     $jsonData = array();
@@ -418,23 +534,33 @@ function construirDatosJSON(&$estadoMonitor, $breakData = array())
                 break;
             }
 
+            // Talk time and call count: DB completed calls within shift + active call if any
+            $sec_calls_completed = isset($callData[$sAgentChannel]['sec_calls']) ? $callData[$sAgentChannel]['sec_calls'] : 0;
+            $num_calls_completed = isset($callData[$sAgentChannel]['num_calls']) ? $callData[$sAgentChannel]['num_calls'] : 0;
+            $active_call_dur = 0;
+            $is_oncall = !is_null($infoAgente['linkstart']);
+            if ($is_oncall) {
+                $active_call_dur = max(0, $iTimestampActual - strtotime($infoAgente['linkstart']));
+            }
+
             // Preparar estado inicial JSON
             $jsonData[$jsonKey] = array(
-                'agentchannel'      =>  $sAgentChannel,
-                'agentname'         =>  $infoAgente['agentname'],
-                'status'            =>  $infoAgente['agentstatus'],
-                'sec_laststatus'    =>  is_null($iTimestampEstado) ? NULL : ($iTimestampActual - $iTimestampEstado),
-                'sec_calls'         =>  $infoAgente['sec_calls'] +
-                    (is_null($infoAgente['linkstart'])
-                        ? 0
-                        : $iTimestampActual - strtotime($infoAgente['linkstart'])),
-                'logintime'         =>  $infoAgente['logintime'] + (
-                    (is_null($infoAgente['lastsessionend']) && !is_null($infoAgente['lastsessionstart']))
-                        ? $iTimestampActual - strtotime($infoAgente['lastsessionstart'])
-                        : 0),
-                'num_calls'         =>  $infoAgente['num_calls'],
-                'oncallupdate'      =>  !is_null($infoAgente['linkstart']),
-                'pausename'         =>  $infoAgente['pausename'],
+                'agentchannel'          =>  $sAgentChannel,
+                'agentname'             =>  $infoAgente['agentname'],
+                'status'                =>  $infoAgente['agentstatus'],
+                'sec_laststatus'        =>  is_null($iTimestampEstado) ? NULL : ($iTimestampActual - $iTimestampEstado),
+                'sec_calls'             =>  $sec_calls_completed + $active_call_dur,
+                'sec_calls_completed'   =>  $sec_calls_completed,
+                'logintime'             =>  isset($loginData[$sAgentChannel])
+                    ? $loginData[$sAgentChannel]
+                    : ($infoAgente['logintime'] + (
+                        (is_null($infoAgente['lastsessionend']) && !is_null($infoAgente['lastsessionstart']))
+                            ? $iTimestampActual - strtotime($infoAgente['lastsessionstart'])
+                            : 0)),
+                'num_calls'             =>  $num_calls_completed + ($is_oncall ? 1 : 0),
+                'num_calls_completed'   =>  $num_calls_completed,
+                'oncallupdate'          =>  $is_oncall,
+                'pausename'             =>  $infoAgente['pausename'],
             );
 
             // Break time tracking
@@ -509,7 +635,9 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     // Acumular inmediatamente las filas que son distintas en estado
     ksort($estadoMonitor);
     $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
-    $jsonData = construirDatosJSON($estadoMonitor, $breakData);
+    $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+    $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
+    $jsonData = construirDatosJSON($estadoMonitor, $breakData, $loginData, $callData);
     foreach ($jsonData as $jsonKey => $jsonRow) {
     	if (isset($estadoCliente[$jsonKey])) {
     		if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
@@ -531,7 +659,9 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
         if (is_array($estadoMonitorActual)) {
             ksort($estadoMonitorActual);
             $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
-            $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData);
+            $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+            $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
+            $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $loginData, $callData);
             foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                 if (isset($estadoCliente[$jsonKey])) {
                     if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
@@ -569,7 +699,8 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
             if (is_array($estadoMonitorActual)) {
                 ksort($estadoMonitorActual);
                 $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
-                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData);
+                $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $loginData);
                 foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                     if (isset($estadoCliente[$jsonKey])) {
                         if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
@@ -641,19 +772,12 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                     $estadoMonitor[$sQueue][$sCanalAgente]['lastpauseend'] = date('Y-m-d H:i:s', $iTimestampActual);
                                 }
                                 $estadoMonitor[$sQueue][$sCanalAgente]['linkstart'] = NULL;
-                                if (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart'])) {
-                                    $iTimestampInicio = strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
-                                    $iDuracionSesion =  $iTimestampActual - $iTimestampInicio;
-                                    if ($iDuracionSesion >= 0) {
-                                    	$estadoMonitor[$sQueue][$sCanalAgente]['logintime'] += $iDuracionSesion;
-                                    }
-                                }
 
                                 // Estado en la estructura JSON
                                 $jsonData[$jsonKey]['status'] = $estadoMonitor[$sQueue][$sCanalAgente]['agentstatus'];
                                 $jsonData[$jsonKey]['sec_laststatus'] = 0;
                                 $jsonData[$jsonKey]['oncallupdate'] = FALSE;
-                                $jsonData[$jsonKey]['logintime'] = $estadoMonitor[$sQueue][$sCanalAgente]['logintime'];
+                                // logintime comes from DB via re-poll (shift-filtered)
 
                                 // Break time: if agent was on a break-type pause, add its duration
                                 if ($jsonData[$jsonKey]['isbreakpause']
@@ -702,14 +826,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 } else {
                                     $jsonData[$jsonKey]['sec_laststatus'] = 0;
                                 }
-                                $jsonData[$jsonKey]['logintime'] = $estadoMonitor[$sQueue][$sCanalAgente]['logintime'];
-                                if (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart'])) {
-                                    $iTimestampInicio = strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
-                                    $iDuracionSesion =  $iTimestampActual - $iTimestampInicio;
-                                    if ($iDuracionSesion >= 0) {
-                                        $jsonData[$jsonKey]['logintime'] += $iDuracionSesion;
-                                    }
-                                }
+                                // logintime comes from DB via re-poll (shift-filtered)
 
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
@@ -780,14 +897,7 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                     $jsonData[$jsonKey]['sec_laststatus'] =
                                         $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
                                 }
-                                $jsonData[$jsonKey]['logintime'] = $estadoMonitor[$sQueue][$sCanalAgente]['logintime'];
-                                if (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart'])) {
-                                    $iTimestampInicio = strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
-                                    $iDuracionSesion =  $iTimestampActual - $iTimestampInicio;
-                                    if ($iDuracionSesion >= 0) {
-                                        $jsonData[$jsonKey]['logintime'] += $iDuracionSesion;
-                                    }
-                                }
+                                // logintime comes from DB via re-poll (shift-filtered)
 
                                 // Break time: add completed break duration if it was break-type
                                 if ($bBreakPauseEnded && $iBreakPauseDuration > 0) {
@@ -836,20 +946,14 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                     is_null($estadoMonitor[$sQueue][$sCanalAgente]['linkstart'])
                                         ? NULL
                                         : $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']);
-                                $jsonData[$jsonKey]['num_calls'] = $estadoMonitor[$sQueue][$sCanalAgente]['num_calls'];
-                                $jsonData[$jsonKey]['sec_calls'] = $estadoMonitor[$sQueue][$sCanalAgente]['sec_calls'] +
-                                    (is_null($jsonData[$jsonKey]['sec_laststatus'])
-                                        ? 0
-                                        : $jsonData[$jsonKey]['sec_laststatus']);
+                                // sec_calls/num_calls: DB completed + active call contribution
+                                $iActiveDur = is_null($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']) ? 0
+                                    : max(0, $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']));
+                                $jsonData[$jsonKey]['sec_calls'] = $jsonData[$jsonKey]['sec_calls_completed'] + $iActiveDur;
+                                $jsonData[$jsonKey]['num_calls'] = $jsonData[$jsonKey]['num_calls_completed']
+                                    + (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']) ? 1 : 0);
                                 $jsonData[$jsonKey]['oncallupdate'] = !is_null($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']);
-                                $jsonData[$jsonKey]['logintime'] = $estadoMonitor[$sQueue][$sCanalAgente]['logintime'];
-                                if (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart'])) {
-                                    $iTimestampInicio = strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
-                                    $iDuracionSesion =  $iTimestampActual - $iTimestampInicio;
-                                    if ($iDuracionSesion >= 0) {
-                                        $jsonData[$jsonKey]['logintime'] += $iDuracionSesion;
-                                    }
-                                }
+                                // logintime comes from DB via re-poll (shift-filtered)
 
                                 // Break time: recalculate at event time, freeze timer during call
                                 $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
@@ -882,12 +986,12 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 $estadoMonitor[$sQueue][$sCanalAgente]['agentstatus'] =
                                     (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpausestart']) && is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastpauseend']))
                                     ? 'paused' : 'online';
+                                // Add the just-ended call to completed totals (DB not yet updated)
                                 if (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['linkstart'])) {
-                                	$iTimestampInicio = strtotime($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']);
-                                    $iDuracionLlamada = $iTimestampActual - $iTimestampInicio;
-                                    if ($iDuracionLlamada >= 0) {
-                                    	$estadoMonitor[$sQueue][$sCanalAgente]['sec_calls'] += $iDuracionLlamada;
-                                    }
+                                    $iDuracionLlamada = max(0,
+                                        $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['linkstart']));
+                                    $jsonData[$jsonKey]['sec_calls_completed'] += $iDuracionLlamada;
+                                    $jsonData[$jsonKey]['num_calls_completed']++;
                                 }
                                 $estadoMonitor[$sQueue][$sCanalAgente]['linkstart'] = NULL;
 
@@ -900,17 +1004,10 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                     $jsonData[$jsonKey]['sec_laststatus'] =
                                         $iTimestampActual - strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
                                 }
-                                $jsonData[$jsonKey]['num_calls'] = $estadoMonitor[$sQueue][$sCanalAgente]['num_calls'];
-                                $jsonData[$jsonKey]['sec_calls'] = $estadoMonitor[$sQueue][$sCanalAgente]['sec_calls'];
+                                $jsonData[$jsonKey]['sec_calls'] = $jsonData[$jsonKey]['sec_calls_completed'];
+                                $jsonData[$jsonKey]['num_calls'] = $jsonData[$jsonKey]['num_calls_completed'];
                                 $jsonData[$jsonKey]['oncallupdate'] = FALSE;
-                                $jsonData[$jsonKey]['logintime'] = $estadoMonitor[$sQueue][$sCanalAgente]['logintime'];
-                                if (!is_null($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart'])) {
-                                    $iTimestampInicio = strtotime($estadoMonitor[$sQueue][$sCanalAgente]['lastsessionstart']);
-                                    $iDuracionSesion =  $iTimestampActual - $iTimestampInicio;
-                                    if ($iDuracionSesion >= 0) {
-                                        $jsonData[$jsonKey]['logintime'] += $iDuracionSesion;
-                                    }
-                                }
+                                // logintime comes from DB via re-poll (shift-filtered)
 
                                 // Break time: check if agent returns to a break-type pause
                                 if ($jsonData[$jsonKey]['status'] == 'paused') {
