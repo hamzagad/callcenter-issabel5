@@ -290,13 +290,15 @@ function manejarRespuestaStatus(respuesta)
 					statuslabel.append('<img src="modules/'+module_name+'/images/agent-ringing.gif" border="0" alt="'+'RINGING'+'"/>');
 					break;
 				case 'oncall':
-					statuslabel.append('<img src="modules/'+module_name+'/images/call.png" border="0" alt="'+'CALL'+'"/>');
-					if (respuesta[k]['onhold']) statuslabel.append($('<span></span>').text('HOLD'));
+					if (respuesta[k]['onhold'])
+						statuslabel.append('<img src="modules/'+module_name+'/images/hold.png" border="0" alt="'+'HOLD'+'"/>');
+					else
+						statuslabel.append('<img src="modules/'+module_name+'/images/call.png" border="0" alt="'+'CALL'+'"/>');
 					break;
 				case 'paused':
 					statuslabel.append('<img src="modules/'+module_name+'/images/break.png" border="0" alt="'+'BREAK'+'"/>');
 					if (respuesta[k]['onhold']) {
-						statuslabel.append($('<span></span>').text('HOLD'));
+						statuslabel.append('<img src="modules/'+module_name+'/images/hold.png" border="0" alt="'+'HOLD'+'"/>');
 					} else if (typeof respuesta[k].pausename == 'string') {
 						statuslabel.append($('<span></span>').text(respuesta[k].pausename));
 					}

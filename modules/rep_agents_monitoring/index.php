@@ -176,14 +176,15 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
             $sEstadoTag = '<img src="modules/'.$module_name.'/images/agent-ringing.gif" border="0" alt="'._tr('RINGING').'"/>';
             break;
         case 'oncall':
-            $sEstadoTag = '<img src="modules/'.$module_name.'/images/call.png" border="0" alt="'._tr('CALL').'"/>';
             if ($jsonRow['onhold'])
-                $sEstadoTag .= '<span>'._tr('HOLD').'</span>';
+                $sEstadoTag = '<img src="modules/'.$module_name.'/images/hold.png" border="0" alt="'._tr('HOLD').'"/>';
+            else
+                $sEstadoTag = '<img src="modules/'.$module_name.'/images/call.png" border="0" alt="'._tr('CALL').'"/>';
             break;
         case 'paused':
             $sEstadoTag = '<img src="modules/'.$module_name.'/images/break.png" border="0" alt="'._tr('BREAK').'"/>';
             if ($jsonRow['onhold'])
-                $sEstadoTag .= '<span>'._tr('HOLD').'</span>';
+                $sEstadoTag .= '<img src="modules/'.$module_name.'/images/hold.png" border="0" alt="'._tr('HOLD').'"/>';
             elseif (!is_null($jsonRow['pausename']))
                 $sEstadoTag .= '<span>'.htmlentities($jsonRow['pausename'], ENT_COMPAT, 'UTF-8').'</span>';
             break;
@@ -843,6 +844,11 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 }
                                 // logintime comes from DB via re-poll (shift-filtered)
 
+                                // Update onhold flag based on event pause class
+                                if (isset($evento['pause_class']) && $evento['pause_class'] == 'hold') {
+                                    $jsonData[$jsonKey]['onhold'] = true;
+                                }
+
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
                                 $estadoCliente[$jsonKey]['oncallupdate'] = $jsonData[$jsonKey]['oncallupdate'];
@@ -921,6 +927,11 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
                                 }
                                 $jsonData[$jsonKey]['isbreakpause'] = false;
                                 $jsonData[$jsonKey]['sec_breaks'] = $jsonData[$jsonKey]['sec_breaks_completed'];
+
+                                // Update onhold flag based on event pause class
+                                if (isset($evento['pause_class']) && $evento['pause_class'] == 'hold') {
+                                    $jsonData[$jsonKey]['onhold'] = false;
+                                }
 
                                 // Estado del cliente
                                 $estadoCliente[$jsonKey]['status'] = $jsonData[$jsonKey]['status'];
