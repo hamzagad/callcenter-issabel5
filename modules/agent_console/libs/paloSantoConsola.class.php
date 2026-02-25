@@ -1778,8 +1778,8 @@ class PaloSantoConsola
                     FROM calls c
                     LEFT JOIN current_calls cc ON cc.id_call = c.id
                     WHERE c.id_campaign IN ($placeholders)
-                    AND c.datetime_entry_queue >= ?
-                    AND c.datetime_entry_queue <= ?
+                    AND c.fecha_llamada >= ?
+                    AND c.fecha_llamada <= ?
                     GROUP BY c.status";
 
             $recordset = $oDB->fetchTable($sql, TRUE, $params);
@@ -1852,8 +1852,8 @@ class PaloSantoConsola
             $sqlQueued = "SELECT COUNT(*) as cnt
                           FROM calls
                           WHERE id_campaign IN ($placeholders)
-                          AND datetime_entry_queue >= ?
-                          AND datetime_entry_queue <= ?
+                          AND fecha_llamada >= ?
+                          AND fecha_llamada <= ?
                           AND status = 'OnQueue'";
 
             $queuedRow = $oDB->getFirstRowQuery($sqlQueued, TRUE, $params2);

@@ -2765,8 +2765,26 @@ Uniqueid: 1429642067.241008
         }
 
         if (strpos($params['Channel'], 'Local/')===0) {
-            $this->_log->output('DEBUG: '.__METHOD__.': ignoro hangup local | EN: ignoring local hangup');
-            return FALSE;
+            // Normally Local channel hangups are ignored because the real trunk
+            // channel hangup handles cleanup. However, when the trunk fails
+            // (e.g., CHANUNAVAIL) but the dialplan routes the call to a queue
+            // where an agent answers, the Local channel hangup is the only
+            // event that can finalize the call.
+            $bLocalTracked = FALSE;
+            if (!is_null($this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid']))) {
+                $bLocalTracked = TRUE;
+            } elseif (!is_null($this->_listaAgentes->buscar('uniqueidlink', $params['Uniqueid']))) {
+                $bLocalTracked = TRUE;
+            } elseif (!is_null($this->_listaLlamadas->buscar('actualchannel', $params['Channel']))) {
+                $bLocalTracked = TRUE;
+            }
+            if (!$bLocalTracked) {
+                $this->_log->output('DEBUG: '.__METHOD__.': ignoro hangup local | EN: ignoring local hangup');
+                return FALSE;
+            }
+            $this->_log->output('DEBUG: '.__METHOD__.
+                ': Local channel hangup matches tracked call, processing normally'.
+                ' | uniqueid='.$params['Uniqueid'].' channel='.$params['Channel']);
         }
 
         $a = NULL;
