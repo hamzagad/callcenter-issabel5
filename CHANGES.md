@@ -2,6 +2,21 @@
 
 ## Version 4.0.0.7+ Bug Fixes
 
+### Fix Outgoing Campaigns Panel Date Filtering
+**File**: `modules/agent_console/libs/paloSantoConsola.class.php`
+
+**Issue**: The Outgoing Campaigns Panel (`rep_outgoing_campaigns_panel`) displayed incorrect call counts (e.g., "Total calls: 0" or significantly lower numbers) compared to the Calls Detail report. The panel was filtering calls using `datetime_entry_queue`, which is only populated when a call actually enters the queue (i.e., the remote party answered and was bridged to an agent). Calls with outcomes like `NoAnswer` or `Failure` have `datetime_entry_queue = NULL` and were excluded from all counts.
+
+**Fix**: Changed the date filter column from `datetime_entry_queue` to `fecha_llamada` in both SQL queries within `getOutgoingCallStatsByDatetimeRange()`. This matches how the Calls Detail report (`calls_detail`) filters outgoing calls and ensures all call records are included in the panel statistics regardless of whether they reached the queue.
+
+**Technical Details**:
+- The `fecha_llamada` column is set when the call record is created/scheduled, so it is always populated
+- The `datetime_entry_queue` column is only set when a call enters the queue after the remote party answers
+- Two queries were updated: the main status count query and the queued calls count query
+- The status mapping logic (Success, Abandoned, NoAnswer, Failure, etc.) remains unchanged
+
+---
+
 ### 0. New Configuration: Dump Related Asterisk Events
 **Files**:
 - `modules/callcenter_config/index.php`
