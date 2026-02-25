@@ -43,6 +43,7 @@
 <tr class="letra12"><td>{$dialer_timeout_inactivity.INPUT}</td></tr>
 <tr class="letra12"><td>{$dialer_debug.INPUT} {$dialer_debug.LABEL}</td></tr>
 <tr class="letra12"><td>{$dialer_allevents.INPUT} {$dialer_allevents.LABEL}</td></tr>
+<tr class="letra12"><td>{$dialer_relatedevents.INPUT} {$dialer_relatedevents.LABEL}</td></tr>
 <tr class="letra12"><td>{$dialer_overcommit.INPUT} {$dialer_overcommit.LABEL}</td></tr>
 <tr class="letra12"><td>{$dialer_predictivo.INPUT} {$dialer_predictivo.LABEL}</td></tr>
 </table>

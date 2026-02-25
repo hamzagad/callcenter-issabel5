@@ -977,6 +977,9 @@ class AMIEventProcess extends TuberiaProcess
                 if ($v) $this->_ami->add_event_handler('*', array($this, 'msg_Default'));
             }
             break;
+        case 'dialer_relatedevents':
+            $this->_config['dialer']['relatedevents'] = $v;
+            break;
         default:
             $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k.' | EN: ignoring unimplemented config key: '.$k);
             break;
@@ -1845,7 +1848,7 @@ class AMIEventProcess extends TuberiaProcess
 
     public function msg_VarSet($sEvent, $params, $sServer, $iPort)
     {
-        if ($this->DEBUG) {
+        if ($this->DEBUG && $this->_config['dialer']['relatedevents']) {
             $this->_log->output('DEBUG: '.__METHOD__.
                 "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
                 "\n$sEvent: => ".print_r($params, TRUE)

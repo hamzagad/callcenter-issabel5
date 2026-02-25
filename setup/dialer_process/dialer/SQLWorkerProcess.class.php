@@ -141,6 +141,7 @@ class SQLWorkerProcess extends TuberiaProcess
                 'tiempo_contestar'  =>  $this->_configDB->dialer_tiempo_contestar,
                 'debug'             =>  $this->_configDB->dialer_debug,
                 'allevents'         =>  $this->_configDB->dialer_allevents,
+                'relatedevents'     =>  $this->_configDB->dialer_relatedevents,
             ),
         ), $por_pedido);
     }
@@ -349,7 +350,7 @@ class SQLWorkerProcess extends TuberiaProcess
                             ));
                     } elseif (in_array($k, array('asterisk_duracion_sesion',
                         'dialer_llamada_corta', 'dialer_tiempo_contestar',
-                        'dialer_debug', 'dialer_allevents'))) {
+                        'dialer_debug', 'dialer_allevents', 'dialer_relatedevents'))) {
                         $this->_tuberia->msg_AMIEventProcess_actualizarConfig(
                             $k, $this->_configDB->$k);
                     }

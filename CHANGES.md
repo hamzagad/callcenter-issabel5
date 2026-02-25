@@ -2,6 +2,34 @@
 
 ## Version 4.0.0.7+ Bug Fixes
 
+### 0. New Configuration: Dump Related Asterisk Events
+**Files**:
+- `modules/callcenter_config/index.php`
+- `modules/callcenter_config/libs/paloSantoConfiguration.class.php`
+- `modules/callcenter_config/lang/en.lang`
+- `modules/callcenter_config/themes/default/form.tpl`
+- `setup/dialer_process/dialer/ConfigDB.class.php`
+- `setup/dialer_process/dialer/AMIEventProcess.class.php`
+- `setup/dialer_process/dialer/SQLWorkerProcess.class.php`
+
+**Issue**: When dialer debug is enabled, VarSet AMI events flood the log (623+ entries), making it difficult to find relevant debug information.
+
+**Fix**: Added new configuration option "Dump related Asterisk events" to control VarSet event logging:
+- When **disabled** (default): VarSet events are processed for MIXMONITOR_FILENAME tracking but not logged
+- When **enabled**: All VarSet events are logged to `/opt/issabel/dialer/dialerd.log`
+
+**Technical Details**:
+- Config key: `dialer.relatedevents` stored in `valor_config` table
+- Default value: `0` (disabled)
+- Follows same pattern as existing `dialer.allevents` option
+- VarSet processing for MIXMONITOR_FILENAME continues regardless of this setting
+
+**Usage**: Call Center > Configuration > check/uncheck "Dump related Asterisk events"
+
+---
+
+## Version 4.0.0.7+ Bug Fixes
+
 ### 1. Campaign Statistics Sync Fix
 **File**: `modules/campaign_out/libs/paloSantoCampaignCC.class.php`
 

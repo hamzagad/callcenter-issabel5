@@ -154,6 +154,16 @@ class ConfigDB
 				'mostrar_valor'	=>	TRUE,
 				'cast'			=>	'bool',
 			),
+			'relatedevents'	=>	array(
+				'descripcion'	=>	'depuración de eventos AMI relacionados (VarSet)',
+				                // debugging of related AMI events (VarSet)
+				'regex'			=>	'^(0|1)$',
+				'valor_omision'	=>	0,
+				'valor_viejo'	=>	NULL,
+				'valor_actual'	=>	NULL,
+				'mostrar_valor'	=>	TRUE,
+				'cast'			=>	'bool',
+			),
             'overcommit'    =>  array(
 				'descripcion'	=>	'sobre-colocación de llamadas',
 				                // call overcommitment
