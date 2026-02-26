@@ -356,10 +356,11 @@ class QueueShadow
 
         $iNumLlamadasColocar = array(
             'AGENTES_LIBRES'        =>  0,
+            'AGENTES_LIBRES_LISTA'  =>  array(),  // List of free agent interfaces for conflict detection
             'AGENTES_POR_DESOCUPAR' =>  array(),
             'CLIENTES_ESPERA'       =>  $this->_queues[$queue]['callers'],
         );
-        foreach ($this->_queues[$queue]['members'] as $miembro) {
+        foreach ($this->_queues[$queue]['members'] as $miembro_key => $miembro) {
 
             // Se ignora miembro en pausa
             // Paused member is ignored
@@ -367,8 +368,10 @@ class QueueShadow
 
             // Miembro definitivamente libre
             // Member definitely free
-            if (in_array($miembro['Status'], array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING)))
+            if (in_array($miembro['Status'], array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING))) {
                 $iNumLlamadasColocar['AGENTES_LIBRES']++;
+                $iNumLlamadasColocar['AGENTES_LIBRES_LISTA'][] = $miembro_key;
+            }
 
             // Miembro ocupado, se verifica si se desocupará
             // Busy member, verify if it will become free

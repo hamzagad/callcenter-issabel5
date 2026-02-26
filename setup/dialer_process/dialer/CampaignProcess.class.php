@@ -89,6 +89,12 @@ class CampaignProcess extends TuberiaProcess
      */
     private $_finalizandoPrograma = FALSE;
 
+    /* Agents claimed by campaigns in current review cycle.
+     * Prevents same agent from being counted as free by multiple campaigns.
+     * Reset at start of each _actualizarCampanias() cycle.
+     */
+    private $_agentesReclamados = array();
+
     public function inicioPostDemonio($infoConfig, &$oMainLog)
     {
     	$this->_log = $oMainLog;
@@ -519,6 +525,9 @@ PETICION_CAMPANIAS_ENTRANTES;
 
             // Generar las llamadas para todas las campañas salientes activas
             // Generate calls for all active outgoing campaigns
+            // Reset claimed agents at start of each campaign review cycle
+            $this->_agentesReclamados = array();
+
             foreach ($listaCampanias['outgoing'] as $tuplaCampania) {
                 /* Se debe crear el predictor para cada campaña porque la
                  * generación de llamadas toma tiempo debido a las consultas a
@@ -622,10 +631,50 @@ PETICION_CAMPANIAS_ENTRANTES;
         if (is_null($iNumLlamadasColocar) || $iNumLlamadasColocar > $iMaxPredecidos)
             $iNumLlamadasColocar = $iMaxPredecidos;
 
-        // TODO: colocar código de detección de conflicto de agentes
-        // TODO: place agent conflict detection code
+        // Agent conflict detection: reduce available agents by those already claimed
+        // Detección de conflicto de agentes: reducir agentes disponibles por los ya reclamados
+        if (isset($infoCola['AGENTES_LIBRES_LISTA']) && count($infoCola['AGENTES_LIBRES_LISTA']) > 0) {
+            $agentesLibresActuales = array();
+            $agentesConflicto = 0;
 
-$pepe = $iNumLlamadasColocar;
+            foreach ($infoCola['AGENTES_LIBRES_LISTA'] as $sAgentInterface) {
+                // Normalize: Local/1001@agents -> Agent/1001
+                $sNormalizado = $sAgentInterface;
+                if (!is_null($this->_compat)) {
+                    $tmp = $this->_compat->normalizeAgentFromInterface($sAgentInterface);
+                    if (!is_null($tmp)) $sNormalizado = $tmp;
+                }
+
+                if (isset($this->_agentesReclamados[$sNormalizado])) {
+                    $agentesConflicto++;
+                    if ($this->DEBUG) {
+                        $this->_log->output("DEBUG: ".__METHOD__." (campaign {$infoCampania['id']} ".
+                            "queue {$infoCampania['queue']}) agent $sNormalizado already claimed by campaign ".
+                            $this->_agentesReclamados[$sNormalizado]);
+                    }
+                } else {
+                    $agentesLibresActuales[] = $sNormalizado;
+                }
+            }
+
+            // Reduce prediction by conflicting agents
+            if ($agentesConflicto > 0) {
+                $iNumLlamadasColocarOriginal = $iNumLlamadasColocar;
+                $iNumLlamadasColocar -= $agentesConflicto;
+                if ($iNumLlamadasColocar < 0) $iNumLlamadasColocar = 0;
+
+                if ($this->DEBUG) {
+                    $this->_log->output("DEBUG: ".__METHOD__." (campaign {$infoCampania['id']} ".
+                        "queue {$infoCampania['queue']}) reduced iNumLlamadasColocar from $iNumLlamadasColocarOriginal ".
+                        "to $iNumLlamadasColocar due to $agentesConflicto conflicting agents");
+                }
+            }
+
+            // Claim available agents for this campaign
+            foreach ($agentesLibresActuales as $sAgente) {
+                $this->_agentesReclamados[$sAgente] = $infoCampania['id'];
+            }
+        }
 
 
         // En Asterisk13 el Originate Response llega tarde, luego de que el llamado termina, no podemos considerar que está pendiente
