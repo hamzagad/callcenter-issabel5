@@ -1,5 +1,111 @@
 # Issabel Call Center - Change Log
 
+## Version 4.0.0.8 - Fair Campaign Distribution
+
+### Fair Rotation for Shared Agents (N-Way Rotation)
+**File**: `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: When multiple campaigns share the same agents (same queue), the first campaign to process always claims all shared agents, leaving nothing for other campaigns. This creates unfair distribution where Campaign B and C never get to use the agents.
+
+**Example of the problem**:
+```
+Campaign A: agents [1001, 1002, 1003]
+Campaign B: agents [1001, 1002, 1003]
+Campaign C: agents [1001, 1002, 1003]  ← All share same agents!
+
+Every cycle:
+- Campaign A processes first → claims all agents → 3 calls
+- Campaign B processes second → all claimed → 0 calls
+- Campaign C processes third → all claimed → 0 calls
+
+B and C NEVER get to use the agents.
+```
+
+**Fix**: Implemented two-pass processing with N-way rotation:
+
+1. **Pass 1**: Collect which campaigns want which agents (intentions)
+2. **Allocate**: For shared agents, use rotation index to determine whose turn
+3. **Pass 2**: Process campaigns with their allocated agents
+4. **Advance**: Increment rotation index for next cycle
+
+**New behavior**:
+```
+Cycle 1: Campaign A gets agents → 3 calls
+Cycle 2: Campaign B gets agents → 3 calls  (ROTATED!)
+Cycle 3: Campaign C gets agents → 3 calls  (ROTATED!)
+Cycle 4: Campaign A gets agents → 3 calls  (back to A)
+
+Pattern: A → B → C → A → B → C → ...
+```
+
+**Technical Details**:
+- New properties added: `$_agentRotation`, `$_campaignIntentions`, `$_allocatedAgents`
+- New methods: `_resolveAgentRotation()`, `_getRotationWinner()`, `_processCampaignWithAllocation()`
+- Rotation state persists across cycles but resets if campaign set changes
+- Each agent rotates independently based on how many campaigns share it
+- Unique agents (only wanted by one campaign) are assigned directly without rotation
+
+**Mixed shared/unique agents example**:
+```
+Campaign A: agents [1001, 1002, 1003, 1004]  (1004 unique to A)
+Campaign B: agents [1001, 1002, 1005]        (1005 unique to B)
+Campaign C: agents [1001, 1006]              (1006 unique to C)
+
+Cycle 1:
+  Agent 1001: [A,B,C] → A (3-way rotation)
+  Agent 1002: [A,B] → A (2-way rotation)
+  Agent 1003-1004: A only
+  Agent 1005: B only
+  Agent 1006: C only
+  Result: A=4, B=1, C=1
+
+Cycle 2:
+  Agent 1001: [A,B,C] → B
+  Agent 1002: [A,B] → B
+  Result: A=2, B=3, C=1
+```
+
+**Debug logs** (when dialer_debug enabled):
+```bash
+# Watch rotation in action
+tail -f /opt/issabel/dialer/dialerd.log | grep -E "rotation|allocated|winner|Pass 1"
+
+# Check rotation pattern
+grep -E "assigned to campaign.*rotation" /opt/issabel/dialer/dialerd.log | tail -30
+```
+
+---
+
+### Agent Conflict Detection
+**File**: `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: When multiple campaigns use the same queue (and thus share the same agents), the dialer could over-place calls. Each campaign independently saw all free agents and tried to place calls for all of them, resulting in more calls than agents available.
+
+**Example of the problem**:
+```
+Queue Q has 3 free agents: [1001, 1002, 1003]
+Campaign A uses Q → sees 3 free agents → places 3 calls
+Campaign B uses Q → sees 3 free agents → places 3 calls
+Campaign C uses Q → sees 3 free agents → places 3 calls
+
+Result: 9 calls placed but only 3 agents available!
+```
+
+**Fix**: Added agent conflict detection that tracks which agents have been claimed by campaigns during each review cycle:
+- New property `$_agentesReclamados` tracks claimed agents per cycle
+- When a campaign processes, it checks which agents are already claimed
+- Only unclaimed agents are counted as available
+- Claimed agents are subtracted from the prediction count
+
+**Technical Details**:
+- Agent interfaces are normalized (e.g., `Local/1001@agents` → `Agent/1001`) for consistent tracking
+- The claimed agents map is reset at the start of each campaign review cycle
+- Debug logging shows which agents are claimed and by which campaign
+
+**Note**: This feature was the foundation that led to the Fair Rotation feature above. With conflict detection alone, the first campaign still gets all agents. Fair Rotation ensures equitable distribution.
+
+---
+
 ## Version 4.0.0.7+ Bug Fixes
 
 ### Fix Outgoing Campaigns Panel Date Filtering

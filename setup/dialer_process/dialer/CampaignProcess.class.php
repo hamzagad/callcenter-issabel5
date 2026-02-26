@@ -95,6 +95,18 @@ class CampaignProcess extends TuberiaProcess
      */
     private $_agentesReclamados = array();
 
+    /* N-way rotation tracking (persistent across cycles)
+     * Seguimiento de rotación N-vías (persistente entre ciclos) */
+    private $_agentRotation = array();  // [agent => ['key'=>'campaignIds', 'campaigns'=>[A,B,C], 'index'=>0]]
+
+    /* Campaign intentions for current cycle (Pass 1)
+     * Intenciones de campaña para el ciclo actual (Paso 1) */
+    private $_campaignIntentions = array();  // [campaign_id => [agent1, agent2, ...]]
+
+    /* Allocated agents after rotation resolution
+     * Agentes asignados después de la resolución de rotación */
+    private $_allocatedAgents = array();  // [campaign_id => [agent1, agent2, ...]]
+
     public function inicioPostDemonio($infoConfig, &$oMainLog)
     {
     	$this->_log = $oMainLog;
@@ -523,11 +535,54 @@ PETICION_CAMPANIAS_ENTRANTES;
              * later due to a DB exception. */
             $this->_iTimestampUltimaRevisionCampanias = time();
 
-            // Generar las llamadas para todas las campañas salientes activas
-            // Generate calls for all active outgoing campaigns
-            // Reset claimed agents at start of each campaign review cycle
+            // ============================================================
+            // PASS 1: Collect campaign intentions (which agents they want)
+            // PASO 1: Recopilar intenciones de campaña (qué agentes quieren)
+            // ============================================================
+            $this->_campaignIntentions = array();
             $this->_agentesReclamados = array();
 
+            foreach ($listaCampanias['outgoing'] as $campaignData) {
+                $queueInfo = $this->_tuberia->AMIEventProcess_infoPrediccionCola($campaignData['queue']);
+                if (is_null($queueInfo)) {
+                    $oPredictor = new Predictor($this->_ami);
+                    if ($oPredictor->examinarColas(array($campaignData['queue']))) {
+                        $queueInfo = $oPredictor->infoPrediccionCola($campaignData['queue']);
+                    }
+                }
+
+                if (!is_null($queueInfo) && isset($queueInfo['AGENTES_LIBRES_LISTA'])) {
+                    $normalizedAgents = array();
+                    foreach ($queueInfo['AGENTES_LIBRES_LISTA'] as $agentInterface) {
+                        $normalizedAgent = $agentInterface;
+                        if (!is_null($this->_compat)) {
+                            $tmp = $this->_compat->normalizeAgentFromInterface($agentInterface);
+                            if (!is_null($tmp)) $normalizedAgent = $tmp;
+                        }
+                        $normalizedAgents[] = $normalizedAgent;
+                    }
+                    $this->_campaignIntentions[$campaignData['id']] = $normalizedAgents;
+
+                    if ($this->DEBUG) {
+                        $this->_log->output("DEBUG: ".__METHOD__.
+                            " (campaign {$campaignData['id']} queue {$campaignData['queue']}) ".
+                            "Pass 1: wants agents [".implode(',', $normalizedAgents)."] | ".
+                            "(campaña {$campaignData['id']} cola {$campaignData['queue']}) ".
+                            "Paso 1: quiere agentes [".implode(',', $normalizedAgents)."]");
+                    }
+                }
+            }
+
+            // ============================================================
+            // ALLOCATE: Resolve shared agents using N-way rotation
+            // ASIGNAR: Resolver agentes compartidos usando rotación N-vías
+            // ============================================================
+            $this->_allocatedAgents = $this->_resolveAgentRotation($this->_campaignIntentions);
+
+            // ============================================================
+            // PASS 2: Process campaigns with allocated agents
+            // PASO 2: Procesar campañas con agentes asignados
+            // ============================================================
             foreach ($listaCampanias['outgoing'] as $tuplaCampania) {
                 /* Se debe crear el predictor para cada campaña porque la
                  * generación de llamadas toma tiempo debido a las consultas a
@@ -538,7 +593,7 @@ PETICION_CAMPANIAS_ENTRANTES;
                  * time it moves to the next campaign using that queue, the
                  * information may be obsolete. */
                 $oPredictor = new Predictor($this->_ami);
-                $this->_actualizarLlamadasCampania($tuplaCampania, $oPredictor);
+                $this->_processCampaignWithAllocation($tuplaCampania, $oPredictor);
 
                 /* Debido a las consultas a la base de datos realizadas para
                  * generar las llamadas a la campaña, es posible que se acumulen
@@ -557,6 +612,431 @@ PETICION_CAMPANIAS_ENTRANTES;
                 $this->_iTimestampUltimaRevisionCampanias = time();
             }
         }
+    }
+
+    /**
+     * Resolve agent allocation using N-way rotation.
+     * Each shared agent rotates among all campaigns that want it.
+     *
+     * Resolver asignación de agentes usando rotación N-vías.
+     * Cada agente compartido rota entre todas las campañas que lo quieren.
+     *
+     * @param array $intentions [campaign_id => [agents...]]
+     * @return array [campaign_id => [allocated_agents...]]
+     */
+    private function _resolveAgentRotation($intentions)
+    {
+        $allocated = array();
+        $agentToCampaigns = array();  // [agent => [campaign_ids...]]
+
+        // Build reverse map: which campaigns want each agent
+        // Construir mapa inverso: qué campañas quieren cada agente
+        foreach ($intentions as $campaignId => $agents) {
+            $allocated[$campaignId] = array();
+            foreach ($agents as $agent) {
+                if (!isset($agentToCampaigns[$agent])) {
+                    $agentToCampaigns[$agent] = array();
+                }
+                $agentToCampaigns[$agent][] = $campaignId;
+            }
+        }
+
+        // Allocate each agent / Asignar cada agente
+        foreach ($agentToCampaigns as $agent => $campaigns) {
+            if (count($campaigns) == 1) {
+                // Only one campaign wants this agent - assign directly
+                // Solo una campaña quiere este agente - asignar directamente
+                $allocated[$campaigns[0]][] = $agent;
+                $this->_agentesReclamados[$agent] = $campaigns[0];
+            } else {
+                // Multiple campaigns want this agent - use rotation
+                // Múltiples campañas quieren este agente - usar rotación
+                $winningCampaign = $this->_getRotationWinner($agent, $campaigns);
+                $allocated[$winningCampaign][] = $agent;
+                $this->_agentesReclamados[$agent] = $winningCampaign;
+
+                if ($this->DEBUG) {
+                    $this->_log->output("DEBUG: ".__METHOD__.
+                        " agent $agent shared by campaigns [".implode(',', $campaigns).
+                        "] -> assigned to campaign $winningCampaign (rotation) | ".
+                        "agente $agent compartido por campañas [".implode(',', $campaigns).
+                        "] -> asignado a campaña $winningCampaign (rotación)");
+                }
+            }
+        }
+
+        return $allocated;
+    }
+
+    /**
+     * Get the winning campaign for a shared agent using N-way rotation.
+     * Obtener la campaña ganadora para un agente compartido usando rotación N-vías.
+     *
+     * @param string $agent The agent identifier
+     * @param array $campaigns List of campaign IDs that want this agent
+     * @return int The campaign ID that wins this rotation
+     */
+    private function _getRotationWinner($agent, $campaigns)
+    {
+        sort($campaigns);  // Ensure consistent order / Asegurar orden consistente
+        $campaignsKey = implode(',', $campaigns);
+
+        // Initialize or update rotation tracking for this agent
+        // Inicializar o actualizar seguimiento de rotación para este agente
+        if (!isset($this->_agentRotation[$agent]) ||
+            $this->_agentRotation[$agent]['key'] !== $campaignsKey) {
+            // New agent or campaign set changed - initialize rotation
+            // Nuevo agente o conjunto de campañas cambió - inicializar rotación
+            $this->_agentRotation[$agent] = array(
+                'key' => $campaignsKey,
+                'campaigns' => $campaigns,
+                'index' => 0,
+            );
+        }
+
+        // Get current winner based on rotation index
+        // Obtener ganador actual basado en índice de rotación
+        $rotation = &$this->_agentRotation[$agent];
+        $winnerIndex = $rotation['index'] % count($rotation['campaigns']);
+        $winner = $rotation['campaigns'][$winnerIndex];
+
+        // Advance rotation for next cycle / Avanzar rotación para próximo ciclo
+        $rotation['index']++;
+
+        if ($this->DEBUG) {
+            $this->_log->output("DEBUG: ".__METHOD__.
+                " agent $agent rotation: index={$rotation['index']}, ".
+                "campaigns=[".implode(',', $campaigns)."], winner=$winner | ".
+                "agente $agent rotación: índice={$rotation['index']}, ".
+                "campañas=[".implode(',', $campaigns)."], ganador=$winner");
+        }
+
+        return $winner;
+    }
+
+    /**
+     * Process campaign calls using pre-allocated agents.
+     * Procesar llamadas de campaña usando agentes pre-asignados.
+     *
+     * @param array $infoCampania Campaign information
+     * @param Predictor $oPredictor Predictor instance
+     * @return bool TRUE if calls were placed, FALSE otherwise
+     */
+    private function _processCampaignWithAllocation($infoCampania, $oPredictor)
+    {
+        $campaignId = $infoCampania['id'];
+        $iTimeoutOriginate = $this->_configDB->dialer_timeout_originate;
+        if (is_null($iTimeoutOriginate) || $iTimeoutOriginate <= 0)
+            $iTimeoutOriginate = NULL;
+        else $iTimeoutOriginate *= 1000; // convertir a milisegundos / convert to milliseconds
+
+        // Get allocated agents for this campaign
+        // Obtener agentes asignados para esta campaña
+        $allocatedAgents = isset($this->_allocatedAgents[$campaignId])
+            ? $this->_allocatedAgents[$campaignId]
+            : array();
+
+        $numAllocatedAgents = count($allocatedAgents);
+
+        if ($numAllocatedAgents == 0) {
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: ".__METHOD__.
+                    " (campaign $campaignId queue {$infoCampania['queue']}) no agents allocated this cycle | ".
+                    "(campaña $campaignId cola {$infoCampania['queue']}) ningún agente asignado en este ciclo");
+            }
+            return FALSE;
+        }
+
+        // Build trunk dial pattern / Construir patrón de marcado de troncal
+        $datosTrunk = $this->_construirPlantillaMarcado($infoCampania['trunk']);
+        if (is_null($datosTrunk)) {
+            $this->_log->output("ERR: no se puede construir plantilla de marcado a partir de trunk '{$infoCampania['trunk']}'! | EN: cannot build dial template from trunk '{$infoCampania['trunk']}'!");
+            return FALSE;
+        }
+
+        // Get schedulable calls / Obtener llamadas programables
+        $listaLlamadasAgendadas = $this->_actualizarLlamadasAgendables($infoCampania, $datosTrunk);
+
+        // Calculate how many calls to place (limited by allocated agents)
+        // Calcular cuántas llamadas colocar (limitado por agentes asignados)
+        $iNumLlamadasColocar = $numAllocatedAgents;
+
+        // Apply max_canales limit if set / Aplicar límite max_canales si está configurado
+        if (!is_null($infoCampania['max_canales']) && $infoCampania['max_canales'] > 0) {
+            if ($iNumLlamadasColocar > $infoCampania['max_canales']) {
+                $iNumLlamadasColocar = $infoCampania['max_canales'];
+            }
+        }
+
+        // Subtract calls waiting for OriginateResponse
+        // Restar llamadas esperando OriginateResponse
+        $iNumEsperanRespuesta = count($listaLlamadasAgendadas) +
+            $this->_contarLlamadasEsperandoRespuesta($infoCampania['queue']);
+        if ($iNumLlamadasColocar > $iNumEsperanRespuesta) {
+            $iNumLlamadasColocar -= $iNumEsperanRespuesta;
+        } else {
+            $iNumLlamadasColocar = 0;
+        }
+
+        if ($this->DEBUG) {
+            $this->_log->output("DEBUG: ".__METHOD__.
+                " (campaign $campaignId queue {$infoCampania['queue']}) ".
+                "allocated agents: $numAllocatedAgents [".implode(',', $allocatedAgents)."], calls to place: $iNumLlamadasColocar | ".
+                "(campaña $campaignId cola {$infoCampania['queue']}) ".
+                "agentes asignados: $numAllocatedAgents [".implode(',', $allocatedAgents)."], llamadas a colocar: $iNumLlamadasColocar");
+        }
+
+        if (count($listaLlamadasAgendadas) <= 0 && $iNumLlamadasColocar <= 0) {
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: ".__METHOD__." (campaign $campaignId queue ".
+                    "{$infoCampania['queue']}) no free agents or calls to place! | ".
+                    "(campaña $campaignId cola {$infoCampania['queue']}) sin agentes libres ni llamadas a colocar!");
+            }
+            return FALSE;
+        }
+
+        // Dialer overcommit logic (to compensate for failed calls)
+        // Lógica de sobre-colocación del marcador (para compensar llamadas fallidas)
+        if ($iNumLlamadasColocar > 0 && $this->_configDB->dialer_overcommit) {
+            $iVentanaHistoria = 60 * 30; // 30 minutes window
+            $sPeticionASR =
+                'SELECT COUNT(*) AS total, SUM(IF(status = "Failure" OR status = "NoAnswer", 0, 1)) AS exito ' .
+                'FROM calls ' .
+                'WHERE id_campaign = ? AND status IS NOT NULL ' .
+                    'AND status <> "Placing" ' .
+                    'AND fecha_llamada IS NOT NULL ' .
+                    'AND fecha_llamada >= ?';
+            $recordset = $this->_db->prepare($sPeticionASR);
+            $recordset->execute(array($campaignId, date('Y-m-d H:i:s', time() - $iVentanaHistoria)));
+            $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
+            $recordset->closeCursor();
+
+            if ($tupla['total'] >= 10 && $tupla['exito'] > 0) {
+                $ASR = $tupla['exito'] / $tupla['total'];
+                $ASR_safe = $ASR;
+                if ($ASR_safe < 0.20) $ASR_safe = 0.20;
+                $iNumLlamadasColocar = (int)round($iNumLlamadasColocar / $ASR_safe);
+                if ($this->DEBUG) {
+                    $this->_log->output(
+                        "DEBUG: (campaign $campaignId queue {$infoCampania['queue']}) ".
+                        "in the last $iVentanaHistoria sec. " .
+                        "{$tupla['exito']} of {$tupla['total']} placed calls succeeded (ASR=".(sprintf('%.2f', $ASR * 100))."%). Placing " .
+                        "$iNumLlamadasColocar to compensate. | ".
+                        "(campaña $campaignId cola {$infoCampania['queue']}) ".
+                        "en los últimos $iVentanaHistoria seg. tuvieron éxito " .
+                        "{$tupla['exito']} de {$tupla['total']} llamadas colocadas (ASR=".(sprintf('%.2f', $ASR * 100))."%). Se colocan " .
+                        "$iNumLlamadasColocar para compensar.");
+                }
+            }
+        }
+
+        // Read calls to place / Leer llamadas a colocar
+        $listaLlamadas = $listaLlamadasAgendadas;
+        $iNumTotalLlamadas = count($listaLlamadas);
+        if ($iNumLlamadasColocar > 0) {
+            $sFechaSys = date('Y-m-d');
+            $sHoraSys = date('H:i:s');
+            $sPeticionLlamadas = <<<PETICION_LLAMADAS
+(SELECT 1 AS dummy_priority, id_campaign, id, phone, date_init AS dummy_date_init,
+    time_init AS dummy_time_init, date_end AS dummy_date_end,
+    time_end AS dummy_time_end, retries
+FROM calls
+WHERE id_campaign = ?
+    AND (status IS NULL
+        OR status NOT IN ("Success", "Placing", "Ringing", "OnQueue", "OnHold"))
+    AND retries < ?
+    AND dnc = 0
+    AND (? BETWEEN date_init AND date_end AND ? BETWEEN time_init AND time_end)
+    AND agent IS NULL)
+UNION
+(SELECT 2 AS dummy_priority, id_campaign, id, phone, date_init AS dummy_date_init,
+    time_init AS dummy_time_init, date_end AS dummy_date_end,
+    time_end AS dummy_time_end, retries
+FROM calls
+WHERE id_campaign = ?
+    AND (status IS NULL
+        OR status NOT IN ("Success", "Placing", "Ringing", "OnQueue", "OnHold"))
+    AND retries < ?
+    AND dnc = 0
+    AND date_init IS NULL AND date_end IS NULL AND time_init IS NULL AND time_end IS NULL
+    AND agent IS NULL)
+ORDER BY dummy_priority, retries, dummy_date_end, dummy_time_end, dummy_date_init, dummy_time_init, id
+LIMIT 0,?
+PETICION_LLAMADAS;
+            $recordset = $this->_db->prepare($sPeticionLlamadas);
+            $recordset->execute(array(
+                $campaignId,
+                $infoCampania['retries'],
+                $sFechaSys, $sHoraSys,
+                $campaignId,
+                $infoCampania['retries'],
+                $iNumLlamadasColocar));
+            $recordset->setFetchMode(PDO::FETCH_ASSOC);
+            $pid = posix_getpid();
+            foreach ($recordset as $tupla) {
+                $iNumTotalLlamadas++;
+                $sKey = sprintf('%d-%d-%d', $pid, $campaignId, $tupla['id']);
+                $sCanalTrunk = str_replace('$OUTNUM$', $tupla['phone'], $datosTrunk['TRUNK']);
+
+                if (!isset($listaLlamadas[$tupla['phone']])) {
+                    $tupla['actionid'] = $sKey;
+                    $tupla['dialstring'] = $sCanalTrunk;
+                    $tupla['agent'] = NULL;
+                    $listaLlamadas[$tupla['phone']] = $tupla;
+                } else {
+                    $this->_log->output("INFO: se ignora llamada $sKey con DialString ".
+                        "$sCanalTrunk - mismo DialString usado por llamada a punto de originar. | EN: call $sKey with DialString ".
+                        "$sCanalTrunk ignored - same DialString used by call about to originate.");
+                }
+            }
+        }
+
+        if ($iNumTotalLlamadas <= 0) {
+            // Check if there are scheduled calls outside the time window
+            $sPeticionTotal =
+                'SELECT COUNT(*) AS N FROM calls '.
+                'WHERE id_campaign = ? '.
+                    'AND (status IS NULL OR status NOT IN ("Success", "Placing", "Ringing", "OnQueue", "OnHold")) '.
+                    'AND retries < ? '.
+                    'AND dnc = 0';
+            $recordset = $this->_db->prepare($sPeticionTotal);
+            $recordset->execute(array($campaignId, $infoCampania['retries']));
+            $iNumTotal = $recordset->fetch(PDO::FETCH_COLUMN, 0);
+            $recordset->closeCursor();
+            if (!is_null($iNumTotal) && $iNumTotal > 0) {
+                if ($this->DEBUG) {
+                    $this->_log->output("DEBUG: ".__METHOD__." (campaign $campaignId ".
+                        "queue {$infoCampania['queue']}) no calls to ".
+                        "place; $iNumTotal scheduled calls but outside ".
+                        "time range. | (campaña $campaignId ".
+                        "cola {$infoCampania['queue']}) no hay llamadas a ".
+                        "colocar; $iNumTotal llamadas agendadas pero fuera de ".
+                        "horario.");
+                }
+                return FALSE;
+            }
+        }
+
+        // Check DNC list / Verificar lista DNC
+        $recordset = $this->_db->prepare(
+            'SELECT COUNT(*) FROM dont_call WHERE caller_id = ? AND status = "A"');
+        $sth = $this->_db->prepare(
+            'UPDATE calls SET dnc = 1 WHERE id_campaign = ? AND id = ?');
+        foreach (array_keys($listaLlamadas) as $k) {
+            $recordset->execute(array($k));
+            $iNumDNC = $recordset->fetch(PDO::FETCH_COLUMN, 0);
+            $recordset->closeCursor();
+            if ($iNumDNC > 0) {
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: '.__METHOD__." (campaign $campaignId ".
+                        "número $k encontrado en lista DNC, no se marcará. | EN: number $k found in DNC list, will not be dialed.");
+                }
+                $sth->execute(array($campaignId, $listaLlamadas[$k]['id']));
+                unset($listaLlamadas[$k]);
+            }
+        }
+
+        // Send to AMIEventProcess for monitoring / Enviar a AMIEventProcess para monitoreo
+        if (count($listaLlamadas) > 0) {
+            $listaKeyRepetidos = $this->_tuberia->AMIEventProcess_nuevasLlamadasMarcar($listaLlamadas);
+            foreach ($listaKeyRepetidos as $k) {
+                $sKey = $listaLlamadas[$k]['actionid'];
+                $sCanalTrunk = $listaLlamadas[$k]['dialstring'];
+                $this->_log->output("INFO: se ignora llamada $sKey con DialString ".
+                    "$sCanalTrunk - mismo DialString usado por llamada monitoreada. | EN: call $sKey with DialString ".
+                    "$sCanalTrunk ignored - same DialString used by monitored call.");
+                unset($listaLlamadas[$k]);
+            }
+        }
+
+        // Prepared statements for call placement
+        $sPeticionLlamadaColocada = <<<SQL_LLAMADA_COLOCADA
+UPDATE calls SET status = 'Placing', datetime_originate = ?, fecha_llamada = NULL,
+    datetime_entry_queue = NULL, start_time = NULL, end_time = NULL,
+    duration_wait = NULL, duration = NULL, failure_cause = NULL,
+    failure_cause_txt = NULL, uniqueid = NULL, id_agent = NULL,
+    retries = retries + 1
+WHERE id_campaign = ? AND id = ?
+SQL_LLAMADA_COLOCADA;
+        $sth_placing = $this->_db->prepare($sPeticionLlamadaColocada);
+
+        // Generate calls / Generar llamadas
+        $queue_monitor_format = NULL;
+        while (count($listaLlamadas) > 0) {
+            $tupla = array_shift($listaLlamadas);
+
+            $listaVars = array(
+                'ID_CAMPAIGN'   =>  $campaignId,
+                'ID_CALL'       =>  $tupla['id'],
+                'NUMBER'        =>  $tupla['phone'],
+                'QUEUE'         =>  $infoCampania['queue'],
+                'CONTEXT'       =>  $infoCampania['context'],
+            );
+            if (!is_null($tupla['agent'])) {
+                $listaVars['AGENTCHANNEL'] = $tupla['agent'];
+                if (is_null($queue_monitor_format))
+                    $queue_monitor_format = $this->_formatoGrabacionCola($infoCampania['queue']);
+                $listaVars['QUEUE_MONITOR_FORMAT'] = $queue_monitor_format;
+            }
+            $sCadenaVar = $this->_construirCadenaVariables($listaVars);
+            if ($this->DEBUG) {
+                $this->_log->output("DEBUG: ".__METHOD__." generating call | generando llamada\n".
+                    "\tKey/Clave....... {$tupla['actionid']}\n" .
+                    "\tAgent/Agente...... ".(is_null($tupla['agent']) ? '(none/ninguno)' : $tupla['agent'])."\n" .
+                    "\tDestination/Destino..... {$tupla['phone']}\n" .
+                    "\tQueue/Cola........ {$infoCampania['queue']}\n" .
+                    "\tContext/Contexto.... {$infoCampania['context']}\n" .
+                    "\tContext Var/Var. Contexto $sCadenaVar\n" .
+                    "\tTrunk....... ".(is_null($infoCampania['trunk']) ? '(by dial plan/por plan de marcado)' : $infoCampania['trunk'])."\n" .
+                    "\tTemplate/Plantilla... ".$datosTrunk['TRUNK']."\n" .
+                    "\tCaller ID... ".(isset($datosTrunk['CID']) ? $datosTrunk['CID'] : "(not defined/no definido)")."\n".
+                    "\tDial string/Cadena de marcado... {$tupla['dialstring']}\n".
+                    "\tDial timeout/Timeout marcado..... ".(is_null($iTimeoutOriginate) ? '(default/por omisión)' : $iTimeoutOriginate.' ms.'));
+            }
+
+            try {
+                $this->_db->beginTransaction();
+
+                $iTimestampInicioOriginate = time();
+                $sth_placing->execute(array(
+                    date('Y-m-d H:i:s', $iTimestampInicioOriginate),
+                    $campaignId,
+                    $tupla['id']
+                ));
+
+                $this->_db->commit();
+            } catch (PDOException $e) {
+                if (!is_null($this->_db)) {
+                    $this->_db->rollBack();
+                }
+
+                $this->_log->output('WARN: '.__METHOD__.' aborting '.
+                    count($listaLlamadas).' undialed calls due to DB exception... | abortando '.
+                    count($listaLlamadas).' llamadas sin marcar debido a excepción de DB...');
+                $llamadasAbortar = array($tupla['actionid']);
+                foreach ($listaLlamadas as $t) $llamadasAbortar[] = $t['actionid'];
+                $this->_tuberia->msg_AMIEventProcess_abortarNuevasLlamadasMarcar($llamadasAbortar);
+
+                throw $e;
+            }
+
+            // Execute the call through AMIEventProcess
+            $this->_tuberia->AMIEventProcess_ejecutarOriginate(
+                $tupla['actionid'], $iTimeoutOriginate, $iTimestampInicioOriginate,
+                (is_null($tupla['agent']) ? $infoCampania['context'] : 'llamada_agendada'),
+                (isset($datosTrunk['CID']) ? $datosTrunk['CID'] : $tupla['phone']),
+                $sCadenaVar, (is_null($tupla['retries']) ? 0 : $tupla['retries']) + 1,
+                $infoCampania['trunk']);
+        }
+
+        // Mark campaign as finished if no more calls
+        if ($iNumLlamadasColocar > 0 && $iNumTotalLlamadas <= 0) {
+            $this->_log->output('INFO: marking campaign as finished: '.$campaignId.' | marcando campaña como finalizada: '.$campaignId);
+            $sth = $this->_db->prepare('UPDATE campaign SET estatus = "T" WHERE id = ?');
+            $sth->execute(array($campaignId));
+        }
+
+        return TRUE;
     }
 
     private function _actualizarLlamadasCampania($infoCampania, $oPredictor)
