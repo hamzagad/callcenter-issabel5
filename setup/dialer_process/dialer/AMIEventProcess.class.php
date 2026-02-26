@@ -2774,7 +2774,15 @@ Uniqueid: 1429642067.241008
             if (!is_null($this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid']))) {
                 $bLocalTracked = TRUE;
             } elseif (!is_null($this->_listaAgentes->buscar('uniqueidlink', $params['Uniqueid']))) {
-                $bLocalTracked = TRUE;
+                // Skip agent callback channels (Local/XXXX@agents) - these are internal
+                // callbacks for Agent type logins that hang up after the agent answers.
+                // Their hangup should NOT finalize the customer call.
+                if (preg_match('/^Local\/\d+@agents/', $params['Channel'])) {
+                    $this->_log->output('DEBUG: '.__METHOD__.
+                        ': ignoring agent callback channel hangup | channel='.$params['Channel']);
+                } else {
+                    $bLocalTracked = TRUE;
+                }
             } elseif (!is_null($this->_listaLlamadas->buscar('actualchannel', $params['Channel']))) {
                 $bLocalTracked = TRUE;
             }
