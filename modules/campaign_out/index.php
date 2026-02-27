@@ -163,6 +163,8 @@ function listCampaign($pDB, $smarty, $module_name, $local_templates_dir)
                 ($campaign['retries'] != "") ? $campaign['retries'] : "&nbsp;",
                 is_null($campaign['trunk']) ? '(Dialplan)' : $campaign['trunk'],
                 $campaign['queue'],
+                ($campaign['total_calls'] != "") ? $campaign['total_calls'] : "0",
+                ($campaign['pending_calls'] != "") ? $campaign['pending_calls'] : "0",
                 ($campaign['num_completadas'] != "") ? $campaign['num_completadas'] : "N/A",
                 ($campaign['promedio'] != "") ? number_format($campaign['promedio'],0) : "N/A",
                 campaignStatusLabel($campaign['estatus']),
@@ -180,7 +182,7 @@ function listCampaign($pDB, $smarty, $module_name, $local_templates_dir)
     $oGrid->setURL($url);
     $oGrid->setColumns(array('', _tr('Name Campaign'), _tr('Range Date'),
         _tr('Schedule per Day'), _tr('Retries'), _tr('Trunk'), _tr('Queue'),
-        _tr('Completed Calls'), _tr('Average Time'), _tr('Status'), _tr('Options')));
+        _tr('Total Calls'), _tr('Pending Calls'), _tr('Completed Calls'), _tr('Average Time'), _tr('Status'), _tr('Options')));
     $_POST['cbo_estado']=$sEstado;
     $oGrid->addFilterControl(
         _tr("Filter applied ")._tr("Status")." = ".$estados[$sEstado],

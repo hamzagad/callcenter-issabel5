@@ -86,6 +86,8 @@ class paloSantoCampaignCC
 SELECT c.id, c.name, c.trunk, c.context, c.queue, c.datetime_init, c.datetime_end, c.daytime_init,
     c.daytime_end, c.script, c.retries, c.promedio,
     (SELECT COUNT(*) FROM calls WHERE id_campaign = c.id AND status = 'Success') AS num_completadas,
+    (SELECT COUNT(*) FROM calls WHERE id_campaign = c.id) AS total_calls,
+    (SELECT COUNT(*) FROM calls WHERE id_campaign = c.id AND status IS NULL) AS pending_calls,
     c.estatus, c.max_canales, c.id_url, c.id_url2, c.id_url3
 FROM campaign c
 SQL_SELECT_CAMPAIGNS;
