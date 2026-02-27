@@ -21,6 +21,22 @@ rm -rf /etc/logrotate.d/issabeldialer
 rm -rf /usr/bin/issabel-callcenter-local-dnc
 rm -rf /usr/share/issabel/module_installer/callcenter/
 
+#remove dashboard ProcessesStatus applet patches
+DASHBOARD_DIR="/var/www/html/modules/dashboard/applets/ProcessesStatus"
+DASHBOARD_INDEX="$DASHBOARD_DIR/index.php"
+
+if [ -f "$DASHBOARD_INDEX" ]; then
+    # Remove Dialer icon mapping
+    sed -i "/'Dialer'.*=>.*'icon_headphones.png'/d" "$DASHBOARD_INDEX"
+    # Remove Dialer service mapping
+    sed -i "/'Dialer'.*=>.*'issabeldialer'/d" "$DASHBOARD_INDEX"
+    # Remove Dialer status detection lines
+    sed -i '/\$arrSERVICES\["Dialer"\]/d' "$DASHBOARD_INDEX"
+    # Remove the icon file
+    rm -f "$DASHBOARD_DIR/images/icon_headphones.png"
+    echo "Removed dashboard ProcessesStatus patches"
+fi
+
 #remove menu
 issabel-menuremove call_center
 

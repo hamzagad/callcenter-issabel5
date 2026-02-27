@@ -82,6 +82,38 @@ echo "Installing modules..."
 chown asterisk.asterisk modules/* -R
 /bin/cp -prf modules/* /var/www/html/modules/
 
+echo "Patching dashboard ProcessesStatus applet..."
+DASHBOARD_DIR="/var/www/html/modules/dashboard/applets/ProcessesStatus"
+DASHBOARD_INDEX="$DASHBOARD_DIR/index.php"
+
+if [ -f "$DASHBOARD_INDEX" ]; then
+    # Copy the dialer icon
+    /bin/cp -f "$WORK_DIR/setup/icon_headphones.png" "$DASHBOARD_DIR/images/"
+
+    # 1. Add Dialer icon mapping (after 'Apache' => 'icon_www.png')
+    if ! grep -q "'Dialer'" "$DASHBOARD_INDEX"; then
+        sed -i "/'Apache'.*=>.*'icon_www.png'/a\\            'Dialer'    =>  'icon_headphones.png'," "$DASHBOARD_INDEX"
+    fi
+
+    # 2. Add Dialer service mapping in _controlServicio (after 'Apache' => 'httpd')
+    if ! grep -q "'Dialer'.*=>.*'issabeldialer'" "$DASHBOARD_INDEX"; then
+        sed -i "/'Apache'.*=>.*'httpd'/a\\            'Dialer'    =>  'issabeldialer'," "$DASHBOARD_INDEX"
+    fi
+
+    # 3. Add Dialer status detection (after Apache status line in getStatusServices)
+    if ! grep -q 'dialerd.pid' "$DASHBOARD_INDEX"; then
+        sed -i '/\$arrSERVICES\["Apache"\]\["name_service"\].*=.*"Web Server"/a\
+\
+        $arrSERVICES["Dialer"]["status_service"]   = $this->_existPID_ByFile("/opt/issabel/dialer/dialerd.pid","issabeldialer");\
+        $arrSERVICES["Dialer"]["activate"]     = $this->_isActivate("issabeldialer");\
+        $arrSERVICES["Dialer"]["name_service"]     = "Issabel Call Center Service";' "$DASHBOARD_INDEX"
+    fi
+
+    echo -e "${GREEN}Dashboard patched successfully${NC}"
+else
+    echo -e "${YELLOW}Warning: Dashboard applet not found at $DASHBOARD_INDEX - skipping patch${NC}"
+fi
+
 echo "Installing dialer..."
 # Install dialer
 mkdir -p /opt/issabel/dialer/
