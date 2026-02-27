@@ -688,6 +688,39 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'waitingcall'       =>  FALSE,
     );
 
+    // Query shift-based times for this agent
+    // EN: Get agent channel from session (e.g., "SIP/101" or "Agent/8001")
+    $agentChannel = $_SESSION['callcenter']['agente'];
+    $shiftRange = agentConsole_calculateShiftDatetimeRange(0, 23);
+    $breakData = agentConsole_consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $holdData = agentConsole_consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
+    $loginData = agentConsole_consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+
+    $sec_shift_login = isset($loginData[$agentChannel]) ? $loginData[$agentChannel] : 0;
+    $sec_shift_break = isset($breakData['breakTimes'][$agentChannel]) ? $breakData['breakTimes'][$agentChannel] : 0;
+    $sec_shift_hold = isset($holdData[$agentChannel]) ? $holdData[$agentChannel] : 0;
+
+    // Add current active break/hold time if applicable
+    if (!is_null($estado['pauseinfo'])) {
+        $iCurrentPauseDur = time() - strtotime($estado['pauseinfo']['pausestart']);
+        $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+        if (in_array($estado['pauseinfo']['pausename'], $holdNames)) {
+            $sec_shift_hold += $iCurrentPauseDur;
+        } else {
+            $sec_shift_break += $iCurrentPauseDur;
+        }
+    }
+
+    $smarty->assign(array(
+        'SHIFT_LOGIN_TIME' => agentConsole_timestamp_format($sec_shift_login),
+        'SHIFT_BREAK_TIME' => agentConsole_timestamp_format($sec_shift_break),
+        'SHIFT_HOLD_TIME'  => agentConsole_timestamp_format($sec_shift_hold),
+    ));
+    $estadoInicial['shift_login_time'] = $sec_shift_login;
+    $estadoInicial['shift_break_time'] = $sec_shift_break;
+    $estadoInicial['shift_hold_time'] = $sec_shift_hold;
+    $estadoInicial['is_hold_pause'] = (!is_null($estado['pauseinfo']) && in_array($estado['pauseinfo']['pausename'], isset($breakData['holdNames']) ? $breakData['holdNames'] : array()));
+
     // Decidir estado del break a mostrar
     if (!is_null($estado['pauseinfo'])) {
         $_SESSION['callcenter']['break_iniciado'] = $estado['pauseinfo']['pausestart'];
@@ -1689,6 +1722,39 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
             break;
         }
 
+        // Add shift-based times to the response
+        // EN: Calculate shift times for the current agent
+        $agentChannel = $_SESSION['callcenter']['agente'];
+        $shiftRange = agentConsole_calculateShiftDatetimeRange(0, 23);
+        $breakData = agentConsole_consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+        $holdData = agentConsole_consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
+        $loginData = agentConsole_consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+
+        $sec_shift_login = isset($loginData[$agentChannel]) ? $loginData[$agentChannel] : 0;
+        $sec_shift_break = isset($breakData['breakTimes'][$agentChannel]) ? $breakData['breakTimes'][$agentChannel] : 0;
+        $sec_shift_hold = isset($holdData[$agentChannel]) ? $holdData[$agentChannel] : 0;
+        $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+
+        // Add current active break/hold time if applicable
+        $is_hold_pause = false;
+        if (!is_null($estado['pauseinfo'])) {
+            $iCurrentPauseDur = time() - strtotime($estado['pauseinfo']['pausestart']);
+            if (in_array($estado['pauseinfo']['pausename'], $holdNames)) {
+                $sec_shift_hold += $iCurrentPauseDur;
+                $is_hold_pause = true;
+            } else {
+                $sec_shift_break += $iCurrentPauseDur;
+            }
+        }
+
+        // Add shift times to each response event
+        foreach ($respuesta as $idx => $evt) {
+            $respuesta[$idx]['shift_login_time'] = $sec_shift_login;
+            $respuesta[$idx]['shift_break_time'] = $sec_shift_break;
+            $respuesta[$idx]['shift_hold_time'] = $sec_shift_hold;
+            $respuesta[$idx]['is_hold_pause'] = $is_hold_pause;
+        }
+
         jsonflush($bSSE, $respuesta);
 
         $respuesta = array();
@@ -1921,6 +1987,174 @@ function construirUrlExterno($s, $infoLlamada, $chanvars)
         $s = str_replace($k, urlencode($v), $s);
     }
     return $s;
+}
+
+// Shift-based time calculation functions for Agent Console
+// EN: Calculate shift datetime range (default full day 00-23)
+function agentConsole_calculateShiftDatetimeRange($fromHour = 0, $toHour = 23)
+{
+    $today = date('Y-m-d');
+    $yesterday = date('Y-m-d', strtotime('-1 day'));
+    $fromHour = max(0, min(23, (int)$fromHour));
+    $toHour = max(0, min(23, (int)$toHour));
+
+    if ($fromHour > $toHour) {
+        $datetimeStart = $yesterday . ' ' . sprintf('%02d:00:00', $fromHour);
+        $datetimeEnd = $today . ' ' . sprintf('%02d:59:59', $toHour);
+    } else {
+        $datetimeStart = $today . ' ' . sprintf('%02d:00:00', $fromHour);
+        $datetimeEnd = $today . ' ' . sprintf('%02d:59:59', $toHour);
+    }
+    return array('start' => $datetimeStart, 'end' => $datetimeEnd);
+}
+
+// EN: Query cumulative break time per agent (Break-type pauses only)
+function agentConsole_consultarTiempoBreakAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array('breakTimes' => array(), 'holdNames' => array());
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(UNIX_TIMESTAMP(audit.datetime_end) - UNIX_TIMESTAMP(audit.datetime_init)) AS sec_breaks " .
+           "FROM audit " .
+           "INNER JOIN break ON break.id = audit.id_break " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE break.tipo = 'B' " .
+           "AND audit.datetime_end IS NOT NULL " .
+           "AND audit.datetime_init >= :start " .
+           "AND audit.datetime_init <= :end " .
+           "GROUP BY agent.id";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start' => $datetimeStart, ':end' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result['breakTimes'][$row['agentchannel']] = (int)$row['sec_breaks'];
+    }
+
+    $sql2 = "SELECT name FROM break WHERE tipo = 'H' AND status = 'A'";
+    $stmt2 = $pDB->query($sql2);
+    while ($row = $stmt2->fetch(PDO::FETCH_ASSOC)) {
+        $result['holdNames'][] = $row['name'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+// EN: Query cumulative hold time per agent (Hold-type pauses only)
+function agentConsole_consultarTiempoHoldAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(UNIX_TIMESTAMP(audit.datetime_end) - UNIX_TIMESTAMP(audit.datetime_init)) AS sec_holds " .
+           "FROM audit " .
+           "INNER JOIN break ON break.id = audit.id_break " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE break.tipo = 'H' " .
+           "AND audit.datetime_end IS NOT NULL " .
+           "AND audit.datetime_init >= :start " .
+           "AND audit.datetime_init <= :end " .
+           "GROUP BY agent.id";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start' => $datetimeStart, ':end' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result[$row['agentchannel']] = (int)$row['sec_holds'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+// EN: Query cumulative login time per agent
+function agentConsole_consultarTiempoLoginAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    $sNow = date('Y-m-d H:i:s');
+    $sActiveEnd = ($sNow < $datetimeEnd) ? $sNow : $datetimeEnd;
+
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(" .
+           "  UNIX_TIMESTAMP(LEAST(COALESCE(audit.datetime_end, :active_end), :end1)) " .
+           "  - UNIX_TIMESTAMP(GREATEST(audit.datetime_init, :start1))" .
+           ") AS logintime " .
+           "FROM audit " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE audit.id_break IS NULL " .
+           "AND audit.datetime_init <= :end2 " .
+           "AND (audit.datetime_end IS NULL OR audit.datetime_end >= :start2) " .
+           "GROUP BY agent.id " .
+           "HAVING logintime > 0";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(
+        ':active_end' => $sActiveEnd,
+        ':start1'     => $datetimeStart,
+        ':end1'       => $datetimeEnd,
+        ':start2'     => $datetimeStart,
+        ':end2'       => $datetimeEnd,
+    ));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result[$row['agentchannel']] = (int)$row['logintime'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+// EN: Format seconds as HH:MM:SS
+function agentConsole_timestamp_format($i)
+{
+    return sprintf('%02d:%02d:%02d',
+        ($i - ($i % 3600)) / 3600,
+        (($i - ($i % 60)) / 60) % 60,
+        $i % 60);
 }
 
 ?>

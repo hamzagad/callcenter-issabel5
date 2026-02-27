@@ -59,6 +59,11 @@
 	    <div id="issabel-callcenter-estado-agente-texto">{$TEXTO_ESTADO_AGENTE_INICIAL}</div>
         <div id="issabel-callcenter-cronometro">{$CRONOMETRO}</div>{* issabel-callcenter-cronometro *}
     </div>{* issabel-callcenter-estado-agente *}
+    <div id="issabel-callcenter-shift-stats">
+        <div id="shift-stat-login" class="shift-stat-box shift-stat-login" title="Total Login Time">{$SHIFT_LOGIN_TIME}</div>
+        <div id="shift-stat-break" class="shift-stat-box shift-stat-break" title="Total Break Time">{$SHIFT_BREAK_TIME}</div>
+        <div id="shift-stat-hold" class="shift-stat-box shift-stat-hold" title="Total Hold Time">{$SHIFT_HOLD_TIME}</div>
+    </div>
     <div id="issabel-callcenter-wrap">
 	    {* Los controles que aparecen en la parte superior de la interfaz *}
 	    <div id="issabel-callcenter-controles">

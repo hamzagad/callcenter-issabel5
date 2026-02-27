@@ -313,3 +313,33 @@ td.issabel-callcenter-class-estado-activo {
 .externalurl-btn:hover {
     background-color: #45a049;
 }
+
+/* Shift-based time statistics squares */
+#issabel-callcenter-shift-stats {
+    display: inline-block;
+    float: right;
+    margin-top: 2px;
+}
+
+.shift-stat-box {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-left: 5px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #FFFFFF;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.shift-stat-login {
+    background-color: #2E7D32;  /* Green - login time */
+}
+
+.shift-stat-break {
+    background-color: #C62828;  /* Red - break time */
+}
+
+.shift-stat-hold {
+    background-color: #F57C00;  /* Orange - hold time */
+}

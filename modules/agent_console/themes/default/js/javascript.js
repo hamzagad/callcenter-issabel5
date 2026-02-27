@@ -31,6 +31,15 @@ var timer = null;
 // Objeto EventSource, si está soportado por el navegador
 var evtSource = null;
 
+// Shift-based time tracking variables
+var shiftLoginTime = null;  // Date object for login timer
+var shiftBreakTime = null;  // Date object for break timer
+var shiftHoldTime = null;   // Date object for hold timer
+var origShiftLogin = 0;     // Original seconds from server
+var origShiftBreak = 0;
+var origShiftHold = 0;
+var isHoldPause = false;    // True if current pause is hold-type
+
 // Copia del URL a cargar al agregar la nueva cejilla
 var jqueryui_tabs_use_refresh = true;
 var externalurl = null;
@@ -259,6 +268,17 @@ function initialize_client_state(nuevoEstado)
 		$('#btn_transfer').button('disable');
 	}
 
+	// Initialize shift stat timers
+	origShiftLogin = nuevoEstado.shift_login_time || 0;
+	origShiftBreak = nuevoEstado.shift_break_time || 0;
+	origShiftHold = nuevoEstado.shift_hold_time || 0;
+	isHoldPause = nuevoEstado.is_hold_pause || false;
+
+	var now = new Date();
+	shiftLoginTime = new Date(now.getTime() - origShiftLogin * 1000);
+	shiftBreakTime = new Date(now.getTime() - origShiftBreak * 1000);
+	shiftHoldTime = new Date(now.getTime() - origShiftHold * 1000);
+
 	// Lanzar el callback que actualiza el estado de la llamada
     setTimeout(do_checkstatus, 1);
 
@@ -303,7 +323,40 @@ function actualizar_cronometro()
 	var i = 0;
 	for (i = 0; i < 3; i++) { if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i]; }
 	$('#issabel-callcenter-cronometro').text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
+
+	// Update shift stat timers
+	// Login timer always ticks when logged in
+	if (shiftLoginTime != null) {
+		formatoShiftTimer('#shift-stat-login', shiftLoginTime);
+	}
+
+	// Break timer ticks only when on break (and not hold-type)
+	if (shiftBreakTime != null && estadoCliente.break_id != null && !isHoldPause) {
+		formatoShiftTimer('#shift-stat-break', shiftBreakTime);
+	}
+
+	// Hold timer ticks only when on hold
+	if (shiftHoldTime != null && (estadoCliente.onhold || isHoldPause)) {
+		formatoShiftTimer('#shift-stat-hold', shiftHoldTime);
+	}
+
 	timer = setTimeout(actualizar_cronometro, 500);
+}
+
+// Format shift timer display
+function formatoShiftTimer(selector, fechaInicio) {
+	var fechaDiff = new Date();
+	var msec = fechaDiff.getTime() - fechaInicio.getTime();
+	var tiempo = [0, 0, 0];
+	tiempo[0] = (msec - (msec % 1000)) / 1000;
+	tiempo[1] = (tiempo[0] - (tiempo[0] % 60)) / 60;
+	tiempo[0] %= 60;
+	tiempo[2] = (tiempo[1] - (tiempo[1] % 60)) / 60;
+	tiempo[1] %= 60;
+	for (var i = 0; i < 3; i++) {
+		if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i];
+	}
+	$(selector).text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
 }
 
 // El siguiente código aplica estilos de jQueryUI
@@ -774,6 +827,24 @@ function manejarRespuestaStatus(respuesta)
 			} else {
 				iniciar_cronometro(null);
 			}
+		}
+
+		// Update shift times from server response
+		var fechaAhora = new Date();
+		if (respuesta[i].shift_login_time !== undefined) {
+			origShiftLogin = respuesta[i].shift_login_time;
+			shiftLoginTime = new Date(fechaAhora.getTime() - origShiftLogin * 1000);
+		}
+		if (respuesta[i].shift_break_time !== undefined) {
+			origShiftBreak = respuesta[i].shift_break_time;
+			shiftBreakTime = new Date(fechaAhora.getTime() - origShiftBreak * 1000);
+		}
+		if (respuesta[i].shift_hold_time !== undefined) {
+			origShiftHold = respuesta[i].shift_hold_time;
+			shiftHoldTime = new Date(fechaAhora.getTime() - origShiftHold * 1000);
+		}
+		if (respuesta[i].is_hold_pause !== undefined) {
+			isHoldPause = respuesta[i].is_hold_pause;
 		}
 
 		switch (respuesta[i].event) {
