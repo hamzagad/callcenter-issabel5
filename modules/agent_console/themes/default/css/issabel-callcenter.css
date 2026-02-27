@@ -314,11 +314,47 @@ td.issabel-callcenter-class-estado-activo {
     background-color: #45a049;
 }
 
-/* Shift-based time statistics squares */
+/* Shift bar container (filter + counters) */
+#issabel-callcenter-shift-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 10px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 5px;
+}
+
+/* Shift filter panel (left side) */
+#issabel-callcenter-shift-filter {
+    display: inline-block;
+    font-size: 0.9em;
+}
+
+#issabel-callcenter-shift-filter label {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+#issabel-callcenter-shift-filter select {
+    margin-right: 15px;
+    padding: 2px 5px;
+}
+
+#issabel-callcenter-shift-filter button {
+    padding: 3px 10px;
+    margin-right: 10px;
+}
+
+#shiftRangeIndicator {
+    font-style: italic;
+    color: #666;
+}
+
+/* Shift-based time statistics squares (right side) */
 #issabel-callcenter-shift-stats {
     display: inline-block;
-    float: right;
-    margin-top: 2px;
 }
 
 .shift-stat-box {

@@ -195,7 +195,7 @@ function manejarLogin($module_name, &$smarty, $sDirLocalPlantillas)
      * ha perdido un estado de callcenter anterior. */
     if (in_array($sAction, array('checkStatus', 'agentLogout', 'hangup',
         'break', 'unbreak', 'transfer', 'confirm_contact', 'schedule',
-        'saveforms'))) {
+        'saveforms', 'updateShiftTimes'))) {
         $json = new Services_JSON();
         Header('Content-Type: application/json');
         return $json->encode(array(
@@ -628,7 +628,20 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
     // Acciones para mostrar la pantalla principal, fuera de cualquier acción AJAX
     for ($i = 0; $i < 24; $i++) { $ii = sprintf('%02d', $i); $comboHora[$ii] = $ii; }
     for ($i = 0; $i < 60; $i++) { $ii = sprintf('%02d', $i); $comboMinuto[$ii] = $ii; }
+
+    // Build shift hours options for the filter dropdown
+    $sShiftHoursOptions = '';
+    for ($h = 0; $h < 24; $h++) {
+        $sHourVal = sprintf('%02d', $h);
+        $sShiftHoursOptions .= '<option value="'.$sHourVal.'">'.$sHourVal.':00</option>';
+    }
+
     $smarty->assign(array(
+        // Shift filter labels
+        'LBL_SHIFT_FROM'                =>  _tr('From'),
+        'LBL_SHIFT_TO'                  =>  _tr('To'),
+        'BTN_SHIFT_APPLY'               =>  _tr('Apply'),
+        'SHIFT_HOURS_OPTIONS'           =>  $sShiftHoursOptions,
         'FRAMEWORK_TIENE_TITULO_MODULO' => existeSoporteTituloFramework(),
         'icon'                          => 'modules/'.$module_name.'/images/call_center.png',
         'title'                         =>  _tr('Agent Console').': '.$_SESSION['callcenter']['agente_nombre'],
@@ -1332,6 +1345,54 @@ function manejarSesionActiva_saveforms($module_name, $smarty, $sDirLocalPlantill
             }
         }
     }
+    $json = new Services_JSON();
+    Header('Content-Type: application/json');
+    return $json->encode($respuesta);
+}
+
+// Handler for updating shift times when filter changes
+function manejarSesionActiva_updateShiftTimes($module_name, $smarty,
+    $sDirLocalPlantillas, $oPaloConsola, $estado)
+{
+    global $arrConf;
+
+    $shiftFrom = getParameter('shift_from');
+    $shiftTo = getParameter('shift_to');
+    $shiftFrom = is_numeric($shiftFrom) ? intval($shiftFrom) : 0;
+    $shiftTo = is_numeric($shiftTo) ? intval($shiftTo) : 23;
+
+    // Get current agent channel from session
+    $agentChannel = $_SESSION['callcenter']['agente'];
+
+    // Query shift-based times for this agent
+    $shiftRange = agentConsole_calculateShiftDatetimeRange($shiftFrom, $shiftTo);
+    $breakData = agentConsole_consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $holdData = agentConsole_consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
+    $loginData = agentConsole_consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+
+    $sec_shift_login = isset($loginData[$agentChannel]) ? $loginData[$agentChannel] : 0;
+    $sec_shift_break = isset($breakData['breakTimes'][$agentChannel]) ? $breakData['breakTimes'][$agentChannel] : 0;
+    $sec_shift_hold = isset($holdData[$agentChannel]) ? $holdData[$agentChannel] : 0;
+
+    // Add current pause time if agent is on a pause
+    $isHoldPause = false;
+    if (!is_null($estado['pauseinfo'])) {
+        $iCurrentPauseDur = time() - strtotime($estado['pauseinfo']['pausestart']);
+        $isHoldPause = in_array($estado['pauseinfo']['pausename'], isset($breakData['holdNames']) ? $breakData['holdNames'] : array());
+        if ($isHoldPause) {
+            $sec_shift_hold += $iCurrentPauseDur;
+        } else {
+            $sec_shift_break += $iCurrentPauseDur;
+        }
+    }
+
+    $respuesta = array(
+        'shift_login_time' => $sec_shift_login,
+        'shift_break_time' => $sec_shift_break,
+        'shift_hold_time'  => $sec_shift_hold,
+        'is_hold_pause'    => $isHoldPause,
+    );
+
     $json = new Services_JSON();
     Header('Content-Type: application/json');
     return $json->encode($respuesta);

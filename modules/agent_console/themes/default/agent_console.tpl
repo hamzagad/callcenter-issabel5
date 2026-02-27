@@ -59,10 +59,21 @@
 	    <div id="issabel-callcenter-estado-agente-texto">{$TEXTO_ESTADO_AGENTE_INICIAL}</div>
         <div id="issabel-callcenter-cronometro">{$CRONOMETRO}</div>{* issabel-callcenter-cronometro *}
     </div>{* issabel-callcenter-estado-agente *}
-    <div id="issabel-callcenter-shift-stats">
-        <div id="shift-stat-login" class="shift-stat-box shift-stat-login" title="Total Login Time">{$SHIFT_LOGIN_TIME}</div>
-        <div id="shift-stat-break" class="shift-stat-box shift-stat-break" title="Total Break Time">{$SHIFT_BREAK_TIME}</div>
-        <div id="shift-stat-hold" class="shift-stat-box shift-stat-hold" title="Total Hold Time">{$SHIFT_HOLD_TIME}</div>
+    {* Shift filter bar with counters *}
+    <div id="issabel-callcenter-shift-bar">
+        <div id="issabel-callcenter-shift-filter">
+            <label for="shiftFromHour">{$LBL_SHIFT_FROM}:</label>
+            <select id="shiftFromHour">{$SHIFT_HOURS_OPTIONS}</select>
+            <label for="shiftToHour">{$LBL_SHIFT_TO}:</label>
+            <select id="shiftToHour">{$SHIFT_HOURS_OPTIONS}</select>
+            <button id="applyShiftFilter" type="button">{$BTN_SHIFT_APPLY}</button>
+            <span id="shiftRangeIndicator"></span>
+        </div>
+        <div id="issabel-callcenter-shift-stats">
+            <span id="shift-stat-login" class="shift-stat-box shift-stat-login" title="Total Login Time">{$SHIFT_LOGIN_TIME}</span>
+            <span id="shift-stat-break" class="shift-stat-box shift-stat-break" title="Total Break Time">{$SHIFT_BREAK_TIME}</span>
+            <span id="shift-stat-hold" class="shift-stat-box shift-stat-hold" title="Total Hold Time">{$SHIFT_HOLD_TIME}</span>
+        </div>
     </div>
     <div id="issabel-callcenter-wrap">
 	    {* Los controles que aparecen en la parte superior de la interfaz *}

@@ -40,6 +40,68 @@ var origShiftBreak = 0;
 var origShiftHold = 0;
 var isHoldPause = false;    // True if current pause is hold-type
 
+// Shift filter variables (default: full day 00:00-23:59)
+var shiftFromHour = 0;
+var shiftToHour = 23;
+var STORAGE_KEY_SHIFT_FROM = 'agent_console_shift_from';
+var STORAGE_KEY_SHIFT_TO = 'agent_console_shift_to';
+
+function loadShiftPreferences() {
+    var storedFrom = localStorage.getItem(STORAGE_KEY_SHIFT_FROM);
+    var storedTo = localStorage.getItem(STORAGE_KEY_SHIFT_TO);
+
+    if (storedFrom !== null) {
+        shiftFromHour = parseInt(storedFrom, 10);
+        if (isNaN(shiftFromHour) || shiftFromHour < 0 || shiftFromHour > 23) {
+            shiftFromHour = 0;
+        }
+    }
+
+    if (storedTo !== null) {
+        shiftToHour = parseInt(storedTo, 10);
+        if (isNaN(shiftToHour) || shiftToHour < 0 || shiftToHour > 23) {
+            shiftToHour = 23;
+        }
+    }
+}
+
+function saveShiftPreferences() {
+    localStorage.setItem(STORAGE_KEY_SHIFT_FROM, shiftFromHour);
+    localStorage.setItem(STORAGE_KEY_SHIFT_TO, shiftToHour);
+}
+
+function updateShiftRangeIndicator() {
+    var indicator = $('#shiftRangeIndicator');
+    var fromStr = (shiftFromHour < 10 ? '0' : '') + shiftFromHour + ':00';
+    var toStr = (shiftToHour < 10 ? '0' : '') + shiftToHour + ':59';
+
+    if (shiftFromHour > shiftToHour) {
+        indicator.text('Yesterday ' + fromStr + ' - Today ' + toStr);
+    } else {
+        indicator.text('Today ' + fromStr + ' - ' + toStr);
+    }
+}
+
+function applyShiftFilter() {
+    var rawFrom = $('#shiftFromHour').val();
+    var rawTo = $('#shiftToHour').val();
+
+    var newFrom = parseInt(rawFrom, 10);
+    var newTo = parseInt(rawTo, 10);
+
+    if (isNaN(newFrom) || newFrom < 0 || newFrom > 23) newFrom = 0;
+    if (isNaN(newTo) || newTo < 0 || newTo > 23) newTo = 23;
+
+    shiftFromHour = newFrom;
+    shiftToHour = newTo;
+
+    saveShiftPreferences();
+    updateShiftRangeIndicator();
+
+    // Request updated shift times from server
+    do_updateShiftTimes();
+}
+
 // Copia del URL a cargar al agregar la nueva cejilla
 var jqueryui_tabs_use_refresh = true;
 var externalurl = null;
@@ -279,6 +341,13 @@ function initialize_client_state(nuevoEstado)
 	shiftBreakTime = new Date(now.getTime() - origShiftBreak * 1000);
 	shiftHoldTime = new Date(now.getTime() - origShiftHold * 1000);
 
+	// Initialize shift filter UI
+	loadShiftPreferences();
+	$('#shiftFromHour').val(('0' + shiftFromHour).slice(-2));
+	$('#shiftToHour').val(('0' + shiftToHour).slice(-2));
+	updateShiftRangeIndicator();
+	$('#applyShiftFilter').on('click', applyShiftFilter);
+
 	// Lanzar el callback que actualiza el estado de la llamada
     setTimeout(do_checkstatus, 1);
 
@@ -305,24 +374,28 @@ function iniciar_cronometro(timer_seconds)
 	if (timer_seconds != null) {
 		fechaInicio = new Date();
 		fechaInicio.setTime(fechaInicio.getTime() - timer_seconds * 1000);
-		timer = setTimeout(actualizar_cronometro, 1);
 	}
+	// Always start the timer loop for shift stats (even when idle)
+	timer = setTimeout(actualizar_cronometro, 1);
 }
 
 // Cada 500 ms se llama a esta función para actualizar el cronómetro
 function actualizar_cronometro()
 {
-	var fechaDiff = new Date();
-	var msec = fechaDiff.getTime() - fechaInicio.getTime();
-	var tiempo = [0, 0, 0];
-	tiempo[0] = (msec - (msec % 1000)) / 1000;
-	tiempo[1] = (tiempo[0] - (tiempo[0] % 60)) / 60;
-	tiempo[0] %= 60;
-	tiempo[2] = (tiempo[1] - (tiempo[1] % 60)) / 60;
-	tiempo[1] %= 60;
-	var i = 0;
-	for (i = 0; i < 3; i++) { if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i]; }
-	$('#issabel-callcenter-cronometro').text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
+	// Update main chronometer only if active (fechaInicio is set)
+	if (fechaInicio != null) {
+		var fechaDiff = new Date();
+		var msec = fechaDiff.getTime() - fechaInicio.getTime();
+		var tiempo = [0, 0, 0];
+		tiempo[0] = (msec - (msec % 1000)) / 1000;
+		tiempo[1] = (tiempo[0] - (tiempo[0] % 60)) / 60;
+		tiempo[0] %= 60;
+		tiempo[2] = (tiempo[1] - (tiempo[1] % 60)) / 60;
+		tiempo[1] %= 60;
+		var i = 0;
+		for (i = 0; i < 3; i++) { if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i]; }
+		$('#issabel-callcenter-cronometro').text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
+	}
 
 	// Update shift stat timers
 	// Login timer always ticks when logged in
@@ -771,6 +844,36 @@ function do_ping()
 		verificar_error_session(respuesta);
 		setTimeout(do_ping, (respuesta['gc_maxlifetime'] / 2) * 1000);
 	});
+}
+
+// Request updated shift times from server with current filter
+function do_updateShiftTimes()
+{
+    var params = {
+        menu:       module_name,
+        rawmode:    'yes',
+        action:     'updateShiftTimes',
+        shift_from: shiftFromHour,
+        shift_to:   shiftToHour
+    };
+    $.post('index.php?menu=' + module_name + '&rawmode=yes', params,
+    function (respuesta) {
+        verificar_error_session(respuesta);
+        if (respuesta.shift_login_time !== undefined) {
+            var now = new Date();
+            origShiftLogin = respuesta.shift_login_time;
+            origShiftBreak = respuesta.shift_break_time;
+            origShiftHold = respuesta.shift_hold_time;
+            shiftLoginTime = new Date(now.getTime() - origShiftLogin * 1000);
+            shiftBreakTime = new Date(now.getTime() - origShiftBreak * 1000);
+            shiftHoldTime = new Date(now.getTime() - origShiftHold * 1000);
+            isHoldPause = respuesta.is_hold_pause || false;
+            // Update display immediately
+            formatoShiftTimer('#shift-stat-login', shiftLoginTime);
+            formatoShiftTimer('#shift-stat-break', shiftBreakTime);
+            formatoShiftTimer('#shift-stat-hold', shiftHoldTime);
+        }
+    }, 'json');
 }
 
 function do_checkstatus()
