@@ -917,10 +917,10 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
 
 
         echo "<script>";
-        echo "localStorage.setItem('mhrgl.com.identity.display_name', $extension);";
-        echo "localStorage.setItem('mhrgl.com.identity.impi', $extension);";
+        echo "localStorage.setItem('mhrgl.com.identity.display_name', '$extension');";
+        echo "localStorage.setItem('mhrgl.com.identity.impi', '$extension');";
         echo "localStorage.setItem('mhrgl.com.identity.name', '$webphoneName[0]');";
-        echo "localStorage.setItem('mhrgl.com.identity.impu', 'sip:'+ $extension+'@'+ window.location.hostname);";
+        echo "localStorage.setItem('mhrgl.com.identity.impu', 'sip:$extension@'+ window.location.hostname);";
         echo "localStorage.setItem('mhrgl.com.identity.password', '$webphonePassword[0]');";
         echo "localStorage.setItem('mhrgl.com.identity.realm', window.location.hostname);";
         echo "localStorage.setItem('mhrgl.com.identity.socket', '8089');";
