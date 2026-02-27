@@ -101,7 +101,7 @@ function initialize_client_state(nuevoEstado, nuevoEstadoHash)
 	var fechaInicio = new Date();
 	var regexp = /^(queue-\d+)/;
 	for (var k in estadoCliente) {
-		var keys = ['sec_laststatus', 'logintime', 'sec_calls', 'sec_breaks'];
+		var keys = ['sec_laststatus', 'logintime', 'sec_calls', 'sec_breaks', 'sec_holds'];
 		for (var j = 0; j < keys.length; j++) {
 			var ktimestamp = keys[j];
 			estadoCliente[k]['orig_'+ktimestamp] = estadoCliente[k][ktimestamp];
@@ -157,7 +157,8 @@ function actualizar_valores_cronometro()
 			totalesCola[kq] = {
 				logintime: 0,
 				sec_calls: 0,
-				sec_breaks: 0
+				sec_breaks: 0,
+				sec_holds: 0
 			};
 		}
 
@@ -187,6 +188,13 @@ function actualizar_valores_cronometro()
 		} else {
 			totalesCola[kq]['sec_breaks'] += estadoCliente[k]['orig_sec_breaks'] * 1000;
 		}
+
+		// Hold time increments when agent is on a hold-type pause
+		if (estadoCliente[k]['onhold'] && estadoCliente[k]['isholdpause']) {
+			totalesCola[kq]['sec_holds'] += formatoCronometro('#'+k+'-sec_holds', estadoCliente[k]['sec_holds']);
+		} else {
+			totalesCola[kq]['sec_holds'] += estadoCliente[k]['orig_sec_holds'] * 1000;
+		}
 	}
 
 	// Actualizar totales por cola
@@ -194,6 +202,7 @@ function actualizar_valores_cronometro()
 		formatoMilisegundo('#'+kq+'-logintime', totalesCola[kq]['logintime']);
 		formatoMilisegundo('#'+kq+'-sec_calls', totalesCola[kq]['sec_calls']);
 		formatoMilisegundo('#'+kq+'-sec_breaks', totalesCola[kq]['sec_breaks']);
+		formatoMilisegundo('#'+kq+'-sec_holds', totalesCola[kq]['sec_holds']);
 	}
 }
 
@@ -254,7 +263,7 @@ function do_checkstatus()
 function manejarRespuestaStatus(respuesta)
 {
 	var fechaInicio = new Date();
-	var keys = ['sec_laststatus', 'logintime', 'sec_calls', 'sec_breaks'];
+	var keys = ['sec_laststatus', 'logintime', 'sec_calls', 'sec_breaks', 'sec_holds'];
 
 	// Intentar recargar la página en caso de error
 	if (respuesta['error'] != null) {
@@ -324,6 +333,7 @@ function manejarRespuestaStatus(respuesta)
 			}
 			estadoCliente[k]['oncallupdate'] = respuesta[k]['oncallupdate'];
 			estadoCliente[k]['isbreakpause'] = respuesta[k]['isbreakpause'];
+			estadoCliente[k]['isholdpause'] = respuesta[k]['isholdpause'];
 			estadoCliente[k]['num_calls'] = respuesta[k]['num_calls'];
 
 			$('#'+k+'-num_calls').text(estadoCliente[k]['num_calls']);

@@ -154,9 +154,10 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
     ksort($estadoMonitor);
 
     $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $holdData  = consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
     $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
     $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
-    $jsonData = construirDatosJSON($estadoMonitor, $breakData, $loginData, $callData);
+    $jsonData = construirDatosJSON($estadoMonitor, $breakData, $holdData, $loginData, $callData);
 
     $arrData = array();
     $tuplaTotal = NULL;
@@ -212,6 +213,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
                     '<b><span id="'.$jsTotalKey.'-logintime">'.timestamp_format($tuplaTotal['logintime']).'</span></b>',
                     '<b><span id="'.$jsTotalKey.'-sec_calls">'.timestamp_format($tuplaTotal['sec_calls']).'</span></b>',
                     '<b><span id="'.$jsTotalKey.'-sec_breaks">'.timestamp_format($tuplaTotal['sec_breaks']).'</span></b>',
+                    '<b><span id="'.$jsTotalKey.'-sec_holds">'.timestamp_format($tuplaTotal['sec_holds']).'</span></b>',
                 );
             }
 
@@ -223,6 +225,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
                 'num_calls'     =>  0,
                 'sec_calls'     =>  0,
                 'sec_breaks'    =>  0,
+                'sec_holds'     =>  0,
             );
         }
         $tuplaTotal['num_agents']++;
@@ -230,6 +233,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         $tuplaTotal['num_calls'] += $jsonRow['num_calls'];
         $tuplaTotal['sec_calls'] += $jsonRow['sec_calls'];
         $tuplaTotal['sec_breaks'] += $jsonRow['sec_breaks'];
+        $tuplaTotal['sec_holds'] += $jsonRow['sec_holds'];
         $tupla = array(
             ($sPrevQueue == $sQueue) ? '' : $sQueue,
             $jsonRow['agentchannel'],
@@ -239,6 +243,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
             '<span id="'.$jsonKey.'-logintime">'.timestamp_format($jsonRow['logintime']).'</span>',
             '<span id="'.$jsonKey.'-sec_calls">'.timestamp_format($jsonRow['sec_calls']).'</span>',
             '<span id="'.$jsonKey.'-sec_breaks">'.timestamp_format($jsonRow['sec_breaks']).'</span>',
+            '<span id="'.$jsonKey.'-sec_holds">'.timestamp_format($jsonRow['sec_holds']).'</span>',
         );
         $arrData[] = $tupla;
         $sPrevQueue = $sQueue;
@@ -254,6 +259,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
         '<b><span id="'.$jsTotalKey.'-logintime">'.timestamp_format($tuplaTotal['logintime']).'</span></b>',
         '<b><span id="'.$jsTotalKey.'-sec_calls">'.timestamp_format($tuplaTotal['sec_calls']).'</span></b>',
         '<b><span id="'.$jsTotalKey.'-sec_breaks">'.timestamp_format($tuplaTotal['sec_breaks']).'</span></b>',
+        '<b><span id="'.$jsTotalKey.'-sec_holds">'.timestamp_format($tuplaTotal['sec_holds']).'</span></b>',
     );
 
     // No es necesario emitir el nombre del agente la inicialización JSON
@@ -314,6 +320,7 @@ JSON_INITIALIZE;
                 array('name'    =>  _tr('Total login time')),
                 array('name'    =>  _tr('Total talk time')),
                 array('name'    =>  _tr('Total break time')),
+                array('name'    =>  _tr('Total hold time')),
             ),
         ), $arrData, $arrLang).
         $sJsonInitialize;
@@ -390,6 +397,48 @@ function consultarTiempoBreakAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
     $stmt2 = $pDB->query($sql2);
     while ($row = $stmt2->fetch(PDO::FETCH_ASSOC)) {
         $result['holdNames'][] = $row['name'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+function consultarTiempoHoldAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    // Default to full day if no shift range provided
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    // Query cumulative completed hold time per agent (Hold-type pauses only)
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(UNIX_TIMESTAMP(audit.datetime_end) - UNIX_TIMESTAMP(audit.datetime_init)) AS sec_holds " .
+           "FROM audit " .
+           "INNER JOIN break ON break.id = audit.id_break " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE break.tipo = 'H' " .
+           "AND audit.datetime_end IS NOT NULL " .
+           "AND audit.datetime_init >= :start " .
+           "AND audit.datetime_init <= :end " .
+           "GROUP BY agent.id";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start' => $datetimeStart, ':end' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result[$row['agentchannel']] = (int)$row['sec_holds'];
     }
 
     $pDB = null;
@@ -510,7 +559,7 @@ function consultarLlamadasAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
     return $result;
 }
 
-function construirDatosJSON(&$estadoMonitor, $breakData = array(), $loginData = array(), $callData = array())
+function construirDatosJSON(&$estadoMonitor, $breakData = array(), $holdData = array(), $loginData = array(), $callData = array())
 {
     $iTimestampActual = time();
     $jsonData = array();
@@ -585,6 +634,22 @@ function construirDatosJSON(&$estadoMonitor, $breakData = array(), $loginData = 
             $jsonData[$jsonKey]['sec_breaks'] = $sec_breaks;
             $jsonData[$jsonKey]['sec_breaks_completed'] = $sec_breaks_completed;
             $jsonData[$jsonKey]['isbreakpause'] = $isbreakpause;
+
+            // Hold time tracking
+            $sec_holds_completed = isset($holdData[$sAgentChannel])
+                ? $holdData[$sAgentChannel] : 0;
+            $isholdpause = false;
+            if ($infoAgente['onhold'] && !is_null($infoAgente['pausename'])) {
+                $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+                $isholdpause = in_array($infoAgente['pausename'], $holdNames);
+            }
+            $sec_holds = $sec_holds_completed;
+            if ($isholdpause && !is_null($infoAgente['lastpausestart'])) {
+                $sec_holds += max(0, $iTimestampActual - strtotime($infoAgente['lastpausestart']));
+            }
+            $jsonData[$jsonKey]['sec_holds'] = $sec_holds;
+            $jsonData[$jsonKey]['sec_holds_completed'] = $sec_holds_completed;
+            $jsonData[$jsonKey]['isholdpause'] = $isholdpause;
         }
     }
     return $jsonData;
@@ -642,9 +707,10 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     // Acumular inmediatamente las filas que son distintas en estado
     ksort($estadoMonitor);
     $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $holdData  = consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
     $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
     $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
-    $jsonData = construirDatosJSON($estadoMonitor, $breakData, $loginData, $callData);
+    $jsonData = construirDatosJSON($estadoMonitor, $breakData, $holdData, $loginData, $callData);
     foreach ($jsonData as $jsonKey => $jsonRow) {
     	if (isset($estadoCliente[$jsonKey])) {
     		if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
@@ -668,9 +734,10 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
         if (is_array($estadoMonitorActual)) {
             ksort($estadoMonitorActual);
             $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+            $holdData  = consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
             $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
             $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
-            $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $loginData, $callData);
+            $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $holdData, $loginData, $callData);
             foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                 if (isset($estadoCliente[$jsonKey])) {
                     if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
@@ -710,9 +777,10 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
             if (is_array($estadoMonitorActual)) {
                 ksort($estadoMonitorActual);
                 $breakData = consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+                $holdData  = consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
                 $loginData = consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
                 $callData  = consultarLlamadasAgentes($shiftRange['start'], $shiftRange['end']);
-                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $loginData, $callData);
+                $jsonDataActual = construirDatosJSON($estadoMonitorActual, $breakData, $holdData, $loginData, $callData);
                 foreach ($jsonDataActual as $jsonKey => $jsonRow) {
                     if (isset($estadoCliente[$jsonKey])) {
                         if ($estadoCliente[$jsonKey]['status'] != $jsonRow['status'] ||
