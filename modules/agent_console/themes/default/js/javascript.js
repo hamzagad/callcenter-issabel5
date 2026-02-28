@@ -348,6 +348,11 @@ function initialize_client_state(nuevoEstado)
 	updateShiftRangeIndicator();
 	$('#applyShiftFilter').on('click', applyShiftFilter);
 
+	// If saved preferences differ from default (0-23), fetch correct shift data
+	if (shiftFromHour !== 0 || shiftToHour !== 23) {
+		setTimeout(do_updateShiftTimes, 100);
+	}
+
 	// Lanzar el callback que actualiza el estado de la llamada
     setTimeout(do_checkstatus, 1);
 
