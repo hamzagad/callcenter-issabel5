@@ -107,6 +107,10 @@ class CampaignProcess extends TuberiaProcess
      * Agentes asignados después de la resolución de rotación */
     private $_allocatedAgents = array();  // [campaign_id => [agent1, agent2, ...]]
 
+    /* Campaign max_canales limits for current cycle
+     * Límites max_canales de campaña para el ciclo actual */
+    private $_campaignMaxCanales = array();  // [campaign_id => max_canales]
+
     public function inicioPostDemonio($infoConfig, &$oMainLog)
     {
     	$this->_log = $oMainLog;
@@ -540,9 +544,17 @@ PETICION_CAMPANIAS_ENTRANTES;
             // PASO 1: Recopilar intenciones de campaña (qué agentes quieren)
             // ============================================================
             $this->_campaignIntentions = array();
+            $this->_campaignMaxCanales = array();
             $this->_agentesReclamados = array();
 
             foreach ($listaCampanias['outgoing'] as $campaignData) {
+                // Store max_canales for this campaign / Guardar max_canales para esta campaña
+                $maxCanales = $campaignData['max_canales'];
+                if (is_null($maxCanales) || $maxCanales <= 0) {
+                    $maxCanales = PHP_INT_MAX;  // No limit / Sin límite
+                }
+                $this->_campaignMaxCanales[$campaignData['id']] = $maxCanales;
+
                 $queueInfo = $this->_tuberia->AMIEventProcess_infoPrediccionCola($campaignData['queue']);
                 if (is_null($queueInfo)) {
                     $oPredictor = new Predictor($this->_ami);
@@ -566,9 +578,9 @@ PETICION_CAMPANIAS_ENTRANTES;
                     if ($this->DEBUG) {
                         $this->_log->output("DEBUG: ".__METHOD__.
                             " (campaign {$campaignData['id']} queue {$campaignData['queue']}) ".
-                            "Pass 1: wants agents [".implode(',', $normalizedAgents)."] | ".
+                            "Pass 1: wants agents [".implode(',', $normalizedAgents)."], max_canales=$maxCanales | ".
                             "(campaña {$campaignData['id']} cola {$campaignData['queue']}) ".
-                            "Paso 1: quiere agentes [".implode(',', $normalizedAgents)."]");
+                            "Paso 1: quiere agentes [".implode(',', $normalizedAgents)."], max_canales=$maxCanales");
                     }
                 }
             }
@@ -577,7 +589,7 @@ PETICION_CAMPANIAS_ENTRANTES;
             // ALLOCATE: Resolve shared agents using N-way rotation
             // ASIGNAR: Resolver agentes compartidos usando rotación N-vías
             // ============================================================
-            $this->_allocatedAgents = $this->_resolveAgentRotation($this->_campaignIntentions);
+            $this->_allocatedAgents = $this->_resolveAgentRotation($this->_campaignIntentions, $this->_campaignMaxCanales);
 
             // ============================================================
             // PASS 2: Process campaigns with allocated agents
@@ -615,24 +627,27 @@ PETICION_CAMPANIAS_ENTRANTES;
     }
 
     /**
-     * Resolve agent allocation using N-way rotation.
-     * Each shared agent rotates among all campaigns that want it.
+     * Resolve agent allocation using N-way rotation with max_canales awareness.
+     * Each shared agent rotates among campaigns that want it and have capacity.
      *
-     * Resolver asignación de agentes usando rotación N-vías.
-     * Cada agente compartido rota entre todas las campañas que lo quieren.
+     * Resolver asignación de agentes usando rotación N-vías con conocimiento de max_canales.
+     * Cada agente compartido rota entre campañas que lo quieren y tienen capacidad.
      *
      * @param array $intentions [campaign_id => [agents...]]
+     * @param array $maxCanales [campaign_id => max_canales_limit]
      * @return array [campaign_id => [allocated_agents...]]
      */
-    private function _resolveAgentRotation($intentions)
+    private function _resolveAgentRotation($intentions, $maxCanales = array())
     {
         $allocated = array();
+        $allocationCount = array();  // Track how many agents allocated to each campaign
         $agentToCampaigns = array();  // [agent => [campaign_ids...]]
 
         // Build reverse map: which campaigns want each agent
         // Construir mapa inverso: qué campañas quieren cada agente
         foreach ($intentions as $campaignId => $agents) {
             $allocated[$campaignId] = array();
+            $allocationCount[$campaignId] = 0;
             foreach ($agents as $agent) {
                 if (!isset($agentToCampaigns[$agent])) {
                     $agentToCampaigns[$agent] = array();
@@ -644,23 +659,47 @@ PETICION_CAMPANIAS_ENTRANTES;
         // Allocate each agent / Asignar cada agente
         foreach ($agentToCampaigns as $agent => $campaigns) {
             if (count($campaigns) == 1) {
-                // Only one campaign wants this agent - assign directly
-                // Solo una campaña quiere este agente - asignar directamente
-                $allocated[$campaigns[0]][] = $agent;
-                $this->_agentesReclamados[$agent] = $campaigns[0];
-            } else {
-                // Multiple campaigns want this agent - use rotation
-                // Múltiples campañas quieren este agente - usar rotación
-                $winningCampaign = $this->_getRotationWinner($agent, $campaigns);
-                $allocated[$winningCampaign][] = $agent;
-                $this->_agentesReclamados[$agent] = $winningCampaign;
+                // Only one campaign wants this agent - assign if has capacity
+                // Solo una campaña quiere este agente - asignar si tiene capacidad
+                $campaignId = $campaigns[0];
+                $limit = isset($maxCanales[$campaignId]) ? $maxCanales[$campaignId] : PHP_INT_MAX;
 
-                if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: ".__METHOD__.
-                        " agent $agent shared by campaigns [".implode(',', $campaigns).
-                        "] -> assigned to campaign $winningCampaign (rotation) | ".
-                        "agente $agent compartido por campañas [".implode(',', $campaigns).
-                        "] -> asignado a campaña $winningCampaign (rotación)");
+                if ($allocationCount[$campaignId] < $limit) {
+                    $allocated[$campaignId][] = $agent;
+                    $allocationCount[$campaignId]++;
+                    $this->_agentesReclamados[$agent] = $campaignId;
+                } else {
+                    if ($this->DEBUG) {
+                        $this->_log->output("DEBUG: ".__METHOD__.
+                            " agent $agent: campaign $campaignId reached max_canales=$limit, agent not allocated | ".
+                            "agente $agent: campaña $campaignId alcanzó max_canales=$limit, agente no asignado");
+                    }
+                }
+            } else {
+                // Multiple campaigns want this agent - use rotation with max_canales awareness
+                // Múltiples campañas quieren este agente - usar rotación con conocimiento de max_canales
+                $winningCampaign = $this->_getRotationWinnerWithCapacity($agent, $campaigns, $maxCanales, $allocationCount);
+
+                if (!is_null($winningCampaign)) {
+                    $allocated[$winningCampaign][] = $agent;
+                    $allocationCount[$winningCampaign]++;
+                    $this->_agentesReclamados[$agent] = $winningCampaign;
+
+                    if ($this->DEBUG) {
+                        $this->_log->output("DEBUG: ".__METHOD__.
+                            " agent $agent shared by campaigns [".implode(',', $campaigns).
+                            "] -> assigned to campaign $winningCampaign (rotation) | ".
+                            "agente $agent compartido por campañas [".implode(',', $campaigns).
+                            "] -> asignado a campaña $winningCampaign (rotación)");
+                    }
+                } else {
+                    if ($this->DEBUG) {
+                        $this->_log->output("DEBUG: ".__METHOD__.
+                            " agent $agent shared by campaigns [".implode(',', $campaigns).
+                            "] -> all campaigns at max_canales, agent not allocated | ".
+                            "agente $agent compartido por campañas [".implode(',', $campaigns).
+                            "] -> todas las campañas en max_canales, agente no asignado");
+                    }
                 }
             }
         }
@@ -709,6 +748,83 @@ PETICION_CAMPANIAS_ENTRANTES;
                 "campaigns=[".implode(',', $campaigns)."], winner=$winner | ".
                 "agente $agent rotación: índice={$rotation['index']}, ".
                 "campañas=[".implode(',', $campaigns)."], ganador=$winner");
+        }
+
+        return $winner;
+    }
+
+    /**
+     * Get the winning campaign for a shared agent using N-way rotation,
+     * respecting max_canales limits. If the rotation winner is at capacity,
+     * try the next campaign in rotation order.
+     *
+     * Obtener la campaña ganadora para un agente compartido usando rotación N-vías,
+     * respetando los límites de max_canales. Si el ganador de rotación está al límite,
+     * intentar con la siguiente campaña en orden de rotación.
+     *
+     * @param string $agent The agent identifier
+     * @param array $campaigns List of campaign IDs that want this agent
+     * @param array $maxCanales [campaign_id => max_canales_limit]
+     * @param array $allocationCount [campaign_id => current_allocation_count]
+     * @return int|null The campaign ID that wins, or null if all at capacity
+     */
+    private function _getRotationWinnerWithCapacity($agent, $campaigns, $maxCanales, $allocationCount)
+    {
+        sort($campaigns);  // Ensure consistent order / Asegurar orden consistente
+        $campaignsKey = implode(',', $campaigns);
+        $numCampaigns = count($campaigns);
+
+        // Initialize or update rotation tracking for this agent
+        // Inicializar o actualizar seguimiento de rotación para este agente
+        if (!isset($this->_agentRotation[$agent]) ||
+            $this->_agentRotation[$agent]['key'] !== $campaignsKey) {
+            // New agent or campaign set changed - initialize rotation
+            // Nuevo agente o conjunto de campañas cambió - inicializar rotación
+            $this->_agentRotation[$agent] = array(
+                'key' => $campaignsKey,
+                'campaigns' => $campaigns,
+                'index' => 0,
+            );
+        }
+
+        $rotation = &$this->_agentRotation[$agent];
+        $startIndex = $rotation['index'];
+        $winner = null;
+
+        // Try each campaign in rotation order until we find one with capacity
+        // Intentar cada campaña en orden de rotación hasta encontrar una con capacidad
+        for ($i = 0; $i < $numCampaigns; $i++) {
+            $winnerIndex = ($startIndex + $i) % $numCampaigns;
+            $candidateCampaign = $rotation['campaigns'][$winnerIndex];
+
+            $limit = isset($maxCanales[$candidateCampaign]) ? $maxCanales[$candidateCampaign] : PHP_INT_MAX;
+            $currentCount = isset($allocationCount[$candidateCampaign]) ? $allocationCount[$candidateCampaign] : 0;
+
+            if ($currentCount < $limit) {
+                // This campaign has capacity / Esta campaña tiene capacidad
+                $winner = $candidateCampaign;
+
+                if ($this->DEBUG && $i > 0) {
+                    // Log that we skipped some campaigns due to max_canales
+                    $this->_log->output("DEBUG: ".__METHOD__.
+                        " agent $agent: skipped $i campaign(s) at max_canales, assigned to campaign $winner | ".
+                        "agente $agent: saltó $i campaña(s) en max_canales, asignado a campaña $winner");
+                }
+                break;
+            }
+        }
+
+        // Advance rotation for next cycle (always advance, even if no capacity found)
+        // Avanzar rotación para próximo ciclo (siempre avanzar, aunque no se encuentre capacidad)
+        $rotation['index']++;
+
+        if ($this->DEBUG) {
+            $winnerStr = is_null($winner) ? 'none' : $winner;
+            $this->_log->output("DEBUG: ".__METHOD__.
+                " agent $agent rotation: index={$rotation['index']}, ".
+                "campaigns=[".implode(',', $campaigns)."], winner=$winnerStr | ".
+                "agente $agent rotación: índice={$rotation['index']}, ".
+                "campañas=[".implode(',', $campaigns)."], ganador=$winnerStr");
         }
 
         return $winner;

@@ -2,6 +2,87 @@
 
 ---
 
+## 29. Max Concurrent Calls Awareness in Fair Rotation
+**Date**: 2026-02-28
+
+**File**: `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: When using fair rotation with shared agents, if a campaign won more agents than its `max_canales` (max concurrent calls) allowed, the extra agents were wasted - they weren't given to other campaigns that could use them.
+
+**Example of the problem**:
+```
+10 shared agents available
+Campaign 1: max_canales = 5
+Campaign 2: max_canales = 5
+
+Cycle 1 (Campaign 1 wins rotation for all 10 agents):
+  - Campaign 1 allocated: 10 agents
+  - Campaign 1 places: min(10, 5) = 5 calls (capped by max_canales)
+  - 5 agents WASTED (not given to Campaign 2)
+```
+
+**Fix**: Enhanced the fair rotation allocation to be max_canales-aware:
+- Track allocation count per campaign during agent distribution
+- When a campaign wins an agent but has reached its max_canales limit, skip to the next campaign in rotation order
+- Continue until finding a campaign with capacity or all campaigns are at limit
+
+**New behavior**:
+```
+10 shared agents available
+Campaign 1: max_canales = 5
+Campaign 2: max_canales = 5
+
+Cycle 1:
+  - Agents 1-5: Campaign 1 wins, has capacity → allocated to Campaign 1
+  - Agent 6: Campaign 1 wins, but at limit (5/5) → skip to Campaign 2 → allocated
+  - Agent 7: Campaign 1 wins, but at limit → skip to Campaign 2 → allocated
+  - Agents 8-10: Same pattern → allocated to Campaign 2
+
+  Result: Campaign 1 gets 5, Campaign 2 gets 5 (NO agents wasted!)
+```
+
+**Technical Details**:
+- New property: `$_campaignMaxCanales` stores max_canales per campaign
+- New method: `_getRotationWinnerWithCapacity()` finds next campaign with available capacity
+- Pass 1 now collects max_canales for each campaign
+- Rotation still advances normally to maintain fairness across cycles
+
+**Debug logs** (when dialer_debug enabled):
+```bash
+# Watch max_canales-aware allocation
+tail -f /opt/issabel/dialer/dialerd.log | grep -E "max_canales|skipped.*at max_canales"
+
+# Check skipped allocations
+grep "skipped.*at max_canales" /opt/issabel/dialer/dialerd.log | tail -20
+```
+
+---
+
+## 28. Dialer Service in Dashboard ProcessesStatus Applet
+**Date**: 2026-02-27
+
+**Files**:
+- `build/5.0/install-issabel-callcenter.sh`
+- `build/5.0/remove-issabel-callcenter.sh`
+- `setup/icon_headphones.png`
+
+**Feature**: Added the Issabel Call Center Service (Dialer) to the Issabel Dashboard's ProcessesStatus widget, allowing administrators to monitor and control the dialer service from the main dashboard.
+
+**Changes**:
+- Installation script now patches `/var/www/html/modules/dashboard/applets/ProcessesStatus/index.php` to add:
+  - Dialer icon mapping (`icon_headphones.png`)
+  - Service control mapping for start/stop/restart
+  - Status detection using `/opt/issabel/dialer/dialerd.pid`
+- Removal script removes all patches and the icon file
+- Patching is idempotent (safe to run multiple times)
+
+**Dashboard Display**:
+- Service name: "Issabel Call Center Service"
+- Icon: headphones icon
+- Controls: Start, Stop, Restart, Enable, Disable
+
+---
+
 ## 27. Shift-Based Counters in Agent Console
 **Date**: 2026-02-27
 
