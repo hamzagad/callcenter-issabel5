@@ -553,7 +553,18 @@ PETICION_CAMPANIAS_ENTRANTES;
                 if (is_null($maxCanales) || $maxCanales <= 0) {
                     $maxCanales = PHP_INT_MAX;  // No limit / Sin límite
                 }
-                $this->_campaignMaxCanales[$campaignData['id']] = $maxCanales;
+
+                // Count active calls for this campaign (Placing, Ringing, OnQueue, OnHold)
+                // Contar llamadas activas para esta campaña
+                $activeCalls = $this->_countActiveCalls($campaignData['id']);
+
+                // Calculate effective max_canales (subtract active calls)
+                // Calcular max_canales efectivo (restar llamadas activas)
+                $effectiveMaxCanales = $maxCanales;
+                if ($maxCanales < PHP_INT_MAX) {
+                    $effectiveMaxCanales = max(0, $maxCanales - $activeCalls);
+                }
+                $this->_campaignMaxCanales[$campaignData['id']] = $effectiveMaxCanales;
 
                 $queueInfo = $this->_tuberia->AMIEventProcess_infoPrediccionCola($campaignData['queue']);
                 if (is_null($queueInfo)) {
@@ -578,9 +589,9 @@ PETICION_CAMPANIAS_ENTRANTES;
                     if ($this->DEBUG) {
                         $this->_log->output("DEBUG: ".__METHOD__.
                             " (campaign {$campaignData['id']} queue {$campaignData['queue']}) ".
-                            "Pass 1: wants agents [".implode(',', $normalizedAgents)."], max_canales=$maxCanales | ".
+                            "Pass 1: wants agents [".implode(',', $normalizedAgents)."], max_canales=$maxCanales, active_calls=$activeCalls, effective_max=$effectiveMaxCanales | ".
                             "(campaña {$campaignData['id']} cola {$campaignData['queue']}) ".
-                            "Paso 1: quiere agentes [".implode(',', $normalizedAgents)."], max_canales=$maxCanales");
+                            "Paso 1: quiere agentes [".implode(',', $normalizedAgents)."], max_canales=$maxCanales, llamadas_activas=$activeCalls, max_efectivo=$effectiveMaxCanales");
                     }
                 }
             }
@@ -2147,6 +2158,34 @@ PETICION_LLAMADAS_AGENTE;
     private function _contarLlamadasEsperandoRespuesta($queue)
     {
         return $this->_tuberia->AMIEventProcess_contarLlamadasEsperandoRespuesta($queue);
+    }
+
+    /**
+     * Count active calls for a campaign (Placing, Ringing, OnQueue, OnHold).
+     * Used to calculate effective max_canales for allocation.
+     *
+     * Contar llamadas activas para una campaña (Placing, Ringing, OnQueue, OnHold).
+     * Usado para calcular max_canales efectivo para asignación.
+     *
+     * @param int $campaignId The campaign ID
+     * @return int Number of active calls
+     */
+    private function _countActiveCalls($campaignId)
+    {
+        $sPeticion = 'SELECT COUNT(*) FROM calls WHERE id_campaign = ? AND status IN ("Placing", "Ringing", "OnQueue", "OnHold")';
+        $recordset = $this->_db->prepare($sPeticion);
+        $recordset->execute(array($campaignId));
+        $count = $recordset->fetch(PDO::FETCH_COLUMN, 0);
+        $recordset->closeCursor();
+        $result = is_null($count) ? 0 : (int)$count;
+
+        if ($this->DEBUG && $result > 0) {
+            $this->_log->output("DEBUG: ".__METHOD__.
+                " campaign $campaignId has $result active calls (Placing/Ringing/OnQueue/OnHold) | ".
+                "campaña $campaignId tiene $result llamadas activas (Placing/Ringing/OnQueue/OnHold)");
+        }
+
+        return $result;
     }
 
     // Construir la cadena de variables, con separador adecuado según versión Asterisk
