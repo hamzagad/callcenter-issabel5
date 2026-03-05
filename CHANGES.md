@@ -2,6 +2,36 @@
 
 ---
 
+## 31. Fix Campaign Staying Active After Data Exhaustion
+**Date**: 2026-03-05
+
+**File**: `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: Outgoing campaigns could remain in "Active" status even after all callable data was exhausted. This happened when the last calls completed while no agents were available (busy, logged out, or not allocated), because the "mark as finished" check only ran when agents were available to place calls.
+
+**Root cause**: The finish check (`estatus = "T"`) in `_processCampaignWithAllocation()` required `$iNumLlamadasColocar > 0` (agents available). Two early-return paths exited before reaching this check:
+1. No agents allocated this cycle
+2. No free agents and no scheduled calls
+
+**Fix**: Added `_checkCampaignDataExhausted()` method that runs at both early-return points. It independently checks whether the campaign has any remaining callable records and no active calls in progress, and marks the campaign as finished if data is exhausted — regardless of agent availability.
+
+---
+
+## 30. Fix Outgoing/Incoming Campaigns Panel Reports
+**Date**: 2026-03-05
+
+**Files**:
+- `modules/agent_console/libs/paloSantoConsola.class.php`
+- `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: The Outgoing and Incoming Campaigns Panel reports were filtering calls incorrectly. ECCP returns time-only strings (`HH:MM:SS`) for today's calls (date prefix stripped in `ECCPConn._agregarCallInfo`), but these were being compared against full datetime strings (`YYYY-MM-DD HH:MM:SS`). This caused calls to be incorrectly excluded from the panel results.
+
+**Fix**: Added date normalization before comparison — when `callStartTime` is a time-only string (8 chars or less, no date prefix), today's date is prepended for proper datetime comparison. Applied to both outgoing and incoming campaign panel methods.
+
+**Also included**: Added extra debug logging to the campaign fair rotation logic (rotation start, agent map, allocation results, per-campaign processing).
+
+---
+
 ## 29. Max Concurrent Calls Awareness in Fair Rotation
 **Date**: 2026-02-28
 

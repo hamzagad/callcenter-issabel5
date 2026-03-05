@@ -916,6 +916,9 @@ PETICION_CAMPANIAS_ENTRANTES;
                     " (campaign $campaignId queue {$infoCampania['queue']}) no agents allocated this cycle | ".
                     "(campaña $campaignId cola {$infoCampania['queue']}) ningún agente asignado en este ciclo");
             }
+            // Even with no agents, check if data is exhausted to mark campaign as finished
+            // Aunque no haya agentes, verificar si los datos se agotaron para marcar campaña como finalizada
+            $this->_checkCampaignDataExhausted($campaignId, $infoCampania);
             return FALSE;
         }
 
@@ -964,6 +967,9 @@ PETICION_CAMPANIAS_ENTRANTES;
                     "{$infoCampania['queue']}) no free agents or calls to place! | ".
                     "(campaña $campaignId cola {$infoCampania['queue']}) sin agentes libres ni llamadas a colocar!");
             }
+            // Even with no agents to place calls, check if data is exhausted
+            // Aunque no haya agentes para colocar llamadas, verificar si los datos se agotaron
+            $this->_checkCampaignDataExhausted($campaignId, $infoCampania);
             return FALSE;
         }
 
@@ -2232,6 +2238,45 @@ PETICION_LLAMADAS_AGENTE;
         }
 
         return $result;
+    }
+
+    /**
+     * Check if campaign has exhausted all callable data and mark it as finished.
+     * This runs independently of agent availability to prevent campaigns staying
+     * active when data runs out while no agents are free.
+     *
+     * Verificar si la campaña agotó todos los datos marcables y marcarla como finalizada.
+     * Esto se ejecuta independientemente de la disponibilidad de agentes para evitar que
+     * las campañas permanezcan activas cuando los datos se agotan sin agentes libres.
+     */
+    private function _checkCampaignDataExhausted($campaignId, $infoCampania)
+    {
+        // Check if there are any active calls still in progress
+        // Verificar si hay llamadas activas aún en progreso
+        $activeCalls = $this->_countActiveCalls($campaignId);
+        if ($activeCalls > 0) {
+            return; // Still have calls in progress, don't mark as finished
+        }
+
+        // Check if there are any remaining callable records (regardless of time window)
+        // Verificar si quedan registros marcables (sin importar ventana de tiempo)
+        $sPeticion =
+            'SELECT COUNT(*) FROM calls '.
+            'WHERE id_campaign = ? '.
+                'AND (status IS NULL OR status NOT IN ("Success", "Placing", "Ringing", "OnQueue", "OnHold")) '.
+                'AND retries < ? '.
+                'AND dnc = 0';
+        $recordset = $this->_db->prepare($sPeticion);
+        $recordset->execute(array($campaignId, $infoCampania['retries']));
+        $iNumRemaining = $recordset->fetch(PDO::FETCH_COLUMN, 0);
+        $recordset->closeCursor();
+
+        if (is_null($iNumRemaining) || $iNumRemaining <= 0) {
+            $this->_log->output('INFO: campaign data exhausted, marking as finished: '.$campaignId.
+                ' | datos de campaña agotados, marcando como finalizada: '.$campaignId);
+            $sth = $this->_db->prepare('UPDATE campaign SET estatus = "T" WHERE id = ? AND estatus = "A"');
+            $sth->execute(array($campaignId));
+        }
     }
 
     // Construir la cadena de variables, con separador adecuado según versión Asterisk
