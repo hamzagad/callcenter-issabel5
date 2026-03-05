@@ -397,6 +397,8 @@ class CampaignProcess extends TuberiaProcess
         $iTimestamp = time();
         if ($iTimestamp - $this->_iTimestampUltimaRevisionCampanias >= INTERVALO_REVISION_CAMPANIAS) {
 
+            $this->_log->output("DEBUG: ".__METHOD__." === CAMPAIGN REVIEW CYCLE STARTED === | === CICLO DE REVISION DE CAMPAÑAS INICIADO ===");
+
             /* Se actualiza timestamp de revisión aquí por si no se puede
              * actualizar más tarde debido a una excepción de DB.
              * Review timestamp is updated here in case it cannot be updated
@@ -439,6 +441,13 @@ PETICION_CAMPANIAS_SALIENTES;
             foreach ($recordset as $tupla) {
             	$listaCampanias['outgoing'][] = $tupla;
             }
+
+            // Log loaded outgoing campaigns
+            $outgoingIds = array();
+            foreach ($listaCampanias['outgoing'] as $c) {
+                $outgoingIds[] = $c['id'].'('.$c['name'].'/q'.$c['queue'].')';
+            }
+            $this->_log->output("DEBUG: ".__METHOD__." Loaded ".count($listaCampanias['outgoing'])." outgoing campaigns: [".implode(', ', $outgoingIds)."] | Cargadas ".count($listaCampanias['outgoing'])." campañas salientes: [".implode(', ', $outgoingIds)."]");
 
             // Desactivar todas las campañas que sigan activas y que hayan superado
             // la fecha final de duración de campaña
@@ -596,11 +605,23 @@ PETICION_CAMPANIAS_ENTRANTES;
                 }
             }
 
+            // Log Pass 1 summary
+            $this->_log->output("DEBUG: ".__METHOD__." Pass 1 COMPLETE: ".count($this->_campaignIntentions)." campaigns with intentions, max_canales: ".json_encode($this->_campaignMaxCanales)." | Paso 1 COMPLETO: ".count($this->_campaignIntentions)." campañas con intenciones");
+            foreach ($this->_campaignIntentions as $cid => $agents) {
+                $this->_log->output("DEBUG: ".__METHOD__." Pass 1 intentions: campaign $cid wants ".count($agents)." agents: [".implode(',', $agents)."], effective_max=".$this->_campaignMaxCanales[$cid]." | Paso 1 intenciones: campaña $cid quiere ".count($agents)." agentes");
+            }
+
             // ============================================================
             // ALLOCATE: Resolve shared agents using N-way rotation
             // ASIGNAR: Resolver agentes compartidos usando rotación N-vías
             // ============================================================
             $this->_allocatedAgents = $this->_resolveAgentRotation($this->_campaignIntentions, $this->_campaignMaxCanales);
+
+            // Log allocation results
+            $this->_log->output("DEBUG: ".__METHOD__." ALLOCATION COMPLETE | ASIGNACION COMPLETA:");
+            foreach ($this->_allocatedAgents as $cid => $agents) {
+                $this->_log->output("DEBUG: ".__METHOD__." Allocated: campaign $cid gets ".count($agents)." agents: [".implode(',', $agents)."] | Asignado: campaña $cid obtiene ".count($agents)." agentes: [".implode(',', $agents)."]");
+            }
 
             // ============================================================
             // PASS 2: Process campaigns with allocated agents
@@ -650,6 +671,8 @@ PETICION_CAMPANIAS_ENTRANTES;
      */
     private function _resolveAgentRotation($intentions, $maxCanales = array())
     {
+        $this->_log->output("DEBUG: ".__METHOD__." === ROTATION START === Input: ".count($intentions)." campaigns, maxCanales=".json_encode($maxCanales)." | === INICIO ROTACION === Entrada: ".count($intentions)." campañas");
+
         $allocated = array();
         $allocationCount = array();  // Track how many agents allocated to each campaign
         $agentToCampaigns = array();  // [agent => [campaign_ids...]]
@@ -664,6 +687,23 @@ PETICION_CAMPANIAS_ENTRANTES;
                     $agentToCampaigns[$agent] = array();
                 }
                 $agentToCampaigns[$agent][] = $campaignId;
+            }
+        }
+
+        // Log agent-to-campaigns map
+        $sharedAgents = array();
+        $uniqueAgents = array();
+        foreach ($agentToCampaigns as $agent => $campaigns) {
+            if (count($campaigns) > 1) {
+                $sharedAgents[$agent] = $campaigns;
+            } else {
+                $uniqueAgents[$agent] = $campaigns[0];
+            }
+        }
+        $this->_log->output("DEBUG: ".__METHOD__." Agent map: ".count($uniqueAgents)." unique agents, ".count($sharedAgents)." shared agents | Mapa agentes: ".count($uniqueAgents)." únicos, ".count($sharedAgents)." compartidos");
+        if (count($sharedAgents) > 0) {
+            foreach ($sharedAgents as $agent => $campaigns) {
+                $this->_log->output("DEBUG: ".__METHOD__." Shared agent $agent wanted by campaigns: [".implode(',', $campaigns)."] | Agente compartido $agent querido por campañas: [".implode(',', $campaigns)."]");
             }
         }
 
@@ -802,6 +842,8 @@ PETICION_CAMPANIAS_ENTRANTES;
         $startIndex = $rotation['index'];
         $winner = null;
 
+        $this->_log->output("DEBUG: ".__METHOD__." agent $agent: rotation index=$startIndex, campaigns=[".implode(',', $campaigns)."] | agente $agent: índice rotación=$startIndex, campañas=[".implode(',', $campaigns)."]");
+
         // Try each campaign in rotation order until we find one with capacity
         // Intentar cada campaña en orden de rotación hasta encontrar una con capacidad
         for ($i = 0; $i < $numCampaigns; $i++) {
@@ -852,6 +894,8 @@ PETICION_CAMPANIAS_ENTRANTES;
     private function _processCampaignWithAllocation($infoCampania, $oPredictor)
     {
         $campaignId = $infoCampania['id'];
+        $this->_log->output("DEBUG: ".__METHOD__." === Processing campaign $campaignId ({$infoCampania['name']}) queue {$infoCampania['queue']} === | === Procesando campaña $campaignId ({$infoCampania['name']}) cola {$infoCampania['queue']} ===");
+
         $iTimeoutOriginate = $this->_configDB->dialer_timeout_originate;
         if (is_null($iTimeoutOriginate) || $iTimeoutOriginate <= 0)
             $iTimeoutOriginate = NULL;
@@ -864,6 +908,7 @@ PETICION_CAMPANIAS_ENTRANTES;
             : array();
 
         $numAllocatedAgents = count($allocatedAgents);
+        $this->_log->output("DEBUG: ".__METHOD__." campaign $campaignId: allocated $numAllocatedAgents agents: [".implode(',', $allocatedAgents)."] | campaña $campaignId: $numAllocatedAgents agentes asignados: [".implode(',', $allocatedAgents)."]");
 
         if ($numAllocatedAgents == 0) {
             if ($this->DEBUG) {
@@ -960,6 +1005,7 @@ PETICION_CAMPANIAS_ENTRANTES;
         // Read calls to place / Leer llamadas a colocar
         $listaLlamadas = $listaLlamadasAgendadas;
         $iNumTotalLlamadas = count($listaLlamadas);
+        $this->_log->output("DEBUG: ".__METHOD__." campaign $campaignId: FINAL iNumLlamadasColocar=$iNumLlamadasColocar, scheduled_calls=".count($listaLlamadasAgendadas)." | campaña $campaignId: FINAL llamadasAColocar=$iNumLlamadasColocar, llamadas_programadas=".count($listaLlamadasAgendadas));
         if ($iNumLlamadasColocar > 0) {
             $sFechaSys = date('Y-m-d');
             $sHoraSys = date('H:i:s');

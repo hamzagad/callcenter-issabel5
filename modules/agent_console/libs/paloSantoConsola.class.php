@@ -1649,6 +1649,15 @@ class PaloSantoConsola
                     }
 
                     if (!is_null($callStartTime)) {
+                        // ECCP returns time-only strings (HH:MM:SS) for today's calls
+                        // (date prefix stripped in ECCPConn._agregarCallInfo)
+                        // Prepend today's date for proper datetime comparison
+                        // ES: ECCP devuelve solo hora (HH:MM:SS) para llamadas de hoy
+                        // Anteponer la fecha de hoy para comparacion correcta
+                        if (strlen($callStartTime) <= 8 || !preg_match('/^\d{4}-\d{2}-\d{2}/', $callStartTime)) {
+                            $callStartTime = date('Y-m-d') . ' ' . $callStartTime;
+                        }
+
                         if (!is_null($datetime_start) && $callStartTime < $datetime_start) {
                             continue;
                         }
@@ -1950,6 +1959,15 @@ class PaloSantoConsola
                     }
 
                     if (!is_null($callStartTime)) {
+                        // ECCP returns time-only strings (HH:MM:SS) for today's calls
+                        // (date prefix stripped in ECCPConn._agregarCallInfo)
+                        // Prepend today's date for proper datetime comparison
+                        // ES: ECCP devuelve solo hora (HH:MM:SS) para llamadas de hoy
+                        // Anteponer la fecha de hoy para comparacion correcta
+                        if (strlen($callStartTime) <= 8 || !preg_match('/^\d{4}-\d{2}-\d{2}/', $callStartTime)) {
+                            $callStartTime = date('Y-m-d') . ' ' . $callStartTime;
+                        }
+
                         if (!is_null($datetime_start) && $callStartTime < $datetime_start) {
                             continue;
                         }
