@@ -128,6 +128,10 @@ if (file_exists($path_script_db))
     actualizarLongitudCampo($pDB, 'call_center', 'current_call_entry', 'ChannelClient', 50);
     actualizarLongitudCampo($pDB, 'call_center', 'current_calls', 'ChannelClient', 50);
 
+    // Convertir todas las tablas a utf8mb4 para soporte completo de Unicode
+    // EN: Convert all tables to utf8mb4 for full Unicode support
+    convertirCharsetUtf8mb4($pDB, 'call_center');
+
     // Asegurarse de que todo agente tiene una contraseña de ECCP
     // EN: Ensure that every agent has an ECCP password
     $pDB->genQuery('UPDATE agent SET eccp_password = SHA1(CONCAT(NOW(), RAND(), number)) WHERE eccp_password IS NULL');
@@ -596,5 +600,30 @@ function convertirAgentsConf($astMajor)
     chown($sArchivo, 'asterisk');
     chgrp($sArchivo, 'asterisk');
     fputs(STDERR, "INFO: agents.conf conversion complete (".count($agentesEncontrados)." agents)\n");
+}
+
+function convertirCharsetUtf8mb4($pDB, $sDatabase)
+{
+    // Buscar tablas que no usen utf8mb4_general_ci
+    // EN: Find tables that don't use utf8mb4_general_ci
+    $sPeticionSQL = <<<SQL_CHARSET
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' AND TABLE_COLLATION != 'utf8mb4_general_ci'
+SQL_CHARSET;
+    $result = $pDB->fetchTable($sPeticionSQL, TRUE, array($sDatabase));
+    if (!is_array($result) || count($result) == 0) {
+        fputs(STDERR, "INFO: All tables already use utf8mb4_general_ci charset. | Es: Todas las tablas ya usan charset utf8mb4_general_ci.\n");
+        return;
+    }
+
+    foreach ($result as $row) {
+        $sTabla = $row['TABLE_NAME'];
+        $sql = "ALTER TABLE `$sTabla` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci";
+        fputs(STDERR, "INFO: Converting $sTabla to utf8mb4 charset | Es: Convirtiendo $sTabla a charset utf8mb4\n");
+        fputs(STDERR, "\t$sql\n");
+        $r = $pDB->genQuery($sql);
+        if (!$r) fputs(STDERR, "ERR: ".$pDB->errMsg."\n");
+    }
+    fputs(STDERR, "INFO: utf8mb4 charset conversion complete (".count($result)." tables converted) | Es: Conversión de charset utf8mb4 completada (".count($result)." tablas convertidas)\n");
 }
 ?>
