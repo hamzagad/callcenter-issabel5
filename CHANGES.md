@@ -2,6 +2,40 @@
 
 ---
 
+## 37. Cap Overcommit by max_canales (Trunk Capacity Limit)
+**Date**: 2026-03-06
+
+**File**: `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: When "Enable Overcommit of Outgoing Calls" is enabled, the overcommit logic inflates the number of calls to place based on the ASR (Answer Seizure Ratio), but does not re-check the campaign's `max_canales` setting afterward. Since `max_canales` represents the physical trunk capacity, overcommit can push calls beyond what the trunk can handle, causing trunk saturation, high call failure rates, and unnecessary data/traffic consumption.
+
+**Example of the problem**:
+```
+7 agents logged in
+Trunk capacity: max_canales = 8
+ASR = 50%
+
+Before fix:
+  Calls to place = 7
+  Overcommit: 7 / 0.5 = 14 calls placed
+  Trunk can only handle 8 → 6 calls fail due to trunk saturation
+  Failed calls lower ASR further → vicious cycle
+
+After fix:
+  Calls to place = 7
+  Overcommit: 7 / 0.5 = 14
+  Re-cap: min(14, 8) = 8 calls placed
+  Trunk handles all 8 → ~4 succeed, within trunk limits
+```
+
+**Fix**: Added a max_canales re-cap after the overcommit inflation in both code paths:
+- **Fair-rotation path** (`_processCampaignWithAllocation`): re-caps after overcommit at ~line 1007
+- **Legacy path** (`_revisarLlamadasCampania`): re-caps after overcommit at ~line 1435
+
+The re-cap uses the raw `max_canales` value (not `effectiveMaxCanales`) since it represents the absolute trunk hardware limit. Overcommit still provides benefit up to that ceiling.
+
+---
+
 ## 36. Conditional RINGING-as-Free Based on Predictive Dialer Config
 **Date**: 2026-03-06
 

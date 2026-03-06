@@ -1001,6 +1001,22 @@ PETICION_CAMPANIAS_ENTRANTES;
                 $ASR_safe = $ASR;
                 if ($ASR_safe < 0.20) $ASR_safe = 0.20;
                 $iNumLlamadasColocar = (int)round($iNumLlamadasColocar / $ASR_safe);
+
+                // Re-cap by max_canales after overcommit to respect trunk capacity
+                // Re-limitar por max_canales después de sobre-colocación para respetar capacidad del trunk
+                if (!is_null($infoCampania['max_canales']) && $infoCampania['max_canales'] > 0
+                    && $iNumLlamadasColocar > $infoCampania['max_canales']) {
+                    $iBeforeRecap = $iNumLlamadasColocar;
+                    $iNumLlamadasColocar = $infoCampania['max_canales'];
+                    if ($this->DEBUG) {
+                        $this->_log->output(
+                            "DEBUG: (campaign $campaignId queue {$infoCampania['queue']}) ".
+                            "overcommit capped from $iBeforeRecap to {$infoCampania['max_canales']} by max_canales (trunk limit) | ".
+                            "(campaña $campaignId cola {$infoCampania['queue']}) ".
+                            "sobre-colocación limitada de $iBeforeRecap a {$infoCampania['max_canales']} por max_canales (límite de trunk)");
+                    }
+                }
+
                 if ($this->DEBUG) {
                     $this->_log->output(
                         "DEBUG: (campaign $campaignId queue {$infoCampania['queue']}) ".
@@ -1413,6 +1429,22 @@ SQL_LLAMADA_COLOCADA;
                 $ASR_safe = $ASR;
                 if ($ASR_safe < 0.20) $ASR_safe = 0.20;
                 $iNumLlamadasColocar = (int)round($iNumLlamadasColocar / $ASR_safe);
+
+                // Re-cap by max_canales after overcommit to respect trunk capacity
+                // Re-limitar por max_canales después de sobre-colocación para respetar capacidad del trunk
+                if (!is_null($infoCampania['max_canales']) && $infoCampania['max_canales'] > 0
+                    && $iNumLlamadasColocar > $infoCampania['max_canales']) {
+                    $iBeforeRecap = $iNumLlamadasColocar;
+                    $iNumLlamadasColocar = $infoCampania['max_canales'];
+                    if ($this->DEBUG) {
+                        $this->_log->output(
+                            "DEBUG: (campaign {$infoCampania['id']} queue {$infoCampania['queue']}) ".
+                            "overcommit capped from $iBeforeRecap to {$infoCampania['max_canales']} by max_canales (trunk limit) | ".
+                            "(campaña {$infoCampania['id']} cola {$infoCampania['queue']}) ".
+                            "sobre-colocación limitada de $iBeforeRecap a {$infoCampania['max_canales']} por max_canales (límite de trunk)");
+                    }
+                }
+
                 if ($this->DEBUG) {
                     $this->_log->output(
                         "DEBUG: (campania {$infoCampania['id']} cola {$infoCampania['queue']}) ".
