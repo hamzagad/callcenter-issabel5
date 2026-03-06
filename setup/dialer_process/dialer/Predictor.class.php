@@ -202,7 +202,11 @@ BridgedUniqueID: 1441991139.3
         $this->_enum_complete = TRUE;
     }
 
-    function infoPrediccionCola($cola)
+    // TODO: Analyze whether AST_DEVICE_RINGING should be counted as free even in predictive mode.
+    // Ringing agents may be receiving a transferred call and should not receive new campaign calls.
+    // TODO: Analizar si AST_DEVICE_RINGING debería contarse como libre incluso en modo predictivo.
+    // Agentes en ringing podrían estar recibiendo una llamada transferida y no deberían recibir nuevas llamadas.
+    function infoPrediccionCola($cola, $predictive = true)
     {
         if (!isset($this->_infoColas[$cola])) return NULL;
 
@@ -222,7 +226,10 @@ BridgedUniqueID: 1441991139.3
 
             // Miembro definitivamente libre
             // Member definitely free
-            if (in_array($miembro['Status'], array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING))) {
+            $freeStatuses = $predictive
+                ? array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING)
+                : array(AST_DEVICE_NOT_INUSE);
+            if (in_array($miembro['Status'], $freeStatuses)) {
                 $iNumLlamadasColocar['AGENTES_LIBRES']++;
                 $iNumLlamadasColocar['AGENTES_LIBRES_LISTA'][] = $interface;
             }

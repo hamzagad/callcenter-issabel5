@@ -575,13 +575,17 @@ PETICION_CAMPANIAS_ENTRANTES;
                 }
                 $this->_campaignMaxCanales[$campaignData['id']] = $effectiveMaxCanales;
 
-                $queueInfo = $this->_tuberia->AMIEventProcess_infoPrediccionCola($campaignData['queue']);
+                $queueInfo = $this->_tuberia->AMIEventProcess_infoPrediccionCola($campaignData['queue'], $this->_configDB->dialer_predictivo);
                 if (is_null($queueInfo)) {
                     $oPredictor = new Predictor($this->_ami);
                     if ($oPredictor->examinarColas(array($campaignData['queue']))) {
-                        $queueInfo = $oPredictor->infoPrediccionCola($campaignData['queue']);
+                        $queueInfo = $oPredictor->infoPrediccionCola($campaignData['queue'], $this->_configDB->dialer_predictivo);
                     }
                 }
+
+                // === TIMESTAMP TRACKER: Campaign Agent Allocation ===
+                $fCampMicrotime = microtime(TRUE);
+                $fCampTime = date('Y-m-d H:i:s.', (int)$fCampMicrotime) . sprintf('%03d', ($fCampMicrotime - (int)$fCampMicrotime) * 1000);
 
                 if (!is_null($queueInfo) && isset($queueInfo['AGENTES_LIBRES_LISTA'])) {
                     $normalizedAgents = array();
@@ -594,6 +598,9 @@ PETICION_CAMPANIAS_ENTRANTES;
                         $normalizedAgents[] = $normalizedAgent;
                     }
                     $this->_campaignIntentions[$campaignData['id']] = $normalizedAgents;
+
+                    // === TIMESTAMP TRACKER: Campaign Allocation Summary ===
+                    $this->_log->output("TIMING: ".__METHOD__.": [CAMPAIGN_ALLOC] CampaignID={$campaignData['id']}, Queue={$campaignData['queue']}, Type={$campaignData['type']}, free_agents=".count($normalizedAgents).", agents=[".implode(',', $normalizedAgents)."], microtime=$fCampMicrotime, time=$fCampTime | ES: Asignación de campaña");
 
                     if ($this->DEBUG) {
                         $this->_log->output("DEBUG: ".__METHOD__.
@@ -1257,10 +1264,10 @@ SQL_LLAMADA_COLOCADA;
 
         // Parámetros requeridos para predicción de colocación de llamadas
         // Parameters required for call placement prediction
-        $infoCola = $this->_tuberia->AMIEventProcess_infoPrediccionCola($infoCampania['queue']);
+        $infoCola = $this->_tuberia->AMIEventProcess_infoPrediccionCola($infoCampania['queue'], $this->_configDB->dialer_predictivo);
         if (is_null($infoCola)) {
             if ($oPredictor->examinarColas(array($infoCampania['queue']))) {
-                $infoCola = $oPredictor->infoPrediccionCola($infoCampania['queue']);
+                $infoCola = $oPredictor->infoPrediccionCola($infoCampania['queue'], $this->_configDB->dialer_predictivo);
             }
         }
 

@@ -2,6 +2,35 @@
 
 ---
 
+## 36. Conditional RINGING-as-Free Based on Predictive Dialer Config
+**Date**: 2026-03-06
+
+**Files**:
+- `setup/dialer_process/dialer/QueueShadow.class.php`
+- `setup/dialer_process/dialer/Predictor.class.php`
+- `setup/dialer_process/dialer/AMIEventProcess.class.php`
+- `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: When a call is transferred to a callback agent (SIP/PJSIP), the phone rings for several seconds until the agent answers. During this time, `AST_DEVICE_RINGING` was counted as "free" in the campaign prediction logic (`infoPrediccionCola`), so campaigns could originate calls for an agent who was actually handling a transferred call — wasting calls and causing abandoned calls.
+
+**Fix**: Made the RINGING-as-free behavior conditional on the `dialer_predictivo` config flag:
+- **Predictive ON** (`dialer.predictivo = 1`): counts both `AST_DEVICE_NOT_INUSE` and `AST_DEVICE_RINGING` as free (current behavior preserved)
+- **Predictive OFF** (`dialer.predictivo = 0`): counts only `AST_DEVICE_NOT_INUSE` as free (safer for transfers)
+
+**Technical Details**:
+- Added `$predictive` parameter (default `true`) to `infoPrediccionCola()` in both `QueueShadow` and `Predictor`
+- `CampaignProcess` passes `$this->_configDB->dialer_predictivo` at all 4 call sites
+- `AMIEventProcess.rpc_infoPrediccionCola()` unpacks and forwards the flag via the RPC mechanism
+- Added TODO comments noting that RINGING-as-free should be deeply analyzed even for predictive mode
+- Log output includes `predictive=YES/NO` for debugging
+
+**Verification**:
+```bash
+grep -E "AGENT_FREE|predictive" /opt/issabel/dialer/dialerd.log | tail -30
+```
+
+---
+
 ## 35. Check Extension Registration Before Callback Login
 **Date**: 2026-03-06
 

@@ -1152,6 +1152,11 @@ class AMIEventProcess extends TuberiaProcess
      */
     private function _finalizarTransferencia($sAgente)
     {
+        // === TIMESTAMP TRACKER: Finalize Transferencia Entry ===
+        $fEntryMicrotime = microtime(TRUE);
+        $fEntryTime = date('Y-m-d H:i:s.', (int)$fEntryMicrotime) . sprintf('%03d', ($fEntryMicrotime - (int)$fEntryMicrotime) * 1000);
+        $this->_log->output("TIMING: ".__METHOD__.": [ENTER] Agent=$sAgente, microtime=$fEntryMicrotime, time=$fEntryTime | ES: Iniciando finalización de transferencia");
+
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (is_null($a)) {
             $this->_log->output("ERR: ".__METHOD__." no se encuentra agente ".$sAgente." | EN: agent not found ".$sAgente);
@@ -1172,10 +1177,19 @@ class AMIEventProcess extends TuberiaProcess
             $a->llamada->llamadaRegresaHold($this->_ami, microtime(TRUE));
         }
 
+        // === TIMESTAMP TRACKER: Before Finalize Call Tracking ===
+        $fBeforeFinalize = microtime(TRUE);
+        $this->_log->output("TIMING: ".__METHOD__.": [BEFORE_FINALIZE] Agent=$sAgente, has_call=".(is_null($a->llamada)?'NO':'YES').", microtime=$fBeforeFinalize | ES: Antes de llamar llamadaFinalizaSeguimiento");
+
         // Finalize call tracking - this releases the agent
         $a->llamada->llamadaFinalizaSeguimiento(
             microtime(TRUE),
             $this->_config['dialer']['llamada_corta']);
+
+        // === TIMESTAMP TRACKER: After Finalize Call Tracking ===
+        $fAfterFinalize = microtime(TRUE);
+        $fElapsed = ($fAfterFinalize - $fBeforeFinalize) * 1000;
+        $this->_log->output("TIMING: ".__METHOD__.": [AFTER_FINALIZE] Agent=$sAgente, elapsed_ms=".round($fElapsed,3).", agent_call_null=".(is_null($a->llamada)?'YES':'NO').", microtime=$fAfterFinalize | ES: Después de llamadaFinalizaSeguimiento");
     }
 
     private function _quitarSilencio($llamada)
@@ -1511,9 +1525,9 @@ class AMIEventProcess extends TuberiaProcess
             $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
 
-        list($queue) = $datos;
+        list($queue, $predictive) = $datos;
 
-        $this->_tuberia->enviarRespuesta($sFuente, $this->_queueshadow->infoPrediccionCola($queue));
+        $this->_tuberia->enviarRespuesta($sFuente, $this->_queueshadow->infoPrediccionCola($queue, $predictive));
     }
 
     /**************************************************************************/
@@ -3347,6 +3361,13 @@ Uniqueid: 1429642067.241008
     // is set in the respective queue.
     public function msg_QueueMemberStatus($sEvent, $params, $sServer, $iPort)
     {
+        // === TIMESTAMP TRACKER: QueueMemberStatus Event Entry ===
+        $fQmsMicrotime = microtime(TRUE);
+        $fQmsTime = date('Y-m-d H:i:s.', (int)$fQmsMicrotime) . sprintf('%03d', ($fQmsMicrotime - (int)$fQmsMicrotime) * 1000);
+        $sInterface = isset($params['Location']) ? $params['Location'] : (isset($params['Interface']) ? $params['Interface'] : 'UNKNOWN');
+        $iStatus = isset($params['Status']) ? $params['Status'] : -1;
+        $this->_log->output("TIMING: ".__METHOD__.": [QMS_EVENT] Interface=$sInterface, Queue=".$params['Queue'].", Status=$iStatus, microtime=$fQmsMicrotime, time=$fQmsTime | ES: Evento QueueMemberStatus recibido");
+
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
                 "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
@@ -3368,9 +3389,17 @@ Uniqueid: 1429642067.241008
 
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (!is_null($a)) {
+            // === TIMESTAMP TRACKER: Before updating agent queue status ===
+            $bHasCall = !is_null($a->llamada);
+            $this->_log->output("TIMING: ".__METHOD__.": [BEFORE_UPDATE] Agent=$sAgente, has_internal_call=".($bHasCall?'YES':'NO').", queue_status=$iStatus | ES: Antes de actualizar estado en cola");
+
             // TODO: existe $params['Paused'] que indica si está en pausa
             // TODO: there is $params['Paused'] that indicates if paused
             $a->actualizarEstadoEnCola($params['Queue'], $params['Status']);
+
+            // === TIMESTAMP TRACKER: After updating agent queue status ===
+            $fAfterUpdate = microtime(TRUE);
+            $this->_log->output("TIMING: ".__METHOD__.": [AFTER_UPDATE] Agent=$sAgente, queue={$params['Queue']}, status=$iStatus, elapsed_ms=".round(($fAfterUpdate - $fQmsMicrotime) * 1000, 3)." | ES: Después de actualizar estado en cola");
         } else {
             if ($this->DEBUG) {
                 $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora | EN: agent '.$sAgente.' is not a registered agent in the callcenter, ignoring');
