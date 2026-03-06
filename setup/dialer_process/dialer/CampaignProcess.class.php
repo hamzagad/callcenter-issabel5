@@ -111,6 +111,10 @@ class CampaignProcess extends TuberiaProcess
      * Límites max_canales de campaña para el ciclo actual */
     private $_campaignMaxCanales = array();  // [campaign_id => max_canales]
 
+    /* Predictive slots claimed per queue this cycle (prevents double-counting across shared queues)
+     * Slots predictivos reclamados por cola en este ciclo (previene doble conteo en colas compartidas) */
+    private $_predictiveSlotsUsed = array();  // [queue => int]
+
     public function inicioPostDemonio($infoConfig, &$oMainLog)
     {
     	$this->_log = $oMainLog;
@@ -555,6 +559,7 @@ PETICION_CAMPANIAS_ENTRANTES;
             $this->_campaignIntentions = array();
             $this->_campaignMaxCanales = array();
             $this->_agentesReclamados = array();
+            $this->_predictiveSlotsUsed = array();
 
             foreach ($listaCampanias['outgoing'] as $campaignData) {
                 // Store max_canales for this campaign / Guardar max_canales para esta campaña
@@ -942,6 +947,63 @@ PETICION_CAMPANIAS_ENTRANTES;
         // Calculate how many calls to place (limited by allocated agents)
         // Calcular cuántas llamadas colocar (limitado por agentes asignados)
         $iNumLlamadasColocar = $numAllocatedAgents;
+
+        // Predictive dialer boost: anticipate agents about to become free
+        // Impulso del marcador predictivo: anticipar agentes que se van a desocupar
+        $iPredictiveBoost = 0;
+        if ($this->_configDB->dialer_predictivo && $numAllocatedAgents > 0) {
+            $infoCola = $this->_tuberia->AMIEventProcess_infoPrediccionCola(
+                $infoCampania['queue'], $this->_configDB->dialer_predictivo);
+            if (is_null($infoCola)) {
+                if ($oPredictor->examinarColas(array($infoCampania['queue']))) {
+                    $infoCola = $oPredictor->infoPrediccionCola(
+                        $infoCampania['queue'], $this->_configDB->dialer_predictivo);
+                }
+            }
+
+            if (!is_null($infoCola)) {
+                // Apply Erlang prediction if enough completed calls for statistical confidence
+                // Aplicar predicción Erlang si hay suficientes llamadas completadas para confianza estadística
+                $resumenPrediccion = ($infoCampania['num_completadas'] >= MIN_MUESTRAS)
+                    ? $oPredictor->predecirNumeroLlamadas($infoCola,
+                        $this->_configDB->dialer_qos,
+                        $infoCampania['promedio'],
+                        $this->_leerTiempoContestar($campaignId))
+                    : $oPredictor->predecirNumeroLlamadas($infoCola);
+
+                // Calculate available predictive slots for this queue
+                // Calcular slots predictivos disponibles para esta cola
+                $sQueue = $infoCampania['queue'];
+                $predictiveAgents = $resumenPrediccion['AGENTES_POR_DESOCUPAR'];
+                $waitingClients = $resumenPrediccion['CLIENTES_ESPERA'];
+                $alreadyClaimed = isset($this->_predictiveSlotsUsed[$sQueue])
+                    ? $this->_predictiveSlotsUsed[$sQueue] : 0;
+
+                $iPredictiveBoost = $predictiveAgents - $waitingClients - $alreadyClaimed;
+                if ($iPredictiveBoost < 0) $iPredictiveBoost = 0;
+
+                // Claim these slots so other campaigns sharing this queue don't double-count
+                // Reclamar estos slots para que otras campañas en la misma cola no los cuenten doble
+                if (!isset($this->_predictiveSlotsUsed[$sQueue])) {
+                    $this->_predictiveSlotsUsed[$sQueue] = 0;
+                }
+                $this->_predictiveSlotsUsed[$sQueue] += $iPredictiveBoost;
+
+                $iNumLlamadasColocar += $iPredictiveBoost;
+
+                if ($this->DEBUG) {
+                    $this->_log->output("DEBUG: ".__METHOD__.
+                        " (campaign $campaignId queue $sQueue) ".
+                        "predictive boost: agents_about_to_free=$predictiveAgents, ".
+                        "waiting_clients=$waitingClients, already_claimed=$alreadyClaimed, ".
+                        "boost=$iPredictiveBoost, total_calls=$iNumLlamadasColocar | ".
+                        "(campaña $campaignId cola $sQueue) ".
+                        "impulso predictivo: agentes_por_desocupar=$predictiveAgents, ".
+                        "clientes_espera=$waitingClients, ya_reclamados=$alreadyClaimed, ".
+                        "impulso=$iPredictiveBoost, total_llamadas=$iNumLlamadasColocar");
+                }
+            }
+        }
 
         // Apply max_canales limit if set / Aplicar límite max_canales si está configurado
         if (!is_null($infoCampania['max_canales']) && $infoCampania['max_canales'] > 0) {

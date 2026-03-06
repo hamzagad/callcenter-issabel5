@@ -2,6 +2,65 @@
 
 ---
 
+## 38. Integrate Predictive Dialer into Fair-Rotation Path
+**Date**: 2026-03-06
+
+**File**: `setup/dialer_process/dialer/CampaignProcess.class.php`
+
+**Issue**: The fair-rotation path (`_processCampaignWithAllocation`) ignored the `dialer_predictivo` configuration setting. It placed exactly 1 call per allocated free agent, never anticipating busy agents about to finish their calls. The Erlang-based predictive logic only existed in the dead legacy method (`_actualizarLlamadasCampania`), so enabling "Predictive Dialer Behavior" in callcenter_config had no effect on call placement.
+
+**Example of the problem**:
+```
+Queue has 3 free agents + 2 busy agents about to finish calls
+Campaign allocated 3 agents via fair rotation
+
+Without predictive (before fix):
+  Calls placed = 3 (only free agents)
+  2 agents finish calls → idle until next cycle
+
+With predictive (after fix):
+  Calls placed = 3 + 2 = 5 (free + predicted)
+  2 agents finish calls → calls already waiting for them
+```
+
+**Fix**: Added predictive dialer boost in `_processCampaignWithAllocation` (Pass 2), applied after agent allocation and before the max_canales cap:
+
+1. Gets fresh queue prediction data via `infoPrediccionCola()`
+2. Runs `predecirNumeroLlamadas()` with Erlang probability if campaign has enough samples (`num_completadas >= 10`)
+3. Calculates boost: `AGENTES_POR_DESOCUPAR - CLIENTES_ESPERA - already_claimed`
+4. Adds boost to `iNumLlamadasColocar` before max_canales cap
+
+**Shared-queue double-counting prevention**: New property `$_predictiveSlotsUsed` tracks how many predictive slots each queue has given out per cycle. When Campaign A claims 2 predictive slots from a shared queue, Campaign B sees 2 fewer available.
+
+**Order of operations**:
+```
+1. iNumLlamadasColocar = numAllocatedAgents        (fair rotation)
+2. + predictive boost                               (NEW)
+3. Cap by max_canales                               (trunk limit)
+4. Subtract pending OriginateResponse               (avoid over-placing)
+5. Overcommit (ASR-based)                           (compensate failures)
+6. Re-cap by max_canales                            (trunk hard limit)
+```
+
+**Activation conditions**:
+- `dialer.predictivo = 1` (enabled in callcenter_config)
+- Campaign has at least 1 allocated agent this cycle
+- Erlang prediction requires `num_completadas >= 10` completed calls; otherwise falls back to basic agent counting
+
+**Debug logs** (when dialer_debug enabled):
+```bash
+# Watch predictive boost events
+grep -E "predictive boost|impulso predictivo" /opt/issabel/dialer/dialerd.log | tail -30
+
+# Compare allocated agents vs total calls placed
+grep -E "allocated agents|FINAL iNumLlamadasColocar" /opt/issabel/dialer/dialerd.log | tail -30
+
+# Verify shared-queue double-counting prevention
+grep -E "already_claimed|ya_reclamados" /opt/issabel/dialer/dialerd.log | tail -20
+```
+
+---
+
 ## 37. Cap Overcommit by max_canales (Trunk Capacity Limit)
 **Date**: 2026-03-06
 
