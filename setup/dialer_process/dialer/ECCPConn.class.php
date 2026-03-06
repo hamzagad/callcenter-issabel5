@@ -3529,6 +3529,11 @@ SQL_INSERTAR_AGENDAMIENTO;
             // Register the transfer in database with agent number for Agent type, extension for callback types
             // Registrar transferencia en base de datos con número de agente para tipo Agent, extensión para otros
             $this->_registrarTransferencia($infoLlamada, $sRedirectTarget);
+
+            // === TIMESTAMP TRACKER: Agent Transfer Release Timing ===
+            $fTransferMicrotime = microtime(TRUE);
+            $fTransferTime = date('Y-m-d H:i:s.', (int)$fTransferMicrotime) . sprintf('%03d', ($fTransferMicrotime - (int)$fTransferMicrotime) * 1000);
+            $this->_log->output("TIMING: ".__METHOD__.": [TRANSFER_INIT] Source=$sAgente, Target=$sTargetAgent, microtime=$fTransferMicrotime, time=$fTransferTime | ES: Transferencia iniciada");
             // Notify AMIEventProcess to release the source agent after transfer
             $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
             $this->_log->output('INFO: '.__METHOD__.": Transferencia de agente completada con éxito | EN: INFO: ".__METHOD__.": Agent transfer completed successfully - Source: $sAgente, Target: $sTargetAgent");
@@ -4252,11 +4257,8 @@ LOG_CAMPANIA_SALIENTE;
                 if (isset($result['data']) && strpos($result['data'], 'Not Found') === false) {
                     $lines = explode("\n", $result['data']);
                     foreach ($lines as $line) {
-                        if ((stripos($line, 'State') !== false && stripos($line, 'Available') !== false) ||
-                            (stripos($line, 'Status') !== false && stripos($line, 'Reachable') !== false) ||
-                            (stripos($line, 'DeviceState') !== false && (stripos($line, 'InUse') !== false ||
-                             stripos($line, 'RINGING') !== false || stripos($line, 'busy') !== false ||
-                             stripos($line, 'idle') !== false || stripos($line, 'Not in use') !== false))) {
+                        // Contact line with "Avail" means endpoint has a registered contact
+                        if (stripos($line, 'Contact:') !== false && stripos($line, 'Avail') !== false) {
                             $bRegistered = TRUE;
                             break;
                         }
