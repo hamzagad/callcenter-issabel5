@@ -1303,6 +1303,10 @@ SQL_LLAMADA_COLOCADA;
         return TRUE;
     }
 
+    // Dead code - no longer called. Replaced by fair-rotation path:
+    //   Pass 1: _actualizarCampanias() collects intentions
+    //   Allocate: _resolveAgentRotation() distributes agents
+    //   Pass 2: _processCampaignWithAllocation() processes campaigns
     private function _actualizarLlamadasCampania($infoCampania, $oPredictor)
     {
         $iTimeoutOriginate = $this->_configDB->dialer_timeout_originate;
