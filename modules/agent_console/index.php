@@ -380,6 +380,23 @@ function manejarLogin_doLogin()
         }
     }
 
+    // Check if callback extension is already used by Agent type session
+    if ($bContinuar && $bCallback) {
+        $oPaloConsola->desconectarTodo();
+
+        // Extract extension number from callback format (e.g., SIP/101 -> 101)
+        $regs = NULL;
+        $sExtensionNum = (preg_match('|^(\w+)/(\d+)$|', $sAgente, $regs)) ? $regs[2] : $sAgente;
+
+        if ($oPaloConsola->extensionUsadaPorAgente($sExtensionNum)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Extension is already in use by another agent');
+        }
+        // Reconnect for normal login flow
+        $oPaloConsola = new PaloSantoConsola($sAgente);
+    }
+
     // Verificar si el número de agente no está ya ocupado por otra extensión
     if ($bContinuar) {
         $oPaloConsola->desconectarTodo();

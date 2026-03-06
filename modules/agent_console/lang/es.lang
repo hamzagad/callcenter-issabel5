@@ -127,5 +127,6 @@ $arrLangModule = array(
     "Information" => "Información",
     "Script" => "Diálogo",
     "Waiting for call" => "Esperando llamada",
+    "Extension is already in use by another agent" => "La extensión ya está siendo usada por otro agente",
 );
 ?>

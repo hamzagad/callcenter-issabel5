@@ -3526,9 +3526,9 @@ SQL_INSERTAR_AGENDAMIENTO;
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call to agent');
             return $xml_response;
         } else {
-            // Register the transfer in database with the extension number (for all agent types)
-            // Registrar transferencia en base de datos con número de extensión
-            $this->_registrarTransferencia($infoLlamada, $sTargetExtension);
+            // Register the transfer in database with agent number for Agent type, extension for callback types
+            // Registrar transferencia en base de datos con número de agente para tipo Agent, extensión para otros
+            $this->_registrarTransferencia($infoLlamada, $sRedirectTarget);
             // Notify AMIEventProcess to release the source agent after transfer
             $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
             $this->_log->output('INFO: '.__METHOD__.": Transferencia de agente completada con éxito | EN: INFO: ".__METHOD__.": Agent transfer completed successfully - Source: $sAgente, Target: $sTargetAgent");

@@ -2,6 +2,35 @@
 
 ---
 
+## 34. Prevent Callback Extension Login if Extension Used by Agent Type Session
+**Date**: 2026-03-06
+
+**Files**:
+- `modules/agent_console/libs/paloSantoConsola.class.php`
+- `modules/agent_console/index.php`
+- `modules/agent_console/lang/en.lang`
+- `modules/agent_console/lang/es.lang`
+
+**Issue**: A callback extension type agent (SIP/PJSIP/IAX2) could log in using an extension number that was already actively being used by an Agent type login session, causing conflicts.
+
+**Example**:
+- Agent/1001 logs in with extension SIP/101
+- SIP/101 (callback type) can then also log in with extension SIP/101
+- Result: Two sessions using the same physical extension
+
+**Fix**: Added validation check in `manejarLogin_doLogin()` that:
+1. Detects when callback login is attempted
+2. Extracts the extension number from the callback format (e.g., SIP/101 → 101)
+3. Queries the audit table to check if an Agent type agent is actively logged in with that extension
+4. Blocks login with error "Extension is already in use by another agent" / "La extensión ya está siendo usada por otro agente"
+
+**Technical Details**:
+- New method: `PaloSantoConsola::extensionUsadaPorAgente($sExtensionNum)`
+- Query checks: `audit.datetime_end IS NULL` (active session) + `agent.type = 'Agent'` + `login_extension LIKE %extension_number%`
+- Agent type login is NOT affected - only blocks callback types when extension conflicts
+
+---
+
 ## 33. Agent-to-Agent Transfer Feature
 **Date**: 2026-03-06
 
@@ -62,13 +91,13 @@
 
 ---
 
-## 33.1. Fix: Agent Type Transfer Using Correct Agent Number for AgentRequest
+## 33.1. Fix: Agent Type Transfer Using Correct Agent Number
 **Date**: 2026-03-06
 
 **Files**:
 - `setup/dialer_process/dialer/ECCPConn.class.php`
 
-**Bug**: Transferring calls to Agent type agents (app_agent_pool) failed with "Agent 'XXX' does not exist" error because the code was passing the agent's extension number to `AgentRequest()` instead of the agent number.
+**Bug 1**: Transferring calls to Agent type agents (app_agent_pool) failed with "Agent 'XXX' does not exist" error.
 
 **Root Cause**: For Agent type agents like Agent/1002 using extension 102:
 - The agent NUMBER is 1002 (used by AgentRequest)
@@ -76,14 +105,21 @@
 - `AgentRequest(102)` fails because agent ID '102' doesn't exist
 - `AgentRequest(1002)` correctly routes to Agent/1002
 
+**Bug 2**: Transfer was stored in database using extension number instead of agent number for Agent type agents.
+
 **Fix**: Modified `Request_agentauth_transfercallagent()` to:
 1. Extract agent number from agent string using regex: `Agent/(\d+)` -> 1002
 2. Use agent number for `AgentRequest()` when transferring to Agent type agents
-3. Continue using extension for callback agent types (SIP/PJSIP/IAX2)
+3. Use agent number in database transfer field for Agent type agents
+4. Continue using extension for callback agent types (SIP/PJSIP/IAX2)
 
 **Log Change**:
 - Before: `AgentRequest("SIP/...", "102")` - fails
 - After: `AgentRequest("SIP/...", "1002")` - succeeds
+
+**Database Change**:
+- Before: `transfer` field stores "102" (extension)
+- After: `transfer` field stores "1002" (agent number) for Agent type agents
 
 ---
 

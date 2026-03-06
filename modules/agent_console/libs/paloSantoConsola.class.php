@@ -349,6 +349,36 @@ class PaloSantoConsola
     }
 
     /**
+     * Check if an extension number is already used by an active Agent type login session
+     *
+     * EN: Verificar si un número de extensión ya está siendo usado por una sesión activa de tipo Agent
+     *
+     * @param   string  $sExtensionNum  Extension number (e.g., "101")
+     * @return  bool    TRUE if extension is already in use by Agent type, FALSE otherwise
+     */
+    function extensionUsadaPorAgente($sExtensionNum)
+    {
+        $oDB = $this->_obtenerConexion('call_center');
+
+        // Check if this extension number is already used by an active Agent type session
+        $sql_check_extension = "SELECT COUNT(*) as count
+                               FROM audit a
+                               JOIN agent ag ON a.id_agent = ag.id
+                               WHERE a.login_extension LIKE ?
+                               AND ag.type = 'Agent'
+                               AND a.datetime_end IS NULL";
+
+        $result = $oDB->fetchTable($sql_check_extension, TRUE, array("%$sExtensionNum"));
+
+        if (!is_array($result) || count($result) <= 0) {
+            $this->errMsg = "Error checking extension usage: ".$oDB->errMsg;
+            return FALSE;
+        }
+
+        return $result[0]['count'] > 0;
+    }
+
+    /**
      * Método para iniciar el login del agente con la extensión y el número de
      * agente que se indican.
      *
