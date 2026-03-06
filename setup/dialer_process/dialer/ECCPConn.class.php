@@ -3362,6 +3362,162 @@ SQL_INSERTAR_AGENDAMIENTO;
         return $xml_response;
     }
 
+    /**
+     * Transfer agent's current call to another logged-in agent.
+     * Transfiere la llamada actual del agente a otro agente conectado.
+     */
+    private function Request_agentauth_transfercallagent($comando)
+    {
+        if (is_null($this->_ami))
+            return $this->_generarRespuestaFallo(500, 'No AMI connection');
+
+        $sAgente = (string)$comando->agent_number;
+
+        // Verificar que número de agente destino está presente
+        // Verify that target agent number is present
+        if (!isset($comando->target_agent_number))
+            return $this->_generarRespuestaFallo(400, 'Bad request');
+        $sTargetAgent = (string)$comando->target_agent_number;
+
+        $this->_log->output('INFO: '.__METHOD__.": Transferencia de agente solicitada | EN: INFO: ".__METHOD__.": Agent transfer requested - Source: $sAgente, Target: $sTargetAgent");
+
+        $xml_response = new SimpleXMLElement('<response />');
+        $xml_transferResponse = $xml_response->addChild('transfercallagent_response');
+
+        // Validate source agent format
+        // El siguiente código asume formato Agent/9000
+        if (is_null($this->_parseAgent($sAgente))) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no válido | EN: ERR: ".__METHOD__.": Invalid source agent - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Specified agent not found');
+            return $xml_response;
+        }
+
+        // Validate target agent format
+        if (is_null($this->_parseAgent($sTargetAgent))) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente destino no válido | EN: ERR: ".__METHOD__.": Invalid target agent - $sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Target agent not found');
+            return $xml_response;
+        }
+
+        // Check source agent is being monitored and has a call
+        // Verificar si el agente origen está siendo monitoreado
+        $infoSeguimiento = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+        if (is_null($infoSeguimiento)) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no encontrado | EN: ERR: ".__METHOD__.": Source agent not found - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Specified agent not found');
+            return $xml_response;
+        }
+
+        $sCanalRemoto = $infoSeguimiento['clientchannel'];
+        if (is_null($sCanalRemoto)) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no está en llamada | EN: ERR: ".__METHOD__.": Source agent not in call - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417, 'Agent not in call');
+            return $xml_response;
+        }
+
+        // Get source agent's call info
+        // Obtener la información de la llamada atendida por el agente origen
+        $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
+        if (is_null($infoLlamada) || is_null($infoLlamada['callid'])) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no tiene llamada activa | EN: ERR: ".__METHOD__.": Source agent has no active call - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417, 'Agent not in call');
+            return $xml_response;
+        }
+
+        // Get target agent info
+        // Obtener información del agente destino
+        $infoTargetAgent = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sTargetAgent);
+        if (is_null($infoTargetAgent)) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente destino no existe | EN: ERR: ".__METHOD__.": Target agent does not exist - $sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Target agent not found');
+            return $xml_response;
+        }
+
+        // Check target agent status - must be online, not on call, not paused
+        // Verificar estado del agente destino - debe estar online, no en llamada, no en pausa
+        $sTargetStatus = NULL;
+        if ($infoTargetAgent['oncall']) {
+            $sTargetStatus = 'oncall';
+            $sErrorMsg = 'Target agent is busy | Agente destino está ocupado';
+        } elseif ($infoTargetAgent['num_pausas'] > 0) {
+            $sTargetStatus = 'paused';
+            $sErrorMsg = 'Target agent is on pause | Agente destino está en pausa';
+        } elseif ($infoTargetAgent['estado_consola'] != 'logged-in') {
+            $sTargetStatus = 'offline';
+            $sErrorMsg = 'Target agent is not logged in | Agente destino no está conectado';
+        } else {
+            $sTargetStatus = 'online';
+        }
+
+        if ($sTargetStatus != 'online') {
+            $this->_log->output('ERR: '.__METHOD__.": Agente destino no disponible: $sTargetStatus | EN: ERR: ".__METHOD__.": Target agent not available: $sTargetStatus - $sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417, $sErrorMsg);
+            return $xml_response;
+        }
+
+        // Get target agent's extension for the transfer
+        // Obtener extensión del agente destino para la transferencia
+        $sTargetExtension = NULL;
+        $sCanalExt = $infoTargetAgent['login_channel'];
+        if (is_null($sCanalExt)) $sCanalExt = $infoTargetAgent['extension'];
+        if (!is_null($sCanalExt)) {
+            // Extract extension from channel (e.g., SIP/1001-xxx -> 1001)
+            $sRegexp = "|^\w+/(\\d+)|";
+            $regs = NULL;
+            if (preg_match($sRegexp, $sCanalExt, $regs)) {
+                $sTargetExtension = $regs[1];
+            }
+        }
+
+        if (is_null($sTargetExtension)) {
+            $this->_log->output('ERR: '.__METHOD__.": No se puede determinar extensión del agente destino | EN: ERR: ".__METHOD__.": Cannot determine target agent extension - $sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine target agent extension');
+            return $xml_response;
+        }
+
+        // Determine channel to use for target agent based on agent type
+        // Para agentes tipo Agent, usar Local/XXXX@agents; para otros, usar el canal directo
+        $sTargetChannel = $sTargetExtension;
+        if (strpos($sTargetAgent, 'Agent/') === 0) {
+            // Agent type - use agents context with AgentRequest
+            $sTargetContext = 'agents';
+            $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo Agent via contexto [agents] | EN: INFO: ".__METHOD__.": Transferring to Agent type via [agents] context - Target: $sTargetExtension");
+        } else {
+            // SIP/PJSIP/IAX2 type - use direct context
+            $sTargetContext = 'from-internal';
+            $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo callback | EN: INFO: ".__METHOD__.": Transferring to callback type agent - Target: $sTargetExtension");
+        }
+
+        // Perform the transfer using AMI Redirect
+        // Realizar la transferencia usando AMI Redirect
+        $this->_log->output('INFO: '.__METHOD__.": Iniciando transferencia: $sCanalRemoto -> $sTargetExtension@$sTargetContext | EN: INFO: ".__METHOD__.": Initiating transfer: $sCanalRemoto -> $sTargetExtension@$sTargetContext");
+
+        $r = $this->_ami->Redirect(
+            $sCanalRemoto,      // channel (caller to transfer)
+            '',                 // extrachannel
+            $sTargetExtension,  // exten (target agent's extension)
+            $sTargetContext,    // context (agents for Agent type, from-internal for others)
+            1);                 // priority
+
+        if ($r['Response'] != 'Success') {
+            $this->_log->output('ERR: '.__METHOD__.': Falló la transferencia de agente: no se puede transferir '.
+                $sCanalRemoto.' a '.$sTargetExtension.' - '.$r['Message'].
+                ' | EN: ERR: '.__METHOD__.': Agent transfer failed: cannot transfer '.
+                $sCanalRemoto.' to '.$sTargetExtension.' - '.$r['Message']);
+            $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call to agent');
+            return $xml_response;
+        } else {
+            // Register the transfer in database
+            $this->_registrarTransferencia($infoLlamada, $sTargetAgent);
+            // Notify AMIEventProcess to release the source agent after transfer
+            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+            $this->_log->output('INFO: '.__METHOD__.": Transferencia de agente completada con éxito | EN: INFO: ".__METHOD__.": Agent transfer completed successfully - Source: $sAgente, Target: $sTargetAgent");
+        }
+
+        $xml_transferResponse->addChild('success');
+        return $xml_response;
+    }
+
     private function _registrarTransferencia($infoLlamada, $sExtension)
     {
     	$sth = $this->_db->prepare(

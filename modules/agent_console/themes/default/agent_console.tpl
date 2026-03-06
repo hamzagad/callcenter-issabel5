@@ -147,22 +147,33 @@
     <form>
         <table border="0" cellpadding="0" style="width: 100%;">
             <tr>
+                <td>
+                    <div align="center" id="transfer_type_radio">
+                        <input type="radio" id="transfer_type_blind" name="transfer_type" value="blind" checked="checked"/><label for="transfer_type_blind">{$LBL_TRANSFER_BLIND}</label>
+                        {if !$IS_AGENT_TYPE}
+                        <input type="radio" id="transfer_type_attended" name="transfer_type" value="attended" /><label for="transfer_type_attended">{$LBL_TRANSFER_ATTENDED}</label>
+                        {/if}
+                        <input type="radio" id="transfer_type_agent" name="transfer_type" value="agent" /><label for="transfer_type_agent">{$LBL_TRANSFER_AGENT}</label>
+                    </div>
+                </td>
+            </tr>
+            <tr id="transfer_extension_row">
                 <td><input
                 name="transfer_extension"
                 id="transfer_extension"
                 class="ui-widget-content ui-corner-all"
                 style="width: 100%" /></td>
             </tr>
-            {if !$IS_AGENT_TYPE}
-            <tr>
-                <td>
-                    <div align="center" id="transfer_type_radio">
-                        <input type="radio" id="transfer_type_blind" name="transfer_type" value="blind" checked="checked"/><label for="transfer_type_blind">{$LBL_TRANSFER_BLIND}</label>
-                        <input type="radio" id="transfer_type_attended" name="transfer_type" value="attended" /><label for="transfer_type_attended">{$LBL_TRANSFER_ATTENDED}</label>
-                    </div>
+            <tr id="transfer_agent_row" style="display: none;">
+                <td><select
+                    name="transfer_agent"
+                    id="transfer_agent"
+                    class="ui-widget-content ui-corner-all"
+                    style="width: 100%">
+                    {html_options options=$LISTA_AGENTES selected=""}
+                    </select>
                 </td>
             </tr>
-            {/if}
         </table>
     </form>
 </div>{* issabel-callcenter-seleccion-transfer *}

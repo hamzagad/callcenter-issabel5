@@ -285,6 +285,37 @@ Blind transfer to extension.
 #### atxfercall
 Attended transfer to extension.
 
+#### transfercallagent
+Transfer agent's current call to another logged-in agent. The target agent must be online (not on call, not paused).
+
+```xml
+<transfercallagent>
+    <agent_number>Agent/9000</agent_number>
+    <agent_hash>XXX</agent_hash>
+    <target_agent_number>Agent/9001</target_agent_number>
+</transfercallagent>
+```
+
+**Response:**
+```xml
+<transfercallagent_response>
+    <success/>
+</transfercallagent_response>
+```
+
+**Error Conditions:**
+| Code | Condition |
+|------|-----------|
+| 400 | Bad request (missing parameters) |
+| 404 | Agent not found |
+| 417 | Agent not in call / Target agent not available |
+| 500 | Transfer failed |
+
+**Target Agent Status Errors:**
+- Target agent is busy (oncall)
+- Target agent is on pause
+- Target agent is not logged in (offline)
+
 #### schedulecall
 Schedule callback.
 

@@ -183,6 +183,27 @@ function generarEstadoInicial()
     );
 }
 
+/**
+ * Get list of agents for transfer dialog, excluding current logged-in agent.
+ * Obtiene lista de agentes para diálogo de transferencia, excluyendo agente actual.
+ *
+ * @param PaloSantoConsola $oPaloConsola Console object
+ * @return array Array of agents with format ['Agent/9000' => 'Agent/9000 - John Doe']
+ */
+function _obtenerListaAgentesTransferencia($oPaloConsola)
+{
+    $listaAgentes = $oPaloConsola->listarAgentes();
+
+    // Filter out the current logged-in agent from the list
+    // Filtrar el agente actual conectado de la lista
+    $currentAgent = isset($_SESSION['callcenter']['agente']) ? $_SESSION['callcenter']['agente'] : '';
+    if (!empty($currentAgent) && isset($listaAgentes[$currentAgent])) {
+        unset($listaAgentes[$currentAgent]);
+    }
+
+    return $listaAgentes;
+}
+
 // Procedimiento para decidir qué acción tomar en el estado de login de agente
 function manejarLogin($module_name, &$smarty, $sDirLocalPlantillas)
 {
@@ -194,7 +215,7 @@ function manejarLogin($module_name, &$smarty, $sDirLocalPlantillas)
     /* Si el método está entre estos, pero el estado es de login, entonces se
      * ha perdido un estado de callcenter anterior. */
     if (in_array($sAction, array('checkStatus', 'agentLogout', 'hangup',
-        'break', 'unbreak', 'transfer', 'confirm_contact', 'schedule',
+        'break', 'unbreak', 'transfer', 'transferagent', 'confirm_contact', 'schedule',
         'saveforms', 'updateShiftTimes'))) {
         $json = new Services_JSON();
         Header('Content-Type: application/json');
@@ -658,6 +679,7 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'TITLE_TRANSFER_DIALOG'         =>  _tr('Select extension to transfer to'),
         'LBL_TRANSFER_BLIND'            =>  _tr('Blind transfer'),
         'LBL_TRANSFER_ATTENDED'         =>  _tr('Attended transfer'),
+        'LBL_TRANSFER_AGENT'            =>  _tr('Transfer to agent'),
         'TITLE_SCHEDULE_CALL'           =>  _tr('Schedule call'),
         'LBL_SCHEDULE_CAMPAIGN_END'     =>  _tr('Call at end of campaign'),
         'LBL_SCHEDULE_BYDATE'           =>  _tr('Schedule at date'),
@@ -674,6 +696,7 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'TAB_LLAMADA_FORM'              =>  _tr('Forms'),
         'CRONOMETRO'                    =>  '00:00:00',
         'LISTA_BREAKS'                  =>  $oPaloConsola->listarBreaks(),
+        'LISTA_AGENTES'                 =>  _obtenerListaAgentesTransferencia($oPaloConsola),
         'CONTENIDO_LLAMADA_INFORMACION' =>  '',
         'CONTENIDO_LLAMADA_SCRIPT'      =>  '',
         'CONTENIDO_LLAMADA_FORMULARIO'  =>  '',
@@ -1214,6 +1237,32 @@ function manejarSesionActiva_transfer($module_name, $smarty, $sDirLocalPlantilla
             $respuesta['message'] = _tr('Error while transferring call').' - '.$oPaloConsola->errMsg;
         } elseif ($bExito === 'consultation') {
             $respuesta['consultation'] = true;
+        }
+    }
+
+    $json = new Services_JSON();
+    Header('Content-Type: application/json');
+    return $json->encode($respuesta);
+}
+
+function manejarSesionActiva_transferagent($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola, $estado)
+{
+    $respuesta = array(
+        'action'    =>  'transferagent',
+        'message'   =>  '(no message)',
+    );
+    $sTargetAgent = getParameter('target_agent');
+    if ($estado['onhold']) {
+        $respuesta['action'] = 'error';
+        $respuesta['message'] = _tr('Cannot transfer while call is on hold');
+    } elseif (is_null($sTargetAgent) || empty($sTargetAgent)) {
+        $respuesta['action'] = 'error';
+        $respuesta['message'] = _tr('Invalid or missing target agent');
+    } else {
+        $bExito = $oPaloConsola->transferirLlamadaAgente($sTargetAgent);
+        if (!$bExito) {
+            $respuesta['action'] = 'error';
+            $respuesta['message'] = _tr('Error while transferring call to agent').' - '.$oPaloConsola->errMsg;
         }
     }
 

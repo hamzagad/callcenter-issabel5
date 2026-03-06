@@ -512,6 +512,24 @@ class ECCP
         return $xml_response->atxfercall_response;
     }
 
+    /**
+     * Transfer agent's current call to another logged-in agent.
+     * Transfiere la llamada actual del agente a otro agente conectado.
+     *
+     * @param string $targetAgentNumber Target agent number (e.g., 'Agent/9001')
+     * @return SimpleXMLElement Response from transfercallagent request
+     */
+    public function transfercallagent($targetAgentNumber)
+    {
+        $xml_request = new SimpleXMLElement("<request />");
+        $xml_cmdRequest = $xml_request->addChild('transfercallagent');
+        $xml_cmdRequest->addChild('agent_number', $this->_agentNumber);
+        $xml_cmdRequest->addChild('agent_hash', $this->agentHash($this->_agentNumber, $this->_agentPass));
+        $xml_cmdRequest->addChild('target_agent_number', str_replace('&', '&amp;', $targetAgentNumber));
+        $xml_response = $this->send_request($xml_request);
+        return $xml_response->transfercallagent_response;
+    }
+
     public function getcampaignstatus($campaign_type, $campaign_id, $datetime_start = NULL)
     {
         $xml_request = new SimpleXMLElement("<request />");

@@ -150,6 +150,20 @@ $(document).ready(function() {
         }
     });
 
+    // Handle transfer type radio button changes - show/hide appropriate fields
+    $('input[name="transfer_type"]').change(function() {
+        var transferType = $(this).val();
+        if (transferType == 'agent') {
+            // Show agent dropdown, hide extension input
+            $('#transfer_extension_row').hide();
+            $('#transfer_agent_row').show();
+        } else {
+            // Show extension input, hide agent dropdown
+            $('#transfer_extension_row').show();
+            $('#transfer_agent_row').hide();
+        }
+    });
+
     $('#btn_hangup').button();
     $('#btn_hold').button();
     $('#btn_togglebreak').button();
@@ -728,13 +742,23 @@ function do_unbreak()
 
 function do_transfer()
 {
-	$.post('index.php?menu=' + module_name + '&rawmode=yes', {
+	// Determine transfer type
+	var transferType = $('input[name="transfer_type"]:checked').val();
+	var postData = {
 		menu:		module_name,
 		rawmode:	'yes',
 		action:		'transfer',
 		extension:	$('#transfer_extension').val(),
 		atxfer: 	$('#transfer_type_attended').is(':checked')
-	},
+	};
+
+	// If transferring to agent, change action and parameters
+	if (transferType == 'agent') {
+		postData.action = 'transferagent';
+		postData.target_agent = $('#transfer_agent').val();
+	}
+
+	$.post('index.php?menu=' + module_name + '&rawmode=yes', postData,
 	function (respuesta) {
 		verificar_error_session(respuesta);
         if (respuesta['action'] == 'error') {

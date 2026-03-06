@@ -787,6 +787,29 @@ class PaloSantoConsola
         }
     }
 
+    /**
+     * Transfer agent's current call to another logged-in agent.
+     * Transfiere la llamada actual del agente a otro agente conectado.
+     *
+     * @param string $sTargetAgent Target agent number (e.g., 'Agent/9001')
+     * @return bool TRUE on success, FALSE on failure (check $this->errMsg)
+     */
+    function transferirLlamadaAgente($sTargetAgent)
+    {
+        try {
+            $oECCP = $this->_obtenerConexion('ECCP');
+            $respuesta = $oECCP->transfercallagent($sTargetAgent);
+            if (isset($respuesta->failure)) {
+                $this->errMsg = _tr('Unable to transfer call to agent').' - '.$this->_formatoErrorECCP($respuesta);
+                return FALSE;
+            }
+            return TRUE;
+        } catch (Exception $e) {
+            $this->errMsg = '(internal) transfercallagent: '.$e->getMessage();
+            return FALSE;
+        }
+    }
+
     function leerInfoCampania($sCallType, $iCampaignId)
     {
         if ($sCallType == 'incomingqueue') {

@@ -2,6 +2,100 @@
 
 ---
 
+## 33. Agent-to-Agent Transfer Feature
+**Date**: 2026-03-06
+
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php`
+- `modules/agent_console/libs/ECCP.class.php`
+- `modules/agent_console/libs/paloSantoConsola.class.php`
+- `modules/agent_console/index.php`
+- `modules/agent_console/themes/default/js/javascript.js`
+- `modules/agent_console/themes/default/agent_console.tpl`
+- `modules/agent_console/lang/en.lang`
+- `modules/agent_console/lang/es.lang`
+- `setup/dialer_process/dialer/ECCP_Protocol.md`
+- `setup/dialer_process/dialer/eccp_examples/transfercallagent.eccp` (new)
+
+**Feature**: Added "Transfer to Agent" functionality to the agent console, allowing agents to transfer their active calls to another logged-in agent. This is the third transfer type, alongside existing "Blind transfer" (to extension) and "Attended transfer" (to extension).
+
+**New Capabilities**:
+- Agents can transfer calls to other logged-in agents with availability verification
+- Target agent must be online (logged in), not on a call, and not on pause
+- Transfer is executed as a blind transfer (no consultation phase)
+- Agent dropdown shows "Agent/9000 - Agent Name" format for easy selection
+- Current agent is excluded from the dropdown to prevent self-transfer
+
+**UI Changes**:
+- Transfer dialog now has 3 radio buttons: "Blind transfer", "Attended transfer", "Transfer to agent"
+- When "Transfer to agent" is selected, an agent dropdown appears (extension input is hidden)
+- When other transfer types are selected, the extension input appears (agent dropdown is hidden)
+
+**Backend Implementation**:
+- New ECCP command: `transfercallagent` (requires agent authentication)
+- Target agent status validation: checks online, oncall, and paused states
+- For Agent type: uses `[agents]` context with `AgentRequest()` application
+- For callback types (SIP/PJSIP/IAX2): uses `from-internal` context
+- Transfer is registered in database with target agent number
+
+**Error Handling**:
+- "Target agent is busy" - target agent is on a call
+- "Target agent is not logged in" - target agent is offline
+- "Target agent is on pause" - target agent is on break
+- "Cannot transfer while call is on hold" - source agent has call on hold
+- "Invalid or missing target agent" - no agent selected
+
+**ECCP Protocol**:
+```xml
+<request id="timestamp.random">
+    <transfercallagent>
+        <agent_number>Agent/9000</agent_number>
+        <agent_hash>XXX</agent_hash>
+        <target_agent_number>Agent/9001</target_agent_number>
+    </transfercallagent>
+</request>
+```
+
+**Documentation**: See `TRANSFER_TO_AGENTS.md` for complete implementation details and test steps.
+
+---
+
+## 32. New ECCP Example Files
+**Date**: 2026-03-06
+
+**Files**:
+- `setup/dialer_process/dialer/eccp-examples/callprogress.php`
+- `setup/dialer_process/dialer/eccp-examples/getcampaigninfo.php`
+- `setup/dialer_process/dialer/eccp-examples/filterbyagent.php`
+- `setup/dialer_process/dialer/eccp-examples/saveformdata.php`
+
+**Feature**: Added 4 new ECCP example files to complete documentation coverage for all actively used ECCP methods. The ECCP examples directory now includes examples for all 28 methods that are actively used in the codebase (100% coverage, up from 86%).
+
+**New Examples**:
+- `callprogress.php` - Enable/disable call progress event notifications (no auth required)
+- `getcampaigninfo.php` - Retrieve campaign configuration including forms and scripts (no auth required)
+- `filterbyagent.php` - Filter ECCP events to only receive events for a specific agent (requires agent authentication)
+- `saveformdata.php` - Save form data collected during calls (requires agent authentication)
+
+**Usage Examples**:
+```bash
+# Enable call progress tracking
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/callprogress.php 1"
+
+# Get campaign information
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/getcampaigninfo.php outgoing 1"
+
+# Filter events by agent
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/filterbyagent.php Agent/9000 password"
+
+# Save form data
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/saveformdata.php Agent/9000 password outgoing 123 1 10:value1 11:value2"
+```
+
+**Documentation**: See `ECCP_EXAMPLES.md` for complete ECCP method coverage analysis and usage details.
+
+---
+
 ## 31. Fix Campaign Staying Active After Data Exhaustion
 **Date**: 2026-03-05
 
