@@ -94,6 +94,35 @@ su - asterisk -c "/opt/issabel/dialer/eccp-examples/saveformdata.php Agent/9000 
 
 **Documentation**: See `ECCP_EXAMPLES.md` for complete ECCP method coverage analysis and usage details.
 
+**Test Steps**:
+```bash
+# 1. Verify dialer is running
+systemctl status issabeldialer
+
+# 2. Test callprogress (simplest - no prerequisites)
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/callprogress.php 1"
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/callprogress.php 0"
+
+# 3. Test getcampaigninfo (requires campaign ID)
+# Get a valid campaign ID first
+mysql -u root -p$(grep mysqlrootpwd /etc/issabel.conf | cut -d= -f2) \
+  -e "SELECT id, name FROM call_center.campania WHERE tipo = 'outgoing' LIMIT 1;"
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/getcampaigninfo.php outgoing 1"
+
+# 4. Test filterbyagent (requires logged-in agent)
+# Agent must be logged in via console first
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/filterbyagent.php Agent/9000 password"
+
+# 5. Test saveformdata (requires active call with valid call_id)
+# Get form ID first
+mysql -u root -p$(grep mysqlrootpwd /etc/issabel.conf | cut -d= -f2) \
+  -e "SELECT id FROM call_center.form LIMIT 1;"
+su - asterisk -c "/opt/issabel/dialer/eccp-examples/saveformdata.php Agent/9000 password outgoing 123 1 10:value1 11:value2"
+
+# 6. Monitor dialer logs during testing
+tail -f /opt/issabel/dialer/dialerd.log | grep -i eccp
+```
+
 ---
 
 ## 31. Fix Campaign Staying Active After Data Exhaustion

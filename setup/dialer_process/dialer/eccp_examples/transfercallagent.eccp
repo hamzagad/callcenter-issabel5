@@ -1,9 +1,0 @@
-<!-- ECCP Example: Transfer call to another agent -->
-<!-- Usage: nc localhost 20005 < transfercallagent.eccp -->
-<request id="123456">
-    <transfercallagent>
-        <agent_number>Agent/9000</agent_number>
-        <agent_hash>MD5_HASH_HERE</agent_hash>
-        <target_agent_number>Agent/9001</target_agent_number>
-    </transfercallagent>
-</request>
