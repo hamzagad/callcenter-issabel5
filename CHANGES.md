@@ -58,6 +58,33 @@
 
 **Documentation**: See `TRANSFER_TO_AGENTS.md` for complete implementation details and test steps.
 
+**Bug Fix**: Agent type agents require agent NUMBER (e.g., 1002) for `AgentRequest()`, not extension (e.g., 102). The code now correctly extracts the agent number from the agent string (Agent/1002 -> 1002) when transferring to Agent type agents.
+
+---
+
+## 33.1. Fix: Agent Type Transfer Using Correct Agent Number for AgentRequest
+**Date**: 2026-03-06
+
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php`
+
+**Bug**: Transferring calls to Agent type agents (app_agent_pool) failed with "Agent 'XXX' does not exist" error because the code was passing the agent's extension number to `AgentRequest()` instead of the agent number.
+
+**Root Cause**: For Agent type agents like Agent/1002 using extension 102:
+- The agent NUMBER is 1002 (used by AgentRequest)
+- The agent EXTENSION is 102 (the device/phone number)
+- `AgentRequest(102)` fails because agent ID '102' doesn't exist
+- `AgentRequest(1002)` correctly routes to Agent/1002
+
+**Fix**: Modified `Request_agentauth_transfercallagent()` to:
+1. Extract agent number from agent string using regex: `Agent/(\d+)` -> 1002
+2. Use agent number for `AgentRequest()` when transferring to Agent type agents
+3. Continue using extension for callback agent types (SIP/PJSIP/IAX2)
+
+**Log Change**:
+- Before: `AgentRequest("SIP/...", "102")` - fails
+- After: `AgentRequest("SIP/...", "1002")` - succeeds
+
 ---
 
 ## 32. New ECCP Example Files

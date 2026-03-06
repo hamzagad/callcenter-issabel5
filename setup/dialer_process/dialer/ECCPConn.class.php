@@ -3458,6 +3458,7 @@ SQL_INSERTAR_AGENDAMIENTO;
         // Get target agent's extension for the transfer
         // Obtener extensión del agente destino para la transferencia
         $sTargetExtension = NULL;
+        $sAgentNumber = NULL;  // Agent number for AgentRequest (e.g., 1002 for Agent/1002)
         $sCanalExt = $infoTargetAgent['login_channel'];
         if (is_null($sCanalExt)) $sCanalExt = $infoTargetAgent['extension'];
         if (!is_null($sCanalExt)) {
@@ -3469,6 +3470,16 @@ SQL_INSERTAR_AGENDAMIENTO;
             }
         }
 
+        // For Agent type agents, extract agent number from agent string (Agent/1002 -> 1002)
+        // AgentRequest() needs the agent number, not the extension
+        if (strpos($sTargetAgent, 'Agent/') === 0) {
+            $sRegexp = "|^Agent/(\\d+)|";
+            $regs = NULL;
+            if (preg_match($sRegexp, $sTargetAgent, $regs)) {
+                $sAgentNumber = $regs[1];
+            }
+        }
+
         if (is_null($sTargetExtension)) {
             $this->_log->output('ERR: '.__METHOD__.": No se puede determinar extensión del agente destino | EN: ERR: ".__METHOD__.": Cannot determine target agent extension - $sTargetAgent");
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine target agent extension');
@@ -3476,39 +3487,47 @@ SQL_INSERTAR_AGENDAMIENTO;
         }
 
         // Determine channel to use for target agent based on agent type
-        // Para agentes tipo Agent, usar Local/XXXX@agents; para otros, usar el canal directo
+        // Para agentes tipo Agent, usar AgentRequest con número de agente; para otros, usar extensión directa
         $sTargetChannel = $sTargetExtension;
         if (strpos($sTargetAgent, 'Agent/') === 0) {
             // Agent type - use agents context with AgentRequest
+            // AgentRequest() needs agent NUMBER (e.g., 1002), not extension (e.g., 102)
+            if (is_null($sAgentNumber)) {
+                $this->_log->output('ERR: '.__METHOD__.": No se puede determinar número de agente | EN: ERR: ".__METHOD__.": Cannot determine agent number - $sTargetAgent");
+                $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine agent number');
+                return $xml_response;
+            }
             $sTargetContext = 'agents';
-            $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo Agent via contexto [agents] | EN: INFO: ".__METHOD__.": Transferring to Agent type via [agents] context - Target: $sTargetExtension");
+            $sRedirectTarget = $sAgentNumber;  // Use agent number for AgentRequest
+            $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo Agent via contexto [agents] con AgentRequest($sAgentNumber) | EN: INFO: ".__METHOD__.": Transferring to Agent type via [agents] context using AgentRequest($sAgentNumber)");
         } else {
-            // SIP/PJSIP/IAX2 type - use direct context
+            // SIP/PJSIP/IAX2 type - use direct context with extension
             $sTargetContext = 'from-internal';
+            $sRedirectTarget = $sTargetExtension;
             $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo callback | EN: INFO: ".__METHOD__.": Transferring to callback type agent - Target: $sTargetExtension");
         }
 
         // Perform the transfer using AMI Redirect
         // Realizar la transferencia usando AMI Redirect
-        $this->_log->output('INFO: '.__METHOD__.": Iniciando transferencia: $sCanalRemoto -> $sTargetExtension@$sTargetContext | EN: INFO: ".__METHOD__.": Initiating transfer: $sCanalRemoto -> $sTargetExtension@$sTargetContext");
+        $this->_log->output('INFO: '.__METHOD__.": Iniciando transferencia: $sCanalRemoto -> $sRedirectTarget@$sTargetContext | EN: INFO: ".__METHOD__.": Initiating transfer: $sCanalRemoto -> $sRedirectTarget@$sTargetContext");
 
         $r = $this->_ami->Redirect(
             $sCanalRemoto,      // channel (caller to transfer)
             '',                 // extrachannel
-            $sTargetExtension,  // exten (target agent's extension)
+            $sRedirectTarget,   // exten (agent number for Agent type, extension for callback types)
             $sTargetContext,    // context (agents for Agent type, from-internal for others)
             1);                 // priority
 
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.': Falló la transferencia de agente: no se puede transferir '.
-                $sCanalRemoto.' a '.$sTargetExtension.' - '.$r['Message'].
+                $sCanalRemoto.' a '.$sRedirectTarget.' - '.$r['Message'].
                 ' | EN: ERR: '.__METHOD__.': Agent transfer failed: cannot transfer '.
-                $sCanalRemoto.' to '.$sTargetExtension.' - '.$r['Message']);
+                $sCanalRemoto.' to '.$sRedirectTarget.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call to agent');
             return $xml_response;
         } else {
-            // Register the transfer in database with just the extension number
-            // Registrar transferencia en base de datos con solo número de extensión
+            // Register the transfer in database with the extension number (for all agent types)
+            // Registrar transferencia en base de datos con número de extensión
             $this->_registrarTransferencia($infoLlamada, $sTargetExtension);
             // Notify AMIEventProcess to release the source agent after transfer
             $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
