@@ -2,6 +2,56 @@
 
 ---
 
+## 35. Check Extension Registration Before Callback Login
+**Date**: 2026-03-06
+
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php`
+- `modules/agent_console/libs/ECCP.class.php`
+- `modules/agent_console/libs/paloSantoConsola.class.php`
+- `modules/agent_console/index.php`
+- `modules/agent_console/lang/en.lang`
+- `modules/agent_console/lang/es.lang`
+- `setup/dialer_process/dialer/eccp-examples/getextensionstatus.php` (new)
+
+**Issue**: A callback extension type agent (SIP/PJSIP/IAX2) could log in even if their extension was NOT registered in Asterisk. This allowed login attempts from non-existent or offline extensions.
+
+**Fix**: Added ECCP request `getextensionstatus` to check extension registration:
+1. New ECCP server request: `Request_eccpauth_getextensionstatus` in ECCPConn.class.php
+2. New ECCP client method: `ECCP::getextensionstatus($extension)` in ECCP.class.php
+3. New agent console method: `PaloSantoConsola::extensionEstaRegistrada($sAgentFormat)`
+4. Validation in `manejarLogin_doLogin()` blocks login with error "Extension is not registered" / "La extensión no está registrada"
+5. ECCP example file created: `eccp-examples/getextensionstatus.php`
+
+**Technical Details**:
+- Extension registration check uses the dialer's existing AMI connection via ECCP
+- For SIP: checks `sip show peer <extension>` for Status OK/Registered
+- For PJSIP: checks `pjsip show endpoint <extension>` for State/Status Reachable
+- For IAX2: checks `iax2 show peer <extension>` for Status OK/Registered
+- Extension must be registered (not just configured) to allow callback login
+- Validation occurs BEFORE checking if extension is used by Agent type session
+
+**ECCP Request**:
+```xml
+<request>
+    <getextensionstatus>
+        <extension>SIP/101</extension>
+    </getextensionstatus>
+</request>
+```
+
+**ECCP Response**:
+```xml
+<response>
+    <getextensionstatus_response>
+        <extension>SIP/101</extension>
+        <registered>yes</registered>
+    </getextensionstatus_response>
+</response>
+```
+
+---
+
 ## 34. Prevent Callback Extension Login if Extension Used by Agent Type Session
 **Date**: 2026-03-06
 

@@ -4201,5 +4201,93 @@ LOG_CAMPANIA_SALIENTE;
         $xml_dumpstatusResponse->addChild('success');
         return $xml_response;
     }
+
+    /**
+     * ECCP request to check if an extension is registered in Asterisk
+     * EN: Petición ECCP para verificar si una extensión está registrada en Asterisk
+     */
+    private function Request_eccpauth_getextensionstatus($comando)
+    {
+        if (is_null($this->_ami))
+            return $this->_generarRespuestaFallo(500, 'No AMI connection');
+
+        // Get extension from request (format: SIP/101, PJSIP/101, IAX2/101)
+        if (!isset($comando->extension))
+            return $this->_generarRespuestaFallo(400, 'Bad request');
+
+        $sExtension = (string)$comando->extension;
+
+        // Parse extension to get technology and peer number
+        $regs = NULL;
+        if (!preg_match('|^(\w+)/(\d+)$|', $sExtension, $regs)) {
+            return $this->_generarRespuestaFallo(400, 'Invalid extension format');
+        }
+
+        $sTech = strtoupper($regs[1]);  // SIP, PJSIP, IAX2
+        $sPeer = $regs[2];              // Extension number
+
+        $xml_response = new SimpleXMLElement('<response />');
+        $xml_response_child = $xml_response->addChild('getextensionstatus_response');
+
+        $bRegistered = FALSE;
+
+        // Check registration based on technology
+        switch ($sTech) {
+            case 'SIP':
+                $result = $this->_ami->Command("sip show peer $sPeer");
+                if (isset($result['data']) && strpos($result['data'], 'Status') !== false) {
+                    $lines = explode("\n", $result['data']);
+                    foreach ($lines as $line) {
+                        if (stripos($line, 'Status') !== false &&
+                            (stripos($line, 'OK') !== false || stripos($line, 'Registered') !== false)) {
+                            $bRegistered = TRUE;
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            case 'PJSIP':
+                $result = $this->_ami->Command("pjsip show endpoint $sPeer");
+                if (isset($result['data']) && strpos($result['data'], 'Not Found') === false) {
+                    $lines = explode("\n", $result['data']);
+                    foreach ($lines as $line) {
+                        if ((stripos($line, 'State') !== false && stripos($line, 'Available') !== false) ||
+                            (stripos($line, 'Status') !== false && stripos($line, 'Reachable') !== false) ||
+                            (stripos($line, 'DeviceState') !== false && (stripos($line, 'InUse') !== false ||
+                             stripos($line, 'RINGING') !== false || stripos($line, 'busy') !== false ||
+                             stripos($line, 'idle') !== false || stripos($line, 'Not in use') !== false))) {
+                            $bRegistered = TRUE;
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            case 'IAX2':
+                $result = $this->_ami->Command("iax2 show peer $sPeer");
+                if (isset($result['data']) && strpos($result['data'], 'Status') !== false) {
+                    $lines = explode("\n", $result['data']);
+                    foreach ($lines as $line) {
+                        if (stripos($line, 'Status') !== false &&
+                            (stripos($line, 'OK') !== false || stripos($line, 'Registered') !== false)) {
+                            $bRegistered = TRUE;
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            default:
+                $xml_response_child->addChild('status', 'unknown');
+                $xml_response_child->addChild('message', 'Unknown technology: ' . $sTech);
+                return $xml_response;
+        }
+
+        $xml_response_child->addChild('extension', $sExtension);
+        $xml_response_child->addChild('registered', $bRegistered ? 'yes' : 'no');
+
+        return $xml_response;
+    }
 }
 ?>

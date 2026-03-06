@@ -132,5 +132,6 @@ $arrLangModule = array(
 'Script' => 'Script',
 'Waiting for call'=>'Waiting for call',
 'Extension is already in use by another agent' => 'Extension is already in use by another agent',
+'Extension is not registered' => 'Extension is not registered',
 );
 ?>

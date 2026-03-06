@@ -388,7 +388,14 @@ function manejarLogin_doLogin()
         $regs = NULL;
         $sExtensionNum = (preg_match('|^(\w+)/(\d+)$|', $sAgente, $regs)) ? $regs[2] : $sAgente;
 
-        if ($oPaloConsola->extensionUsadaPorAgente($sExtensionNum)) {
+        // NEW: Check if extension is registered in Asterisk
+        if (!$oPaloConsola->extensionEstaRegistrada($sAgente)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Extension is not registered');
+        }
+        // Check if extension is already used by Agent type session
+        elseif ($oPaloConsola->extensionUsadaPorAgente($sExtensionNum)) {
             $bContinuar = FALSE;
             $respuesta['status'] = FALSE;
             $respuesta['message'] = _tr('Extension is already in use by another agent');

@@ -332,6 +332,22 @@ class ECCP
         return $xml_response->getagentstatus_response;
     }
 
+    /**
+     * Check if an extension is registered in Asterisk
+     * EN: Verificar si una extensión está registrada en Asterisk
+     *
+     * @param   string  $sExtension  Extension in format like "SIP/101", "PJSIP/101", "IAX2/101"
+     * @return  SimpleXMLElement  Response with 'registered' field ('yes' or 'no')
+     */
+    public function getextensionstatus($sExtension)
+    {
+        $xml_request = new SimpleXMLElement("<request />");
+        $xml_cmdRequest = $xml_request->addChild('getextensionstatus');
+        $xml_cmdRequest->addChild('extension', $sExtension);
+        $xml_response = $this->send_request($xml_request);
+        return $xml_response->getextensionstatus_response;
+    }
+
     public function mixmonitormute($timeout = NULL)
     {
         $xml_request = new SimpleXMLElement("<request />");

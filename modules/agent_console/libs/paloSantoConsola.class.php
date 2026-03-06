@@ -379,6 +379,30 @@ class PaloSantoConsola
     }
 
     /**
+     * Check if an extension is registered in Asterisk using ECCP
+     *
+     * EN: Verificar si una extensión está registrada en Asterisk usando ECCP
+     *
+     * @param   string  $sAgentFormat  Agent in format like "SIP/101", "PJSIP/101", "IAX2/101"
+     * @return  bool    TRUE if extension is registered, FALSE otherwise
+     */
+    function extensionEstaRegistrada($sAgentFormat)
+    {
+        try {
+            $oECCP = $this->_obtenerConexion('ECCP');
+            $response = $oECCP->getextensionstatus($sAgentFormat);
+            if (isset($response->failure)) {
+                $this->errMsg = '(internal) getextensionstatus: ' . $response->failure->message;
+                return FALSE;
+            }
+            return ((string)$response->registered == 'yes');
+        } catch (Exception $e) {
+            $this->errMsg = '(internal) getextensionstatus: ' . $e->getMessage();
+            return FALSE;
+        }
+    }
+
+    /**
      * Método para iniciar el login del agente con la extensión y el número de
      * agente que se indican.
      *
