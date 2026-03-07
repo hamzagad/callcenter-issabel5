@@ -371,6 +371,20 @@ function manejarLogin_doLogin()
         }
     }
 
+    // Check if Agent type extension is already used by callback extension session
+    if ($bContinuar && !$bCallback) {
+        $oPaloConsola->desconectarTodo();
+
+        // Check if extension is already used by callback type session
+        if ($oPaloConsola->extensionUsadaPorCallback($sExtension)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Extension is already in use by another agent');
+        }
+        // Reconnect for normal login flow
+        $oPaloConsola = new PaloSantoConsola($sAgente);
+    }
+
     // Check if callback extension is already used by Agent type session
     if ($bContinuar && $bCallback) {
         $oPaloConsola->desconectarTodo();

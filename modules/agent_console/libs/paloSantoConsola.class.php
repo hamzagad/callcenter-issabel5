@@ -379,6 +379,37 @@ class PaloSantoConsola
     }
 
     /**
+     * Check if an extension is already in use by a callback extension type session
+     * 
+     * EN: Verificar si una extensión ya está siendo usada por una sesión de tipo callback
+     *
+     * @param   string  $sExtensionNum  Extension number (e.g., "101")
+     * @return  bool    TRUE if extension is already in use by callback type, FALSE otherwise
+     */
+    function extensionUsadaPorCallback($sExtensionNum)
+    {
+        $oDB = $this->_obtenerConexion('call_center');
+
+        // Check if this extension number is already used by an active callback type session
+        // Callback types are: SIP, PJSIP, IAX2 (anything that is NOT 'Agent')
+        $sql_check_extension = "SELECT COUNT(*) as count
+                               FROM audit a
+                               JOIN agent ag ON a.id_agent = ag.id
+                               WHERE a.login_extension LIKE ?
+                               AND ag.type != 'Agent'
+                               AND a.datetime_end IS NULL";
+
+        $result = $oDB->fetchTable($sql_check_extension, TRUE, array("%$sExtensionNum"));
+
+        if (!is_array($result) || count($result) <= 0) {
+            $this->errMsg = "Error checking extension usage: ".$oDB->errMsg;
+            return FALSE;
+        }
+
+        return $result[0]['count'] > 0;
+    }
+
+    /**
      * Check if an extension is registered in Asterisk using ECCP
      *
      * EN: Verificar si una extensión está registrada en Asterisk usando ECCP

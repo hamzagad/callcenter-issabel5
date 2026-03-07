@@ -2,6 +2,32 @@
 
 ---
 
+## 41. Prevent Agent Type Login if Extension Used by Callback Extension Session
+**Date**: 2026-03-07
+
+**Files**:
+- `modules/agent_console/libs/paloSantoConsola.class.php` (added `extensionUsadaPorCallback()` method)
+- `modules/agent_console/index.php` (added check for Agent type login)
+
+**Issue**: An Agent type agent could log in using an extension number that was already actively being used by a callback extension type login session (SIP/PJSIP/IAX2), causing conflicts. This is the reverse scenario of change #34.
+
+**Example**:
+- SIP/101 (callback type) logs in with extension SIP/101
+- Agent/1001 can then also log in with extension 101
+- Result: Two sessions using the same physical extension
+
+**Fix**: Added validation check in `manejarLogin_doLogin()` that:
+1. Detects when Agent type login is attempted (`!$bCallback`)
+2. Queries the audit table to check if a callback type agent is actively logged in with that extension
+3. Blocks login with error "Extension is already in use by another agent" / "La extensión ya está siendo usada por otro agente"
+
+**Technical Details**:
+- New method: `PaloSantoConsola::extensionUsadaPorCallback($sExtensionNum)`
+- Query checks: `audit.datetime_end IS NULL` (active session) + `agent.type != 'Agent'` (callback types) + `login_extension LIKE %extension_number%`
+- Check occurs AFTER password verification but BEFORE proceeding to login state check
+
+---
+
 ## 40. Fix Transfer Reservation Leak on Extension Parsing Failure
 **Date**: 2026-03-07
 
