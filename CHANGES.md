@@ -2,6 +2,44 @@
 
 ---
 
+## 44. Transfer Call Tracking Fix
+**Date**: 2026-03-08
+
+**Files**:
+- `setup/dialer_process/dialer/Llamada.class.php`
+  - Added `transfer_pending` property (boolean flag to protect calls during blind transfer)
+  - Added `llamadaTransferidaDesdeAgente()` method — lightweight agent release that keeps the call alive in `_listaLlamadas` for re-linking to the target agent (unlike `llamadaFinalizaSeguimiento()` which removes the call entirely)
+- `setup/dialer_process/dialer/AMIEventProcess.class.php`
+  - `_finalizarTransferencia()`: Uses `llamadaTransferidaDesdeAgente()` instead of `llamadaFinalizaSeguimiento()` to preserve the call for the target agent's Link event
+  - `_reservarAgenteParaTransferencia()`: Sets `transfer_pending` flag on the call during the synchronous RPC (guaranteed before any Hangup events)
+  - `msg_Hangup()`: Three-way handling when `transfer_pending` is TRUE:
+    1. Agent still linked → lightweight release via `llamadaTransferidaDesdeAgente()`
+    2. Agent already released + customer/trunk channel hanging up → full finalization (transfer failed)
+    3. Agent already released + intermediate channel (Local) → ignore (call waiting for re-link)
+  - `msg_Link()`: Added transfer detection block — when a call has `timestamp_link` set but `agente` is NULL (released by transfer), reassigns the call to the target agent. Includes:
+    - Agent lookup with `estado_consola` (logged-in) check and `extension` index fallback for Agent-type logins
+    - Outgoing call support: accepts calls found by `actualchannel` when uniqueid doesn't match (outgoing calls use Local channels with different uniqueids than the trunk)
+    - Clears `transfer_pending` after successful reassignment
+
+**Bug**: After a blind transfer between agents, the transferred call did not appear in the receiving agent's console. The Hangup button remained disabled, and if the agent hung up from their phone device, the agent session was terminated instead of just ending the call.
+
+**Root Causes**:
+1. `llamadaFinalizaSeguimiento()` removed the call from `_listaLlamadas`, making it invisible to the target agent's `msg_Link()` event
+2. Race condition: `msg_Hangup` could arrive before `_finalizarTransferencia`, fully finalizing the call before the transfer logic ran
+3. For Agent-type logins (e.g., Agent/1001 on SIP/101), the agent lookup found the wrong agent (SIP/101 logged-out instead of Agent/1001 logged-in)
+4. For outgoing calls, the Link event used the trunk's uniqueid (different from the call's tracked Local channel uniqueid), so the call wasn't found
+5. For outgoing calls, multiple hangup events (agent channel + Local channel) required protection — a single `transfer_pending` clear after the first hangup left the second hangup unprotected
+
+**Tested Scenarios**:
+- Incoming calls: SIP callback → PJSIP callback, PJSIP → SIP, SIP → Agent-type, PJSIP → Agent-type
+- Outgoing calls: SIP → PJSIP, PJSIP → SIP, Agent-type → callback, callback → Agent-type
+- Normal call flow (no transfer) unaffected
+- Transfer failure (customer hangs up before target answers) properly finalizes the call
+
+**Limitation (TODO in code)**: Source agent attribution is lost — `id_agent` in `calls`/`call_entry` is overwritten to the target agent. A `call_agent_history` table would be needed to track all agents that handled a call for accurate reporting.
+
+---
+
 ## 43. Centralized Web Module Logging Infrastructure
 **Date**: 2026-03-07
 

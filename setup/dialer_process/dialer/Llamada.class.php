@@ -148,6 +148,7 @@ class Llamada
                                                 // Set to TRUE when waiting for id_current_call
     var $request_hold = FALSE;  // Se asigna a VERDADERO al invocar requerimiento hold, y se verifica en Unlink
     var $atxfer_hold = FALSE;   // TRUE when hold is initiated during atxfer state - Bridge() will retrieve, not AgentRequest
+    var $transfer_pending = FALSE;  // TRUE when a blind transfer is in progress - prevents msg_Hangup from fully finalizing
                                 // Set to TRUE when invoking hold request, and verified in Unlink
     private $_park_exten = NULL;// Extensión de lote de parqueo de llamada enviada a hold
                                 // Extension of parking lot for call sent to hold
@@ -1059,6 +1060,89 @@ class Llamada
             );
             $this->_tuberia->msg_SQLWorkerProcess_sqlupdatecurrentcalls($paramActualizar);
         }
+    }
+
+    /**
+     * Release source agent during a call transfer WITHOUT finalizing the call.
+     * Unlike llamadaFinalizaSeguimiento(), this method keeps the call in
+     * _listaLlamadas so the call can be re-linked to the target agent
+     * via the normal msg_Link() path.
+     *
+     * Liberar agente origen durante transferencia SIN finalizar la llamada.
+     * A diferencia de llamadaFinalizaSeguimiento(), este método mantiene
+     * la llamada en _listaLlamadas para que pueda ser re-enlazada al
+     * agente destino por el flujo normal de msg_Link().
+     */
+    public function llamadaTransferidaDesdeAgente($timestamp)
+    {
+        $this->_log->output('INFO: '.__METHOD__.': releasing source agent for transfer, '.
+            'call='.$this->_nul($this->uniqueid).
+            ' agent='.$this->_nul(!is_null($this->agente) ? $this->agente->channel : NULL).
+            ' | ES: liberando agente origen para transferencia, '.
+            'llamada='.$this->_nul($this->uniqueid).
+            ' agente='.$this->_nul(!is_null($this->agente) ? $this->agente->channel : NULL));
+
+        // Clear agent channel properties
+        $this->_agentchannel = NULL;
+        $this->_actualAgentChannel = NULL;
+
+        // Delete from current_calls/current_call_entry
+        if (!is_null($this->id_current_call)) {
+            $this->_tuberia->msg_SQLWorkerProcess_sqldeletecurrentcalls(array(
+                'tipo_llamada'  =>  $this->tipo_llamada,
+                'id'            =>  $this->id_current_call,
+            ));
+        } elseif (isset($this->_actualizacionesPendientes['sqlinsertcurrentcalls'])) {
+            unset($this->_actualizacionesPendientes['sqlinsertcurrentcalls']);
+        }
+        $this->_id_current_call = NULL;
+
+        // Send AgentUnlinked event for source agent
+        if (!is_null($this->agente) && !is_null($this->id_llamada)) {
+            $fDuration = $timestamp - $this->timestamp_link;
+            $paramProgreso = array(
+                'datetime_entry'    =>  date('Y-m-d H:i:s', $timestamp),
+                'queue'             =>  $this->_queuenumber,
+                'duration'          =>  $fDuration,
+                'new_status'        =>  'Transfer',
+            );
+            $paramProgreso['id_call_'.$this->tipo_llamada] = $this->id_llamada;
+            if (!is_null($this->campania))
+                $paramProgreso['id_campaign_'.$this->tipo_llamada] = $this->campania->id;
+
+            $this->_tuberia->msg_SQLWorkerProcess_AgentUnlinked(
+                $this->agente->channel, $this->tipo_llamada,
+                is_null($this->campania) ? NULL : $this->campania->id,
+                $this->id_llamada, $this->phone,
+                date('Y-m-d H:i:s', $timestamp),
+                $fDuration, FALSE,
+                $paramProgreso);
+        }
+
+        // Release agent without removing call from list
+        if (!is_null($this->agente)) {
+            $this->agente->llamada_agendada = NULL;
+            $this->agente->quitarLlamadaAtendida();
+            $this->agente = NULL;
+        }
+        $this->agente_agendado = NULL;
+
+        // Keep timestamp_link set so transfer detection in msg_Link() fires
+        // (the check is: !is_null(timestamp_link) && is_null(agente))
+        // timestamp_link will be reset by llamadaEnlazadaAgente() when target links
+        // Do NOT clear transfer_pending here — for outgoing calls, a Local channel
+        // hangup may arrive after this method is called by _finalizarTransferencia.
+        // msg_Hangup clears transfer_pending itself after calling this method.
+
+        // Do NOT set timestamp_hangup — the call is still active
+        // Do NOT update call status — it will be updated when target agent links
+        // Do NOT remove from _listaLlamadas — the call must remain findable by uniqueid
+
+        $this->_log->output('INFO: '.__METHOD__.': source agent released, call preserved for re-link '.
+            'uniqueid='.$this->_nul($this->uniqueid).
+            ' timestamp_link='.$this->_nul($this->timestamp_link).
+            ' agente='.$this->_nul($this->agente).
+            ' | ES: agente origen liberado, llamada preservada para re-enlace');
     }
 
     public function llamadaFinalizaSeguimiento($timestamp, $iUmbralLlamadaCorta)

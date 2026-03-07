@@ -1180,19 +1180,18 @@ class AMIEventProcess extends TuberiaProcess
             $a->llamada->llamadaRegresaHold($this->_ami, microtime(TRUE));
         }
 
-        // === TIMESTAMP TRACKER: Before Finalize Call Tracking ===
+        // === TIMESTAMP TRACKER: Before Transfer Release ===
         $fBeforeFinalize = microtime(TRUE);
-        $this->_log->output("TIMING: ".__METHOD__.": [BEFORE_FINALIZE] Agent=$sAgente, has_call=".(is_null($a->llamada)?'NO':'YES').", microtime=$fBeforeFinalize | ES: Antes de llamar llamadaFinalizaSeguimiento");
+        $this->_log->output("TIMING: ".__METHOD__.": [BEFORE_TRANSFER_RELEASE] Agent=$sAgente, has_call=".(is_null($a->llamada)?'NO':'YES').", call_uniqueid=".(is_null($a->llamada)?'NULL':$a->llamada->uniqueid).", microtime=$fBeforeFinalize | ES: Antes de liberar agente para transferencia");
 
-        // Finalize call tracking - this releases the agent
-        $a->llamada->llamadaFinalizaSeguimiento(
-            microtime(TRUE),
-            $this->_config['dialer']['llamada_corta']);
+        // Release source agent but keep call alive in _listaLlamadas
+        // so msg_Link() can re-link it to the target agent
+        $a->llamada->llamadaTransferidaDesdeAgente(microtime(TRUE));
 
-        // === TIMESTAMP TRACKER: After Finalize Call Tracking ===
+        // === TIMESTAMP TRACKER: After Transfer Release ===
         $fAfterFinalize = microtime(TRUE);
         $fElapsed = ($fAfterFinalize - $fBeforeFinalize) * 1000;
-        $this->_log->output("TIMING: ".__METHOD__.": [AFTER_FINALIZE] Agent=$sAgente, elapsed_ms=".round($fElapsed,3).", agent_call_null=".(is_null($a->llamada)?'YES':'NO').", microtime=$fAfterFinalize | ES: Después de llamadaFinalizaSeguimiento");
+        $this->_log->output("TIMING: ".__METHOD__.": [AFTER_TRANSFER_RELEASE] Agent=$sAgente, elapsed_ms=".round($fElapsed,3).", agent_call_null=".(is_null($a->llamada)?'YES':'NO').", microtime=$fAfterFinalize | ES: Después de liberar agente para transferencia");
 
         // Clear transfer reservation if source agent had one pending
         // Limpiar reserva de transferencia si el agente origen tenía una pendiente
@@ -1897,6 +1896,19 @@ class AMIEventProcess extends TuberiaProcess
             'source_agent' => $sSourceAgent,
             'alarm_key'    => $sAlarmKey,
         );
+
+        // Set transfer_pending flag on the source agent's call so msg_Hangup
+        // uses llamadaTransferidaDesdeAgente() instead of full finalization.
+        // This RPC is synchronous, so the flag is set BEFORE the Redirect
+        // triggers any Hangup events from Asterisk.
+        $aSource = $this->_listaAgentes->buscar('agentchannel', $sSourceAgent);
+        if (!is_null($aSource) && !is_null($aSource->llamada)) {
+            $aSource->llamada->transfer_pending = TRUE;
+            $this->_log->output('INFO: '.__METHOD__.": transfer_pending flag SET on call uid=".
+                $aSource->llamada->uniqueid." for source=$sSourceAgent".
+                " | ES: bandera transfer_pending activada en llamada uid=".
+                $aSource->llamada->uniqueid." para origen=$sSourceAgent");
+        }
 
         $this->_log->output('INFO: '.__METHOD__.": Transfer reservation ACQUIRED for target=$sTargetAgent by source=$sSourceAgent (alarm=$sAlarmKey, queue_status=$max_queue_status) | ES: Reserva de transferencia ADQUIRIDA para destino=$sTargetAgent por origen=$sSourceAgent");
 
@@ -2607,6 +2619,15 @@ Uniqueid: 1429642067.241008
         if (is_null($llamada)) $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid1']);
         if (is_null($llamada)) $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid2']);
 
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.': call lookup result: '.
+                'llamada='.(!is_null($llamada) ? 'FOUND(uid='.$llamada->uniqueid.')' : 'NULL').
+                ' timestamp_link='.(!is_null($llamada) ? ($llamada->timestamp_link ?? 'NULL') : 'N/A').
+                ' agente='.(!is_null($llamada) && !is_null($llamada->agente) ? $llamada->agente->channel : 'NULL').
+                ' sChannel='.$sChannel.
+                ' | ES: resultado de búsqueda de llamada');
+        }
+
         if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
             !is_null($llamada->agente) && $llamada->agente->channel != $sChannel) {
 
@@ -2752,6 +2773,17 @@ Uniqueid: 1429642067.241008
                         "{$llamada->channel}, changed Uniqueid to {$sNuevo_Uniqueid}");
                 }
                 $llamada->uniqueid = $sNuevo_Uniqueid;
+            } elseif (!is_null($llamada->timestamp_link) && is_null($llamada->agente)) {
+                // Transfer scenario: outgoing calls use Local channels so the tracked
+                // uniqueid differs from the trunk channel's uniqueid in the new bridge.
+                // Accept the call and update uniqueid so transfer detection handles it.
+                $this->_log->output('INFO: '.__METHOD__.': transfer - outgoing call found by '.
+                    'actualchannel='.$llamada->actualchannel.', updating uniqueid from '.
+                    $llamada->uniqueid.' to '.$sNuevo_Uniqueid.
+                    ' | ES: transferencia - llamada saliente encontrada por '.
+                    'actualchannel='.$llamada->actualchannel.', actualizando uniqueid de '.
+                    $llamada->uniqueid.' a '.$sNuevo_Uniqueid);
+                $llamada->uniqueid = $sNuevo_Uniqueid;
             } else {
                 if ($this->DEBUG) {
                     $this->_log->output("DEBUG: ".__METHOD__.": identificada ".
@@ -2768,7 +2800,55 @@ Uniqueid: 1429642067.241008
         if (!is_null($llamada)) {
             // Se tiene la llamada principal monitoreada
             // The main call is being monitored
-            if (!is_null($llamada->timestamp_link)) return FALSE;   // Múltiple link se ignora | EN: Multiple links are ignored
+            if (!is_null($llamada->timestamp_link)) {
+                if (is_null($llamada->agente)) {
+                    // TRANSFER SCENARIO: call was linked before but source agent released
+                    // by _finalizarTransferencia(). Reassign to the new target agent.
+                    $this->_log->output('INFO: '.__METHOD__.': transfer detected - reassigning call '.
+                        $llamada->uniqueid.' to agent '.$sChannel.
+                        ' | ES: transferencia detectada - reasignando llamada '.
+                        $llamada->uniqueid.' al agente '.$sChannel);
+
+                    $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
+                    if (is_null($a) || $a->estado_consola != 'logged-in') {
+                        // Agent-type fallback: direct extension transfer shows SIP/XXX
+                        // but agentchannel is Agent/XXXX, lookup by extension instead.
+                        // Also fallback when agentchannel finds a logged-out agent
+                        // (e.g. SIP/101 agent exists but Agent/1001 using SIP/101 is logged-in)
+                        $a = $this->_listaAgentes->buscar('extension', $sChannel);
+                    }
+                    if (!is_null($a)) {
+                        $sUniqueidAgente = ($llamada->uniqueid == $params['Uniqueid1'])
+                            ? $params['Uniqueid2'] : $params['Uniqueid1'];
+
+                        // Use $a->channel for agentchannel (e.g. Agent/1001) not $sChannel
+                        // (e.g. SIP/101) to ensure downstream hangup handlers work correctly
+                        $llamada->llamadaEnlazadaAgente(
+                            $params['local_timestamp_received'], $a,
+                            $sRemChannel, $sUniqueidAgente,
+                            $a->channel, $sAgentChannel);
+
+                        // Clear transfer_pending now that call is re-linked to target agent,
+                        // so future hangups use normal finalization
+                        $llamada->transfer_pending = FALSE;
+
+                        $this->_log->output('INFO: '.__METHOD__.': call successfully reassigned to '.
+                            $a->channel.' | ES: llamada reasignada exitosamente a '.$a->channel);
+
+                        // TODO: Source agent attribution is lost - id_agent in calls/call_entry
+                        // is overwritten to target agent. Consider adding a call_agent_history
+                        // table to track all agents that handled a call for accurate reporting.
+
+                        $this->_liberarReservaTransferencia($a->channel);
+                    } else {
+                        $this->_log->output('WARN: '.__METHOD__.': transfer target agent not found for channel '.
+                            $sChannel.' | ES: agente destino no encontrado para canal '.$sChannel);
+                    }
+                    return FALSE;
+                }
+                // Normal multiple link - ignore | Múltiple link se ignora
+                return FALSE;
+            }
 
             $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
             if (is_null($a)) {
@@ -2991,7 +3071,40 @@ Uniqueid: 1429642067.241008
         }
 
         if (!is_null($llamada)) {
-            $this->_procesarLlamadaColgada($llamada, $params);
+            // Check if a blind transfer is in progress - if so, release source
+            // agent but keep the call in _listaLlamadas for the target agent's
+            // Link event to find and re-link.
+            if ($llamada->transfer_pending) {
+                if (!is_null($llamada->agente)) {
+                    // Agent still linked - release with lightweight method
+                    $this->_log->output('INFO: '.__METHOD__.': hangup during transfer - '.
+                        'using lightweight release instead of full finalization. '.
+                        'channel='.$params['Channel'].' uniqueid='.$params['Uniqueid'].
+                        ' call_uid='.$llamada->uniqueid.
+                        ' | ES: hangup durante transferencia - '.
+                        'usando liberación ligera en vez de finalización completa');
+                    $llamada->llamadaTransferidaDesdeAgente($params['local_timestamp_received']);
+                } elseif ($params['Channel'] == $llamada->actualchannel) {
+                    // Customer/trunk channel hung up - transfer failed, finalize
+                    $this->_log->output('INFO: '.__METHOD__.': customer channel hangup during '.
+                        'transfer - finalizing call. channel='.$params['Channel'].
+                        ' call_uid='.$llamada->uniqueid.
+                        ' | ES: hangup de canal del cliente durante transferencia - '.
+                        'finalizando llamada');
+                    $llamada->transfer_pending = FALSE;
+                    $this->_procesarLlamadaColgada($llamada, $params);
+                } else {
+                    // Intermediate channel hangup (e.g. Local channel for outgoing calls)
+                    // Ignore - call is waiting for re-link via msg_Link
+                    $this->_log->output('INFO: '.__METHOD__.': intermediate channel hangup during '.
+                        'transfer - ignoring. channel='.$params['Channel'].
+                        ' call_uid='.$llamada->uniqueid.
+                        ' | ES: hangup de canal intermedio durante transferencia - '.
+                        'ignorando');
+                }
+            } else {
+                $this->_procesarLlamadaColgada($llamada, $params);
+            }
         } elseif (is_null($a)) {
             /* No se encuentra la llamada entre las monitoreadas. Puede ocurrir
              * que este sea el Hangup de un canal auxiliar que tiene información
