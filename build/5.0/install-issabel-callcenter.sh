@@ -130,6 +130,14 @@ chmod +x /etc/rc.d/init.d/issabeldialer
 mkdir -p /etc/logrotate.d/
 /bin/cp -f setup/issabeldialer.logrotate /etc/logrotate.d/issabeldialer
 
+# Create callcenter module log directory
+mkdir -p /var/log/callcenter-module/
+chown asterisk:asterisk /var/log/callcenter-module/
+chmod 750 /var/log/callcenter-module/
+
+# Install web modules logrotate config
+/bin/cp -f setup/callcenter-modules.logrotate /etc/logrotate.d/callcenter-modules
+
 # Install DNC script
 /bin/cp -f setup/usr/bin/issabel-callcenter-local-dnc /usr/bin/
 

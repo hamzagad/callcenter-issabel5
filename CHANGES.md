@@ -2,6 +2,37 @@
 
 ---
 
+## 43. Centralized Web Module Logging Infrastructure
+**Date**: 2026-03-07
+
+**Files**:
+- `modules/agent_console/libs/issabel2.lib.php` (added configurable log path, LOCK_EX flag)
+- `setup/callcenter-modules.logrotate` (new file)
+- `build/5.0/install-issabel-callcenter.sh` (added log directory creation and logrotate install)
+- `build/5.0/remove-issabel-callcenter.sh` (added log directory removal)
+
+**Change**: Moved web module debug logging from `/tmp/debug-callcenter.txt` to proper `/var/log/callcenter-module/` directory with log rotation support.
+
+**Benefits**:
+- Logs persist across reboots (was: `/tmp/` cleared on reboot)
+- Automatic log rotation (daily, 7 days retained, compressed)
+- Follows Linux logging conventions
+- Centralized location for all Call Center web module debug logs
+
+**Technical Details**:
+- New global variable: `$GLOBALS['CALLCENTER_DEBUG_FILE']` (default: `/var/log/callcenter-module/debug.log`)
+- Directory permissions: `750` (asterisk:asterisk)
+- Log file permissions: `640` (asterisk:asterisk)
+- Added `LOCK_EX` flag for concurrent write safety
+- Logrotate config: `/etc/logrotate.d/callcenter-modules`
+
+**Usage**:
+- Enable debug: Set `$GLOBALS['CALLCENTER_DEBUG'] = true;` in `issabel2.lib.php`
+- View logs: `tail -f /var/log/callcenter-module/debug.log`
+- Module identification: Each log entry includes `[module_name]` prefix
+
+---
+
 ## 42. Expand Transfer Dialog Size
 **Date**: 2026-03-07
 

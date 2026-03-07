@@ -18,6 +18,8 @@ rm -rf /var/www/html/modules/{rep_incoming_campaigns_panel,rep_outgoing_campaign
 rm -rf /opt/issabel/dialer
 rm -rf /etc/rc.d/init.d/issabeldialer
 rm -rf /etc/logrotate.d/issabeldialer
+rm -rf /etc/logrotate.d/callcenter-modules
+rm -rf /var/log/callcenter-module
 rm -rf /usr/bin/issabel-callcenter-local-dnc
 rm -rf /usr/share/issabel/module_installer/callcenter/
 

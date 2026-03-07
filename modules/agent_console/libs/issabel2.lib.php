@@ -336,12 +336,23 @@ if (!isset($GLOBALS['CALLCENTER_DEBUG'])) {
 }
 
 /**
+ * Debug log file path for Call Center web modules.
+ * ES: Ruta del archivo de registro de depuracion para los modulos web del Call Center.
+ *
+ * Log file is rotated via logrotate (/etc/logrotate.d/callcenter-modules)
+ * ES: El archivo de registro es rotado via logrotate
+ */
+if (!isset($GLOBALS['CALLCENTER_DEBUG_FILE'])) {
+    $GLOBALS['CALLCENTER_DEBUG_FILE'] = '/var/log/callcenter-module/debug.log';
+}
+
+/**
  * Centralized debug logging for Call Center web modules.
- * Logs to file /tmp/debug-callcenter.txt with module name prefix.
+ * Logs to file /var/log/callcenter-module/debug.log with module name prefix.
  * Also collects messages for browser console output via _cc_debug_flush_html().
  *
  * ES: Registro centralizado de depuracion para los modulos web del Call Center.
- * Registra en archivo /tmp/debug-callcenter.txt con prefijo del nombre del modulo.
+ * Registra en archivo /var/log/callcenter-module/debug.log con prefijo del nombre del modulo.
  * Tambien recolecta mensajes para salida en consola del navegador via _cc_debug_flush_html().
  *
  * @param string $message     Debug message / ES: Mensaje de depuracion
@@ -362,7 +373,7 @@ function _cc_debug($message, $module_name = 'unknown')
         $sIP, date('Y-m-d H:i:s'), $module_name, $sAgent, $message);
 
     // File logging / ES: Registro en archivo
-    file_put_contents('/tmp/debug-callcenter.txt', $logLine, FILE_APPEND);
+    file_put_contents($GLOBALS['CALLCENTER_DEBUG_FILE'], $logLine, FILE_APPEND | LOCK_EX);
 
     // Collect for browser console output / ES: Recolectar para consola del navegador
     if (!isset($GLOBALS['_CC_DEBUG_MESSAGES'])) {
@@ -397,6 +408,9 @@ function _cc_debug_flush_html()
 
     $output = "<script>\n";
     foreach ($GLOBALS['_CC_DEBUG_MESSAGES'] as $msg) {
+        // TODO: Fix XSS - use htmlspecialchars($msg, ENT_QUOTES, 'UTF-8') instead of manual escaping
+        // Currently kept to avoid breaking reporting functionality
+        // ES: TODO: Corregir XSS - usar htmlspecialchars en lugar de escape manual
         $escaped = str_replace(array("\\", "'", "\n", "\r", "</"),
                                array("\\\\", "\\'", "\\n", "\\r", "<\\/"), $msg);
         $output .= "console.log('[CC_DEBUG] ' + '" . $escaped . "');\n";
