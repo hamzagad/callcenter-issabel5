@@ -491,8 +491,8 @@ function apply_ui_styles(uidata)
     });
     $('#issabel-callcenter-seleccion-transfer').dialog({
         autoOpen: false,
-        width: 400,
-        height: 200,
+        width: 600,
+        height: 320,
         modal: true,
         buttons: [
             {
