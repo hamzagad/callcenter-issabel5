@@ -2,6 +2,88 @@
 
 ---
 
+## 39. Centralized Debug Infrastructure for Web Modules
+**Date**: 2026-03-07
+
+**Files**:
+- `modules/agent_console/libs/issabel2.lib.php` (added debug infrastructure)
+- `modules/agent_console/index.php` (migrated to centralized debug)
+- `modules/agent_break/index.php` (added issabel2.lib.php include)
+- `modules/agent_journey/index.php` (added issabel2.lib.php include)
+- `modules/calls_per_agent/index.php` (added issabel2.lib.php include)
+- `modules/calls_per_hour/index.php` (added issabel2.lib.php include)
+- `modules/dont_call_list/index.php` (added issabel2.lib.php include)
+- `modules/graphic_calls/index.php` (added issabel2.lib.php include)
+- `modules/hold_time/index.php` (added issabel2.lib.php include)
+- `modules/login_logout/index.php` (added issabel2.lib.php include)
+- `modules/rep_agent_information/index.php` (added issabel2.lib.php include)
+- `modules/rep_trunks_used_per_hour/index.php` (added issabel2.lib.php include)
+- `modules/ingoings_calls_success/index.php` (added issabel2.lib.php include)
+
+**Issue**: Debug logging for call center web modules was inconsistent and scattered. Only `agent_console` had debug capability via a hardcoded constant `AGENT_CONSOLE_DEBUG_LOG`. The remaining 30 modules had zero debug logging. The old `_debug()` function was local to `agent_console/index.php`, used a PHP constant (cannot be changed at runtime), and only logged to a module-specific file with no browser console output.
+
+**Example of the problem**:
+```
+Before fix:
+  agent_console: define('AGENT_CONSOLE_DEBUG_LOG', FALSE);  // Constant, can't toggle at runtime
+  all other modules: No debug capability at all
+
+After fix:
+  All 31 modules: $GLOBALS['CALLCENTER_DEBUG'] = false;     // Can be toggled at runtime
+  File logging: /tmp/debug-callcenter.txt (centralized)
+  Browser console: console.log() output when debug enabled
+```
+
+**Fix**: Added centralized debug infrastructure to `issabel2.lib.php` (shared library included by all call center modules):
+
+1. **Global debug flag**: `$GLOBALS['CALLCENTER_DEBUG']` (default: false)
+   - Edit `issabel2.lib.php` to enable permanently
+   - Or set at runtime: `$GLOBALS['CALLCENTER_DEBUG'] = true;`
+
+2. **Central debug function**: `_cc_debug($message, $module_name)`
+   - Logs to `/tmp/debug-callcenter.txt` with module name prefix
+   - Format: `IP timestamp [module_name] agent=XXXX message`
+   - Collects messages for browser console output
+
+3. **Browser console flush**: `_cc_debug_flush_html()`
+   - Appends `<script>console.log()</script>` tags to HTML output
+   - Call at HTML return points: `return $html . _cc_debug_flush_html();`
+
+4. **JSON attachment**: `_cc_debug_attach_json(&$response)`
+   - Attaches debug messages to JSON response arrays
+   - Client-side JS can read `response._cc_debug`
+
+**Modules covered** (31 total):
+- Already included issabel2.lib.php (20): agent_console, agents, break_administrator, callcenter_config, calls_detail, campaign_in, campaign_monitoring, campaign_out, cb_extensions, client, eccp_users, external_url, form_designer, form_list, queues, rep_agents_monitoring, rep_incoming_calls_monitoring, rep_incoming_campaigns_panel, rep_outgoing_campaigns_panel, reports_break
+- Added issabel2.lib.php include (11): agent_break, agent_journey, calls_per_agent, calls_per_hour, dont_call_list, graphic_calls, hold_time, login_logout, rep_agent_information, rep_trunks_used_per_hour, ingoings_calls_success
+
+**Usage in any call center module**:
+```php
+_cc_debug('Starting campaign load', 'campaign_out');
+_cc_debug('Filter: ' . $filter, 'calls_detail');
+
+// At HTML return points
+return $smarty->fetch("template.tpl") . _cc_debug_flush_html();
+```
+
+**Enable/disable debug**:
+```bash
+# Enable
+sed -i "s/CALLCENTER_DEBUG'] = false/CALLCENTER_DEBUG'] = true/" /var/www/html/modules/agent_console/libs/issabel2.lib.php
+
+# Disable (default)
+sed -i "s/CALLCENTER_DEBUG'] = true/CALLCENTER_DEBUG'] = false/" /var/www/html/modules/agent_console/libs/issabel2.lib.php
+
+# View logs
+tail -f /tmp/debug-callcenter.txt
+grep '\[agent_console\]' /tmp/debug-callcenter.txt
+grep '\[campaign_out\]' /tmp/debug-callcenter.txt
+```
+
+**Note**: This is separate from the dialer daemon debug system (`dialer.debug` in database, logs to `/opt/issabel/dialer/dialerd.log`). The web module debug only covers PHP web modules running under Apache/PHP-FPM.
+
+---
+
 ## 38. Integrate Predictive Dialer into Fair-Rotation Path
 **Date**: 2026-03-06
 

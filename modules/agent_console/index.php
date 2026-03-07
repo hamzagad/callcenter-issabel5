@@ -31,8 +31,6 @@ $webphonePassword = '';
 $webphoneName = '';
 $extension = '';
 
-define ('AGENT_CONSOLE_DEBUG_LOG', FALSE);
-
 function _moduleContent(&$smarty, $module_name)
 {
     global $arrConf;
@@ -130,14 +128,7 @@ function _moduleContent(&$smarty, $module_name)
 
 function _debug($s)
 {
-    if (! AGENT_CONSOLE_DEBUG_LOG) return;
-
-    $sAgent = '(unset)';
-    if (isset($_SESSION['callcenter']) && isset($_SESSION['callcenter']['agente']))
-        $sAgent = $_SESSION['callcenter']['agente'];
-    file_put_contents('/tmp/debug-callcenter-agentconsole.txt',
-        sprintf("%s %s agent=%s %s\n", $_SERVER['REMOTE_ADDR'], date('Y-m-d H:i:s'), $sAgent, $s),
-        FILE_APPEND);
+    _cc_debug($s, 'agent_console');
 }
 
 /* Procedimiento para generar el estado inicial de la información del agente en
@@ -325,7 +316,7 @@ function manejarLogin_HTML($module_name, &$smarty, $sDirLocalPlantillas)
         }
     }
     $sContenido = $smarty->fetch("$sDirLocalPlantillas/login_agent.tpl");
-    return $sContenido;
+    return $sContenido . _cc_debug_flush_html();
 }
 
 // Procesar requerimiento AJAX para iniciar el login del agente
@@ -978,7 +969,7 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         echo "localStorage.setItem('mhrgl.com.expert.ice_servers', '[{ url: \'stun:stun.a.google.com:19302\'}]');";
         echo "</script>";
 
-    return $smarty->fetch("$sDirLocalPlantillas/agent_console.tpl");
+    return $smarty->fetch("$sDirLocalPlantillas/agent_console.tpl") . _cc_debug_flush_html();
 }
 
 function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantillas, $infoLlamada, $infoCampania)
@@ -1088,7 +1079,7 @@ function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantil
         'MSG_NO_ATTRIBUTES'         =>  _tr('No information available for this call'),
         'ATRIBUTOS_LLAMADA'         =>  $atributos,
     ));
-	return $smarty->fetch("$sDirLocalPlantillas/agent_console_atributos.tpl");
+	return $smarty->fetch("$sDirLocalPlantillas/agent_console_atributos.tpl") . _cc_debug_flush_html();
 }
 
 // Se usa $infoLlamada['call_survey'] , $infoCampania['forms']
@@ -1111,7 +1102,7 @@ function _manejarSesionActiva_HTML_generarFormulario($smarty, $sDirLocalPlantill
     }
 
     if ($nforms > 0) {
-        return $smarty->fetch("$sDirLocalPlantillas/agent_console_formulario.tpl");
+        return $smarty->fetch("$sDirLocalPlantillas/agent_console_formulario.tpl") . _cc_debug_flush_html();
     } else {
         return _tr('No forms available for this call');
     }

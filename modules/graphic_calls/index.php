@@ -25,6 +25,7 @@ require_once "libs/paloSantoForm.class.php";
 require_once "libs/misc.lib.php";
 require_once "libs/paloSantoConfig.class.php";
 require_once "libs/paloSantoGrid.class.php";
+require_once "modules/agent_console/libs/issabel2.lib.php";
 
 if (!function_exists('_tr')) {
     function _tr($s)

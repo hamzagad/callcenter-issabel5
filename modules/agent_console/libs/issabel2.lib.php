@@ -313,4 +313,124 @@ function generarEstadoHash($module_name, $estadoCliente) {
     return $estadoHash;
 }
 }
+
+/**
+ * ============================================================================
+ * CALL CENTER WEB MODULES DEBUG INFRASTRUCTURE
+ * ============================================================================
+ * ES: Infraestructura de depuracion para modulos web del Call Center
+ *
+ * Global debug flag for all Call Center web modules.
+ * Set to TRUE to enable debug logging (file + browser console).
+ * Set to FALSE (default) to suppress all debug output.
+ *
+ * ES: Flag global de depuracion para todos los modulos web del Call Center.
+ * Establecer en TRUE para habilitar el registro de depuracion (archivo + consola del navegador).
+ * Establecer en FALSE (por defecto) para suprimir toda la salida de depuracion.
+ *
+ * Toggle: Edit this file and change to true/false.
+ * Runtime toggle: $GLOBALS['CALLCENTER_DEBUG'] = true; from any module.
+ */
+if (!isset($GLOBALS['CALLCENTER_DEBUG'])) {
+    $GLOBALS['CALLCENTER_DEBUG'] = false;
+}
+
+/**
+ * Centralized debug logging for Call Center web modules.
+ * Logs to file /tmp/debug-callcenter.txt with module name prefix.
+ * Also collects messages for browser console output via _cc_debug_flush_html().
+ *
+ * ES: Registro centralizado de depuracion para los modulos web del Call Center.
+ * Registra en archivo /tmp/debug-callcenter.txt con prefijo del nombre del modulo.
+ * Tambien recolecta mensajes para salida en consola del navegador via _cc_debug_flush_html().
+ *
+ * @param string $message     Debug message / ES: Mensaje de depuracion
+ * @param string $module_name Module identifier (e.g. 'agent_console', 'campaign_out')
+ *                            ES: Identificador del modulo
+ */
+if (!function_exists('_cc_debug')) {
+function _cc_debug($message, $module_name = 'unknown')
+{
+    if (empty($GLOBALS['CALLCENTER_DEBUG'])) return;
+
+    $sAgent = '(unset)';
+    if (isset($_SESSION['callcenter']) && isset($_SESSION['callcenter']['agente']))
+        $sAgent = $_SESSION['callcenter']['agente'];
+    $sIP = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '(cli)';
+
+    $logLine = sprintf("%s %s [%s] agent=%s %s\n",
+        $sIP, date('Y-m-d H:i:s'), $module_name, $sAgent, $message);
+
+    // File logging / ES: Registro en archivo
+    file_put_contents('/tmp/debug-callcenter.txt', $logLine, FILE_APPEND);
+
+    // Collect for browser console output / ES: Recolectar para consola del navegador
+    if (!isset($GLOBALS['_CC_DEBUG_MESSAGES'])) {
+        $GLOBALS['_CC_DEBUG_MESSAGES'] = array();
+    }
+    $GLOBALS['_CC_DEBUG_MESSAGES'][] = sprintf('[%s] agent=%s %s',
+        $module_name, $sAgent, $message);
+}
+}
+
+/**
+ * Flush collected debug messages as browser console.log() statements.
+ * Call this at the end of HTML-returning functions by appending the result
+ * to the HTML string before returning it.
+ * Returns empty string if debug is disabled or no messages were collected.
+ *
+ * ES: Vaciar los mensajes de depuracion recolectados como sentencias console.log() del navegador.
+ * Llamar al final de funciones que retornan HTML, agregando el resultado
+ * a la cadena HTML antes de retornarla.
+ *
+ * Usage: return $smarty->fetch("template.tpl") . _cc_debug_flush_html();
+ *       ES: return $smarty->fetch("plantilla.tpl") . _cc_debug_flush_html();
+ *
+ * @return string HTML script tags with console.log calls, or empty string
+ *         ES: Etiquetas HTML script con llamadas console.log, o cadena vacia
+ */
+if (!function_exists('_cc_debug_flush_html')) {
+function _cc_debug_flush_html()
+{
+    if (empty($GLOBALS['CALLCENTER_DEBUG'])) return '';
+    if (empty($GLOBALS['_CC_DEBUG_MESSAGES'])) return '';
+
+    $output = "<script>\n";
+    foreach ($GLOBALS['_CC_DEBUG_MESSAGES'] as $msg) {
+        $escaped = str_replace(array("\\", "'", "\n", "\r", "</"),
+                               array("\\\\", "\\'", "\\n", "\\r", "<\\/"), $msg);
+        $output .= "console.log('[CC_DEBUG] ' + '" . $escaped . "');\n";
+    }
+    $output .= "</script>\n";
+
+    $GLOBALS['_CC_DEBUG_MESSAGES'] = array();
+    return $output;
+}
+}
+
+/**
+ * Attach collected debug messages to a JSON response array.
+ * Call this before encoding the response to JSON.
+ * Client-side JavaScript can optionally read response._cc_debug
+ * and log each entry via console.log().
+ *
+ * ES: Adjuntar los mensajes de depuracion recolectados a un arreglo de respuesta JSON.
+ * Llamar antes de codificar la respuesta a JSON.
+ *
+ * Usage: _cc_debug_attach_json($respuesta); return $json->encode($respuesta);
+ *       ES: _cc_debug_attach_json($respuesta); return $json->encode($respuesta);
+ *
+ * @param array &$response The response array to attach debug messages to
+ *                         ES: Arreglo de respuesta al que se adjuntan los mensajes
+ */
+if (!function_exists('_cc_debug_attach_json')) {
+function _cc_debug_attach_json(&$response)
+{
+    if (empty($GLOBALS['CALLCENTER_DEBUG'])) return;
+    if (empty($GLOBALS['_CC_DEBUG_MESSAGES'])) return;
+
+    $response['_cc_debug'] = $GLOBALS['_CC_DEBUG_MESSAGES'];
+    $GLOBALS['_CC_DEBUG_MESSAGES'] = array();
+}
+}
 ?>
