@@ -2,6 +2,40 @@
 
 ---
 
+## 40. Fix Transfer Reservation Leak on Extension Parsing Failure
+**Date**: 2026-03-07
+
+**Files**:
+- `setup/dialer_process/dialer/ECCPConn.class.php` (added reservation cleanup on early returns)
+
+**Issue**: In `Request_agentauth_transfercallagent()`, after acquiring an atomic transfer reservation via `AMIEventProcess_reservarAgenteParaTransferencia()`, there were two early-return paths that did not release the reservation:
+1. When target agent's extension could not be determined from their channel (`sTargetExtension` is NULL)
+2. When agent number could not be parsed for Agent-type agents (`sAgentNumber` is NULL)
+
+In these edge cases, the target agent remained blocked in `_agentesEnTransferPendiente` for 30 seconds until the timeout alarm fired, preventing any other transfers to that agent.
+
+**Fix**: Added `msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent)` call before both early returns to immediately release the reservation.
+
+**Example of the problem**:
+```
+Before fix:
+  1. Reservation granted for target Agent/1002
+  2. ExtensionState check passes
+  3. Channel parsing fails (edge case)
+  4. Error returned to client
+  5. Target agent blocked for 30 seconds until timeout
+
+After fix:
+  1. Reservation granted for target Agent/1002
+  2. ExtensionState check passes
+  3. Channel parsing fails (edge case)
+  4. Reservation released immediately
+  5. Error returned to client
+  6. Target agent available immediately
+```
+
+---
+
 ## 39. Centralized Debug Infrastructure for Web Modules
 **Date**: 2026-03-07
 

@@ -3424,36 +3424,41 @@ SQL_INSERTAR_AGENDAMIENTO;
             return $xml_response;
         }
 
-        // Get target agent info
-        // Obtener información del agente destino
+        // === STEP 1: Atomic validation + reservation via AMIEventProcess RPC ===
+        // This single RPC call atomically: validates all dialer-side state + acquires transfer lock
+        // Esta única llamada RPC atómicamente: valida todo el estado del dialer + adquiere bloqueo de transferencia
+        $this->_log->output('INFO: '.__METHOD__.": Requesting transfer reservation: source=$sAgente, target=$sTargetAgent | ES: Solicitando reserva de transferencia: origen=$sAgente, destino=$sTargetAgent");
+
+        $reserveResult = $this->_tuberia->AMIEventProcess_reservarAgenteParaTransferencia($sAgente, $sTargetAgent);
+
+        if (is_null($reserveResult) || !$reserveResult['success']) {
+            $sErrorCode = is_null($reserveResult) ? 500 : $reserveResult['error_code'];
+            $sErrorMsg = is_null($reserveResult) ? 'Internal communication error | Error interno de comunicación' : $reserveResult['error_msg'];
+            $sStatus = is_null($reserveResult) ? 'error' : $reserveResult['status'];
+            $this->_log->output('ERR: '.__METHOD__.": Transfer reservation DENIED: status=$sStatus, target=$sTargetAgent | ES: Reserva de transferencia DENEGADA: estado=$sStatus, destino=$sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, $sErrorCode, $sErrorMsg);
+            return $xml_response;
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": Transfer reservation granted, checking Asterisk device state | ES: Reserva de transferencia concedida, verificando estado de dispositivo Asterisk");
+
+        // === STEP 2: Belt-and-suspenders - Direct Asterisk device state check ===
+        // This queries Asterisk directly via AMI ExtensionState for real-time device state
+        // Esto consulta Asterisk directamente vía AMI ExtensionState para estado de dispositivo en tiempo real
+        $bDeviceStateOk = $this->_checkExtensionState($sTargetAgent, $xml_transferResponse);
+        if (!$bDeviceStateOk) {
+            // Release the reservation since we're aborting the transfer
+            // Liberar la reserva ya que abortamos la transferencia
+            $this->_log->output('WARN: '.__METHOD__.": ExtensionState check FAILED, releasing reservation for $sTargetAgent | ES: Verificación ExtensionState FALLÓ, liberando reserva para $sTargetAgent");
+            $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
+            return $xml_response;
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": All checks passed for transfer to $sTargetAgent | ES: Todas las verificaciones pasaron para transferencia a $sTargetAgent");
+
+        // Get target agent info for extension extraction (validated as existing by reservation RPC)
+        // Obtener info del agente destino para extracción de extensión (ya validado como existente por RPC de reserva)
         $infoTargetAgent = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sTargetAgent);
-        if (is_null($infoTargetAgent)) {
-            $this->_log->output('ERR: '.__METHOD__.": Agente destino no existe | EN: ERR: ".__METHOD__.": Target agent does not exist - $sTargetAgent");
-            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Target agent not found');
-            return $xml_response;
-        }
-
-        // Check target agent status - must be online, not on call, not paused
-        // Verificar estado del agente destino - debe estar online, no en llamada, no en pausa
-        $sTargetStatus = NULL;
-        if ($infoTargetAgent['oncall']) {
-            $sTargetStatus = 'oncall';
-            $sErrorMsg = 'Target agent is busy | Agente destino está ocupado';
-        } elseif ($infoTargetAgent['num_pausas'] > 0) {
-            $sTargetStatus = 'paused';
-            $sErrorMsg = 'Target agent is on pause | Agente destino está en pausa';
-        } elseif ($infoTargetAgent['estado_consola'] != 'logged-in') {
-            $sTargetStatus = 'offline';
-            $sErrorMsg = 'Target agent is not logged in | Agente destino no está conectado';
-        } else {
-            $sTargetStatus = 'online';
-        }
-
-        if ($sTargetStatus != 'online') {
-            $this->_log->output('ERR: '.__METHOD__.": Agente destino no disponible: $sTargetStatus | EN: ERR: ".__METHOD__.": Target agent not available: $sTargetStatus - $sTargetAgent");
-            $this->_agregarRespuestaFallo($xml_transferResponse, 417, $sErrorMsg);
-            return $xml_response;
-        }
 
         // Get target agent's extension for the transfer
         // Obtener extensión del agente destino para la transferencia
@@ -3483,6 +3488,7 @@ SQL_INSERTAR_AGENDAMIENTO;
         if (is_null($sTargetExtension)) {
             $this->_log->output('ERR: '.__METHOD__.": No se puede determinar extensión del agente destino | EN: ERR: ".__METHOD__.": Cannot determine target agent extension - $sTargetAgent");
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine target agent extension');
+            $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
             return $xml_response;
         }
 
@@ -3495,6 +3501,7 @@ SQL_INSERTAR_AGENDAMIENTO;
             if (is_null($sAgentNumber)) {
                 $this->_log->output('ERR: '.__METHOD__.": No se puede determinar número de agente | EN: ERR: ".__METHOD__.": Cannot determine agent number - $sTargetAgent");
                 $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine agent number');
+                $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
                 return $xml_response;
             }
             $sTargetContext = 'agents';
@@ -3523,6 +3530,10 @@ SQL_INSERTAR_AGENDAMIENTO;
                 $sCanalRemoto.' a '.$sRedirectTarget.' - '.$r['Message'].
                 ' | EN: ERR: '.__METHOD__.': Agent transfer failed: cannot transfer '.
                 $sCanalRemoto.' to '.$sRedirectTarget.' - '.$r['Message']);
+            // Release the transfer reservation on Redirect failure
+            // Liberar la reserva de transferencia por falla en Redirect
+            $this->_log->output('WARN: '.__METHOD__.": Redirect failed, releasing transfer reservation for $sTargetAgent | ES: Redirect falló, liberando reserva de transferencia para $sTargetAgent");
+            $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call to agent');
             return $xml_response;
         } else {
@@ -3549,6 +3560,75 @@ SQL_INSERTAR_AGENDAMIENTO;
             'UPDATE '.(($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls').
             ' SET transfer = ? WHERE id = ?');
         $sth->execute(array($sExtension, $infoLlamada['callid']));
+    }
+
+    /**
+     * Check Asterisk device state for target agent via AMI ExtensionState command.
+     * Returns TRUE if the device is available, FALSE if busy (and populates error response).
+     * Fails open (returns TRUE) if AMI query fails — non-fatal, proceed with transfer.
+     *
+     * Verifica el estado del dispositivo Asterisk del agente destino vía AMI ExtensionState.
+     * Devuelve TRUE si disponible, FALSE si ocupado (y genera respuesta de error).
+     * Falla abierto (devuelve TRUE) si la consulta AMI falla — no fatal, proceder con transferencia.
+     */
+    private function _checkExtensionState($sTargetAgent, $xml_transferResponse)
+    {
+        // Determine extension and context based on agent type
+        // Determinar extensión y contexto según tipo de agente
+        if (strpos($sTargetAgent, 'Agent/') === 0) {
+            // Agent type: check agent number in 'agents' context
+            $regs = NULL;
+            if (preg_match('|^Agent/(\d+)|', $sTargetAgent, $regs)) {
+                $sExten = $regs[1];
+                $sContext = 'agents';
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.": Cannot parse Agent number from $sTargetAgent, skipping ExtensionState check | ES: No se puede parsear número de Agent de $sTargetAgent, omitiendo verificación ExtensionState");
+                return TRUE; // Cannot parse, fail-open
+            }
+        } else {
+            // Callback type (SIP/PJSIP/IAX2): extract extension number, check in from-internal
+            $regs = NULL;
+            if (preg_match('|^\w+/(\d+)|', $sTargetAgent, $regs)) {
+                $sExten = $regs[1];
+                $sContext = 'from-internal';
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.": Cannot parse extension from $sTargetAgent, skipping ExtensionState check | ES: No se puede parsear extensión de $sTargetAgent, omitiendo verificación ExtensionState");
+                return TRUE; // Cannot parse, fail-open
+            }
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": Querying ExtensionState for $sExten@$sContext (agent=$sTargetAgent) | ES: Consultando ExtensionState para $sExten@$sContext (agente=$sTargetAgent)");
+
+        $r = $this->_ami->ExtensionState($sExten, $sContext);
+        if ($r['Response'] != 'Success') {
+            $sMsg = isset($r['Message']) ? $r['Message'] : 'unknown';
+            $this->_log->output('WARN: '.__METHOD__.": ExtensionState query failed for $sExten@$sContext: $sMsg — proceeding with transfer (fail-open) | ES: Consulta ExtensionState falló para $sExten@$sContext: $sMsg — procediendo con transferencia (falla abierta)");
+            return TRUE; // Fail-open: don't block transfer if AMI query fails
+        }
+
+        $iStatus = (int)$r['Status'];
+        $this->_log->output('INFO: '.__METHOD__.": ExtensionState result for $sExten@$sContext: Status=$iStatus | ES: Resultado ExtensionState para $sExten@$sContext: Status=$iStatus");
+
+        // ExtensionState uses bitmask values (different from AST_DEVICE_* queue constants):
+        // 0=Idle, 1=InUse, 2=Busy, 4=Unavailable, 8=Ringing, 16=OnHold, -1=Not found
+        // These are bitmask flags, so Status=9 means InUse+Ringing
+        $BUSY_MASK = 1 | 2 | 8 | 16; // InUse | Busy | Ringing | OnHold
+        if ($iStatus > 0 && ($iStatus & $BUSY_MASK)) {
+            $aFlags = array();
+            if ($iStatus & 1)  $aFlags[] = 'InUse';
+            if ($iStatus & 2)  $aFlags[] = 'Busy';
+            if ($iStatus & 8)  $aFlags[] = 'Ringing';
+            if ($iStatus & 16) $aFlags[] = 'OnHold';
+            $sFlagStr = implode('+', $aFlags);
+
+            $this->_log->output('ERR: '.__METHOD__.": Asterisk device state check FAILED for $sExten@$sContext: Status=$iStatus ($sFlagStr) | ES: Verificación de estado de dispositivo FALLÓ para $sExten@$sContext: Status=$iStatus ($sFlagStr)");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417,
+                "Target agent device is busy | Dispositivo del agente destino ocupado ");
+            return FALSE;
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": ExtensionState check PASSED for $sExten@$sContext: Status=$iStatus (Idle) | ES: Verificación ExtensionState PASÓ para $sExten@$sContext: Status=$iStatus (Disponible)");
+        return TRUE;
     }
 
     private function Request_agentauth_hold($comando)

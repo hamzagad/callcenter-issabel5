@@ -46,6 +46,7 @@ class AMIEventProcess extends TuberiaProcess
     private $_listaLlamadas;
     private $_agentesEnAtxferComplete = array(); // Agents completing attended transfer (suppress Agentlogoff)
     private $_agentesEnConsultation = array();   // Agents in attended transfer consultation (callback type)
+    private $_agentesEnTransferPendiente = array(); // Agents with pending blind transfer (prevent double transfer)
 
     // Estimación de la versión de Asterisk que se usa
     // Estimation of the Asterisk version being used
@@ -125,7 +126,8 @@ class AMIEventProcess extends TuberiaProcess
         // Register event handlers from ECCPWorkerProcess
         foreach (array('quitarBreakAgente',
             'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia',
-            'marcarConsultationIniciada') as $k)
+            'marcarConsultationIniciada',
+            'liberarReservaTransferencia') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
         foreach (array('prepararAtxferComplete',
             'agregarIntentoLoginAgente', 'infoSeguimientoAgente',
@@ -135,7 +137,8 @@ class AMIEventProcess extends TuberiaProcess
             'infoSeguimientoAgentesCola', 'reportarInfoLlamadaAgendada',
             'iniciarBreakAgente', 'iniciarHoldAgente',
             'esAgenteEnAtxferComplete',
-            'esAgenteEnConsultation') as $k)
+            'esAgenteEnConsultation',
+            'reservarAgenteParaTransferencia') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "rpc_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
@@ -1190,6 +1193,17 @@ class AMIEventProcess extends TuberiaProcess
         $fAfterFinalize = microtime(TRUE);
         $fElapsed = ($fAfterFinalize - $fBeforeFinalize) * 1000;
         $this->_log->output("TIMING: ".__METHOD__.": [AFTER_FINALIZE] Agent=$sAgente, elapsed_ms=".round($fElapsed,3).", agent_call_null=".(is_null($a->llamada)?'YES':'NO').", microtime=$fAfterFinalize | ES: Después de llamadaFinalizaSeguimiento");
+
+        // Clear transfer reservation if source agent had one pending
+        // Limpiar reserva de transferencia si el agente origen tenía una pendiente
+        foreach ($this->_agentesEnTransferPendiente as $sTarget => $info) {
+            if ($info['source_agent'] == $sAgente) {
+                $this->_cancelarAlarma($info['alarm_key']);
+                unset($this->_agentesEnTransferPendiente[$sTarget]);
+                $this->_log->output('INFO: '.__METHOD__.": Transfer reservation auto-cleared for target=$sTarget (source=$sAgente finalized) | ES: Reserva de transferencia auto-limpiada para destino=$sTarget (origen=$sAgente finalizado)");
+                break;
+            }
+        }
     }
 
     private function _quitarSilencio($llamada)
@@ -1801,6 +1815,150 @@ class AMIEventProcess extends TuberiaProcess
         $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
             array('ConsultationStart', array($sAgente))
         ));
+    }
+
+    /**
+     * Atomically validate target agent availability AND acquire transfer reservation.
+     * This runs in AMIEventProcess (single process), so check-and-set is inherently atomic.
+     *
+     * Validar atómicamente la disponibilidad del agente destino Y adquirir reserva de transferencia.
+     * Esto corre en AMIEventProcess (proceso único), así que verificar-y-establecer es inherentemente atómico.
+     */
+    private function _reservarAgenteParaTransferencia($sSourceAgent, $sTargetAgent)
+    {
+        $this->_log->output('INFO: '.__METHOD__.": Validating transfer reservation: source=$sSourceAgent, target=$sTargetAgent | ES: Validando reserva de transferencia: origen=$sSourceAgent, destino=$sTargetAgent");
+
+        // 1. Find target agent
+        $a = $this->_listaAgentes->buscar('agentchannel', $sTargetAgent);
+        if (is_null($a)) {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent not found: $sTargetAgent | ES: Agente destino no encontrado: $sTargetAgent");
+            return array('success' => false, 'error_code' => 404,
+                'error_msg' => 'Target agent not found | Agente destino no encontrado',
+                'status' => 'not_found');
+        }
+
+        // 2. Check if another transfer is already pending to this agent (RACE CONDITION PREVENTION)
+        if (isset($this->_agentesEnTransferPendiente[$sTargetAgent])) {
+            $pendingInfo = $this->_agentesEnTransferPendiente[$sTargetAgent];
+            $this->_log->output('WARN: '.__METHOD__.": Transfer to $sTargetAgent already in progress from {$pendingInfo['source_agent']} (since ".date('H:i:s', $pendingInfo['timestamp']).") | ES: Transferencia a $sTargetAgent ya en progreso desde {$pendingInfo['source_agent']}");
+            return array('success' => false, 'error_code' => 409,
+                'error_msg' => 'Transfer to target agent already in progress | Transferencia al agente destino ya en progreso',
+                'status' => 'transfer_pending');
+        }
+
+        // 3. Check agent is logged in
+        if ($a->estado_consola != 'logged-in') {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent not logged in: $sTargetAgent (estado_consola={$a->estado_consola}) | ES: Agente destino no conectado: $sTargetAgent");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => 'Target agent is not logged in | Agente destino no está conectado',
+                'status' => 'offline');
+        }
+
+        // 4. Check agent is not on a call (dialer internal state)
+        if (!is_null($a->llamada)) {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent is on call: $sTargetAgent | ES: Agente destino está en llamada: $sTargetAgent");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => 'Target agent is busy | Agente destino está ocupado',
+                'status' => 'oncall');
+        }
+
+        // 5. Check agent is not paused (break or hold)
+        if ($a->num_pausas > 0) {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent is paused: $sTargetAgent (num_pausas={$a->num_pausas}) | ES: Agente destino está en pausa: $sTargetAgent");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => 'Target agent is on pause | Agente destino está en pausa',
+                'status' => 'paused');
+        }
+
+        // 6. Check Asterisk device state via cached queue_status
+        $max_queue_status = AST_DEVICE_UNKNOWN;
+        foreach ($a->colas_actuales as $queue) {
+            $status = $a->estadoEnCola($queue);
+            if ($status > $max_queue_status) $max_queue_status = $status;
+        }
+        $busyDeviceStates = array(AST_DEVICE_INUSE, AST_DEVICE_BUSY, AST_DEVICE_RINGING, AST_DEVICE_RINGINUSE, AST_DEVICE_ONHOLD);
+        if (in_array($max_queue_status, $busyDeviceStates)) {
+            $statusNames = array(
+                AST_DEVICE_INUSE => 'INUSE', AST_DEVICE_BUSY => 'BUSY',
+                AST_DEVICE_RINGING => 'RINGING', AST_DEVICE_RINGINUSE => 'RINGINUSE',
+                AST_DEVICE_ONHOLD => 'ONHOLD'
+            );
+            $sStatusName = isset($statusNames[$max_queue_status]) ? $statusNames[$max_queue_status] : 'UNKNOWN_'.$max_queue_status;
+            $this->_log->output('ERR: '.__METHOD__.": Target agent device is busy: $sTargetAgent (queue_status=$max_queue_status/$sStatusName) | ES: Dispositivo del agente destino ocupado: $sTargetAgent (estado_cola=$max_queue_status/$sStatusName)");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => "Target agent device is busy | Es: Dispositivo del agente destino ocupado ",
+                'status' => 'device_busy', 'queue_status' => $max_queue_status);
+        }
+
+        // 7. ALL CHECKS PASSED - Atomically set reservation with 30s timeout
+        $sAlarmKey = $this->_agregarAlarma(30, array($this, '_timeoutReservaTransferencia'), array($sTargetAgent));
+        $this->_agentesEnTransferPendiente[$sTargetAgent] = array(
+            'timestamp'    => time(),
+            'source_agent' => $sSourceAgent,
+            'alarm_key'    => $sAlarmKey,
+        );
+
+        $this->_log->output('INFO: '.__METHOD__.": Transfer reservation ACQUIRED for target=$sTargetAgent by source=$sSourceAgent (alarm=$sAlarmKey, queue_status=$max_queue_status) | ES: Reserva de transferencia ADQUIRIDA para destino=$sTargetAgent por origen=$sSourceAgent");
+
+        return array('success' => true, 'status' => 'reserved');
+    }
+
+    /**
+     * Safety-net timeout: clear stale transfer reservation after 30 seconds.
+     * Tiempo límite de seguridad: limpiar reserva de transferencia obsoleta después de 30 segundos.
+     */
+    private function _timeoutReservaTransferencia($sTargetAgent)
+    {
+        if (isset($this->_agentesEnTransferPendiente[$sTargetAgent])) {
+            $info = $this->_agentesEnTransferPendiente[$sTargetAgent];
+            $this->_log->output('WARN: '.__METHOD__.": Transfer reservation EXPIRED for target=$sTargetAgent (source={$info['source_agent']}, age=".(time() - $info['timestamp'])."s) | ES: Reserva de transferencia EXPIRADA para destino=$sTargetAgent (origen={$info['source_agent']})");
+            unset($this->_agentesEnTransferPendiente[$sTargetAgent]);
+        }
+    }
+
+    /**
+     * Explicitly release a transfer reservation (called when Redirect fails or ExtensionState rejects).
+     * Liberar explícitamente una reserva de transferencia (llamado cuando Redirect falla o ExtensionState rechaza).
+     */
+    private function _liberarReservaTransferencia($sTargetAgent)
+    {
+        if (isset($this->_agentesEnTransferPendiente[$sTargetAgent])) {
+            $info = $this->_agentesEnTransferPendiente[$sTargetAgent];
+            $this->_cancelarAlarma($info['alarm_key']);
+            unset($this->_agentesEnTransferPendiente[$sTargetAgent]);
+            $this->_log->output('INFO: '.__METHOD__.": Transfer reservation RELEASED for target=$sTargetAgent (source={$info['source_agent']}) | ES: Reserva de transferencia LIBERADA para destino=$sTargetAgent (origen={$info['source_agent']})");
+        } else {
+            $this->_log->output('DEBUG: '.__METHOD__.": No transfer reservation found for target=$sTargetAgent (already cleared) | ES: No se encontró reserva de transferencia para destino=$sTargetAgent (ya limpiada)");
+        }
+    }
+
+    /**
+     * RPC wrapper for transfer reservation.
+     * Validates all state atomically and acquires lock.
+     */
+    public function rpc_reservarAgenteParaTransferencia($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
+        }
+        list($sSourceAgent, $sTargetAgent) = $datos;
+        $this->_tuberia->enviarRespuesta($sFuente,
+            $this->_reservarAgenteParaTransferencia($sSourceAgent, $sTargetAgent));
+    }
+
+    /**
+     * Message handler wrapper for releasing transfer reservation.
+     * Called when transfer fails or needs to be aborted.
+     */
+    public function msg_liberarReservaTransferencia($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
+        }
+        list($sTargetAgent) = $datos;
+        $this->_liberarReservaTransferencia($sTargetAgent);
     }
 
     public function msg_UserEvent($sEvent, $params, $sServer, $iPort)
@@ -3400,6 +3558,17 @@ Uniqueid: 1429642067.241008
             // === TIMESTAMP TRACKER: After updating agent queue status ===
             $fAfterUpdate = microtime(TRUE);
             $this->_log->output("TIMING: ".__METHOD__.": [AFTER_UPDATE] Agent=$sAgente, queue={$params['Queue']}, status=$iStatus, elapsed_ms=".round(($fAfterUpdate - $fQmsMicrotime) * 1000, 3)." | ES: Después de actualizar estado en cola");
+
+            // If target agent has pending transfer reservation and device state resolved, clear it
+            // Si el agente destino tiene reserva de transferencia pendiente y el estado del dispositivo se resolvió, limpiarla
+            if (isset($this->_agentesEnTransferPendiente[$sAgente])) {
+                if ($params['Status'] == AST_DEVICE_INUSE || $params['Status'] == AST_DEVICE_NOT_INUSE) {
+                    $info = $this->_agentesEnTransferPendiente[$sAgente];
+                    $this->_cancelarAlarma($info['alarm_key']);
+                    unset($this->_agentesEnTransferPendiente[$sAgente]);
+                    $this->_log->output('INFO: '.__METHOD__.": Transfer reservation cleared for target=$sAgente via QueueMemberStatus (Status={$params['Status']}) | ES: Reserva de transferencia limpiada para destino=$sAgente via QueueMemberStatus (Status={$params['Status']})");
+                }
+            }
         } else {
             if ($this->DEBUG) {
                 $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora | EN: agent '.$sAgente.' is not a registered agent in the callcenter, ignoring');
@@ -3850,6 +4019,13 @@ Uniqueid: 1429642067.241008
             foreach ($cuenta as $ev => $cnt)
                 $this->_log->output("\t".str_pad($ev, $padlen, '.').'...'.sprintf("%6d", $cnt));
         }
+
+        // Dump pending transfer reservations
+        $this->_log->output('INFO: '.__METHOD__.' agentes con transferencia pendiente / agents with pending transfer: '.
+            (count($this->_agentesEnTransferPendiente) > 0
+                ? print_r($this->_agentesEnTransferPendiente, TRUE)
+                : '(ninguno/none)'));
+
         $this->_log->output('INFO: '.__METHOD__.' fin de volcado status de seguimiento... | EN: end of tracking status dump...');
     }
 
