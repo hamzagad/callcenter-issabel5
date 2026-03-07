@@ -203,7 +203,7 @@ grep -E "AGENT_FREE|predictive" /opt/issabel/dialer/dialerd.log | tail -30
 
 ---
 
-## 33. Agent-to-Agent Transfer Feature
+## 35.1. Agent-to-Agent Transfer Feature
 **Date**: 2026-03-06
 
 **Files**:
@@ -263,7 +263,7 @@ grep -E "AGENT_FREE|predictive" /opt/issabel/dialer/dialerd.log | tail -30
 
 ---
 
-## 33.1. Fix: Agent Type Transfer Using Correct Agent Number
+## 35.2. Fix: Agent Type Transfer Using Correct Agent Number
 **Date**: 2026-03-06
 
 **Files**:
@@ -295,7 +295,7 @@ grep -E "AGENT_FREE|predictive" /opt/issabel/dialer/dialerd.log | tail -30
 
 ---
 
-## 32. New ECCP Example Files
+## 33. New ECCP Example Files
 **Date**: 2026-03-06
 
 **Files**:
@@ -328,6 +328,25 @@ su - asterisk -c "/opt/issabel/dialer/eccp-examples/saveformdata.php Agent/9000 
 ```
 
 **Documentation**: See `ECCP_EXAMPLES.md` for complete ECCP method coverage analysis and usage details.
+
+---
+
+## 32. Full UTF-8 (utf8mb4) Database Support
+**Date**: 2026-03-05
+
+**Files**:
+- `setup/call_center.sql`
+- `setup/installer.php`
+
+**Issue**: The `call_center` database used mixed charsets — most tables were `utf8` (3-byte, no emoji/supplementary Unicode support) and 5 tables (`campaign_entry`, `campaign_form_entry`, `form_data_recolected_entry`, `dont_call`, `valor_config`) defaulted to `latin1` due to missing explicit charset in CREATE TABLE statements. User-facing text fields like form data, campaign names, and scripts could not store full Unicode characters (emojis, CJK supplementary).
+
+**Fix**:
+- **call_center.sql**: Changed all `DEFAULT CHARSET=utf8` to `DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`. Added explicit charset to the 5 tables that were missing it. Changed `SET NAMES utf8` to `SET NAMES utf8mb4`. Added migration procedure `temp_charset_utf8mb4_2026_03_05` that converts any remaining non-utf8mb4 tables via cursor.
+- **installer.php**: Added `convertirCharsetUtf8mb4()` function that queries `INFORMATION_SCHEMA.TABLES` for non-utf8mb4 tables and runs `ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci` on each.
+
+**Key columns affected**: `form_data_recolected.value`, `form_data_recolected_entry.value`, `campaign.name`, `campaign.script`, `campaign_entry.name`, `campaign_entry.script`, `agent.name`, `form_field.etiqueta`, `form.nombre`, `contact.name`, among others.
+
+**Code compatibility**: No code changes needed — the system-wide `paloSantoDB.class.php` and `agent_console` local copy already use `charset=utf8mb4` in PDO DSN connections. No indexed text columns exceed key length limits.
 
 ---
 
