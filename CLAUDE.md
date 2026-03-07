@@ -97,6 +97,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Asterisk conf files: `/etc/asterisk/`
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
 - Always use English language for the added code, comments, variables, and functions, but logs should be added in En and Es
+- TODOs are always added to TODOS.md file
 - **IMPORTANT**: Always modify the live system, don't copy the modified files the repo unless I explicitly asked
 - **IMPORTANT**: Always check your modifications will not affect any other functionality
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
