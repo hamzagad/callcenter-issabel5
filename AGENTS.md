@@ -8,7 +8,7 @@ Issabel Call Center is a predictive dialer and call center solution built on Ast
 - **Dialer Daemon**: Multi-process PHP daemon (`/opt/issabel/dialer/`)
 - **Web Modules**: 31 modules in `/var/www/html/modules/`
 
-Target environment: CentOS 7 / Rocky 8, PHP 5.4-7.4, Asterisk 11/13/18, MariaDB.
+Target environment: Rocky 8, PHP 5.4-8.0, Asterisk 11/13/18, MariaDB.
 
 ## Build/Install Commands
 
@@ -24,12 +24,6 @@ systemctl stop issabeldialer
 
 # Manual dialer start (debug mode, foreground)
 su - asterisk -c "/opt/issabel/dialer/dialerd -d"
-
-# Check dialer logs
-tail -f /opt/issabel/dialer/dialerd.log
-
-# Check web server errors
-tail -f /var/log/httpd/ssl_error_log
 ```
 
 ## Testing
@@ -50,34 +44,11 @@ grep -E "(schedule|ERROR|ERR)" /opt/issabel/dialer/dialerd.log | tail -50
 
 ## Code Style Guidelines
 
-### File Header
-
-All PHP files must include the GPL2 license header:
-
-```php
-<?php
-/* vim: set expandtab tabstop=4 softtabstop=4 shiftwidth=4:
-  Codificación: UTF-8
-  +----------------------------------------------------------------------+
-  | Issabel version 1.2-2                                                |
-  | http://www.issabel.org                                               |
-  +----------------------------------------------------------------------+
-  | Copyright (c) 2006 Palosanto Solutions S. A.                         |
-  +----------------------------------------------------------------------+
-  | The contents of this file are subject to the General Public License  |
-  | (GPL) Version 2 (the "License"); you may not use this file except in |
-  | compliance with the License. You may obtain a copy of the License at |
-  | http://www.opensource.org/licenses/gpl-license.php                   |
-  +----------------------------------------------------------------------+
-  $Id$ */
-```
-
 ### Formatting
 
 - **Indentation**: 4 spaces (no tabs), expandtab
 - **Line endings**: Unix (LF)
 - **Encoding**: UTF-8
-- **Vim modeline**: Include at top of file
 - **PHP opening tag**: `<?php` (never `<?`)
 - **No trailing whitespace**
 
@@ -176,7 +147,7 @@ PETICION_AGENTES_AGENDADOS;
 
 ## Important Rules
 
-1. **Modify live system first** - Changes go to `/opt/issabel/dialer/` and `/var/www/html/modules/`, not just repo
+1. **Modify live system** - Changes go to `/opt/issabel/dialer/` and `/var/www/html/modules/`
 2. **Use `/bin/cp`** - Avoid shell alias issues with cp command
 3. **Dialer runs as asterisk user** - Never as root
 4. **Check impact** - Verify changes don't affect other functionality

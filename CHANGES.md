@@ -2,6 +2,20 @@
 
 ---
 
+## 42. Expand Transfer Dialog Size
+**Date**: 2026-03-07
+
+**Files**:
+- `modules/agent_console/themes/default/js/javascript.js`
+
+**Change**: Expanded transfer popup dimensions for better visibility:
+- Width: 400px → 600px (+50%)
+- Height: 200px → 320px (+60%)
+
+Dialog remains centered via jQuery UI modal positioning.
+
+---
+
 ## 41. Prevent Agent Type Login if Extension Used by Callback Extension Session
 **Date**: 2026-03-07
 
