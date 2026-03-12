@@ -55,7 +55,7 @@ Gracias a la colaboracion de Nicolás Gudiño, Julio pacheco, y comunidad de Iss
 ```bash
 # Full installation (run as root)
 cd /usr/src
-git clone https://github.com/ISSABELPBX/callcenter-issabel5.git callcenter
+git clone https://github.com/ISSABELPBX/callcenter-issabel5.git 
 cd callcenter
 # For local installation:
 bash build/5.0/install-issabel-callcenter.sh -l
