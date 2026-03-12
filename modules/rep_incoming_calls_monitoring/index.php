@@ -105,6 +105,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
     ));
 
     // Construcción del estado de monitoreo
+    // EN: Building of monitoring status
     $estadoMonitor = obtenerEstadoMonitor($oPaloConsola);
 
     $jsonData = construirDatosJSON($estadoMonitor);
@@ -127,6 +128,7 @@ function manejarMonitoreo_HTML($module_name, $smarty, $sDirLocalPlantillas, $oPa
     $arrData[] = $tupla;
 
     // Extraer la información que el navegador va a usar para actualizar
+    // EN: Extract information that browser will use to update
     $estadoCliente = $estadoMonitor;
     $estadoHash = generarEstadoHash($module_name, $estadoCliente);
 

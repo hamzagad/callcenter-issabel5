@@ -57,6 +57,7 @@ class paloSantoConfiguration {
                 'dialer.tiempo_contestar' => '8',
                 'dialer.debug' => '0',
                 'dialer.allevents' => '0',
+                'dialer.relatedevents' => '0',
                 'dialer.overcommit' => '0',
                 'dialer.qos' => '0.97',
                 'dialer.predictivo' => '1',
@@ -82,7 +83,7 @@ class paloSantoConfiguration {
                 $this->errMsg = $this->_DB->errMsg;
                 break;
             }
-            if ($dbfield == 'dialer.debug' || $dbfield == 'dialer.allevents') {
+            if ($dbfield == 'dialer.debug' || $dbfield == 'dialer.allevents' || $dbfield == 'dialer.relatedevents') {
                 if ($valor) {
                     $bContinuar = $this->_DB->genQuery(
                         'INSERT INTO valor_config (config_key, config_value) VALUES (?, ?)', 

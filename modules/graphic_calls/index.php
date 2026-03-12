@@ -25,6 +25,7 @@ require_once "libs/paloSantoForm.class.php";
 require_once "libs/misc.lib.php";
 require_once "libs/paloSantoConfig.class.php";
 require_once "libs/paloSantoGrid.class.php";
+require_once "modules/agent_console/libs/issabel2.lib.php";
 
 if (!function_exists('_tr')) {
     function _tr($s)
@@ -74,9 +75,11 @@ function _moduleContent(&$smarty, $module_name)
     $local_templates_dir = "$base_dir/modules/$module_name/".$templates_dir.'/'.$arrConf['theme'];
 
     // Conexión a la base de datos CallCenter
+    // EN: CallCenter database connection
     $pDB = new paloDB($arrConf['cadena_dsn']);
 
     // Mostrar pantalla correspondiente
+    // EN: Show corresponding screen
     $contenidoModulo = '';
     $sAction = 'list_campaign';
     if (isset($_GET['action'])) $sAction = $_GET['action'];
@@ -140,7 +143,6 @@ function listHistogram($pDB, $smarty, $module_name, $local_templates_dir)
     $oCalls = new paloSantoCallsHour($pDB);
     $arrCalls = $oCalls->getCalls($sTipoLlamada, $sEstadoLlamada, $sFechaInicial, $sFechaFinal);
 
-    // TODO: manejar error al obtener llamadas
     if (!is_array($arrCalls)) {
         $smarty->assign("mb_title", _tr("Validation Error"));
         $smarty->assign("mb_message", $oCalls->errMsg);

@@ -23,14 +23,16 @@ $Id: formulario $ */
 
 include_once("libs/paloSantoDB.class.php");
 /* Clase que implementa Formulario de Campanign de CallCenter (CC) */
+/* EN: Class that implements CallCenter (CC) Campaign Form */
 class paloSantoDataForm
 {
-    private $_db; // instancia de la clase paloDB
+    private $_db; // instancia de la clase paloDB // EN: paloDB class instance
     var $errMsg;
 
     function __construct($pDB)
     {
         // Se recibe como parámetro una referencia a una conexión paloDB
+        // EN: A reference to a paloDB connection is received as a parameter
         if (is_object($pDB)) {
             $this->_db =& $pDB;
             $this->errMsg = $this->_db->errMsg;
@@ -41,8 +43,10 @@ class paloSantoDataForm
             if (!$this->_db->connStatus) {
                 $this->errMsg = $this->_db->errMsg;
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             } else {
                 // debo llenar alguna variable de error
+                // EN: I must fill some error variable
             }
         }
 
@@ -108,6 +112,7 @@ class paloSantoDataForm
     }
     
     // Función exclusivamente para compatibilidad con campaign_out/campaign_in
+    // EN: Function exclusively for compatibility with campaign_out/campaign_in
     function getFormularios($id_formulario = NULL, $estatus='all')
     {
         if (is_null($id_formulario))
@@ -126,6 +131,7 @@ class paloSantoDataForm
         $campos = array();
         foreach ($recordset as $tuplacampo) {
             /* Convertir enumeración separada por comas en valores separados */
+            /* EN: Convert comma-separated enumeration into separate values */
             if ($tuplacampo['tipo'] == 'LIST') {
                 $enumval = explode(',', $tuplacampo['value']);
                 if (count($enumval) > 0 && $enumval[count($enumval) - 1] == '')
@@ -170,6 +176,7 @@ class paloSantoDataForm
         }
         
         // Revisar si hay campañas que referencian el formulario
+        // EN: Check if there are campaigns referencing the form
         foreach (array('campaign_form', 'campaign_form_entry') as $tabla) {
             $sQuery = "SELECT COUNT(*) AS N FROM $tabla WHERE id_form = ?";
             $tupla = $this->_db->getFirstRowQuery($sQuery, TRUE, array($id_formulario));
@@ -184,6 +191,7 @@ class paloSantoDataForm
         }
         
         // Ejecutar el borrado del formulario
+        // EN: Execute form deletion
         $this->_db->beginTransaction();
         $sqllist = array(
             'DELETE FROM form_field WHERE id_form = ?',
@@ -216,6 +224,7 @@ class paloSantoDataForm
         }
         
         // Asignar ordenamiento según posición de arreglo
+        // EN: Assign ordering according to array position
         for ($i = 0; $i < count($formfields); $i++) {
             $formfields[$i]['orden'] = $i + 1;
         }
@@ -223,6 +232,8 @@ class paloSantoDataForm
         /* Leer los datos de los campos anteriores, si existen. Se agregan o quitan
          * campos según existan. No se deben eliminar campos que tienen valores
          * ya recogidos. */
+        /* EN: Read existing field data, if any. Fields are added or removed */
+        /* EN: according to existence. Fields with collected values should not be deleted. */
         $camposExistentes = array();
         $camposBorrar = array();
         $camposActualizar = array();
@@ -230,6 +241,8 @@ class paloSantoDataForm
         $iNumCampaniasUsanForm = 0;
         if (!is_null($id)) {
             // Revisar si hay datos recolectados para este formulario
+            // EN: Check if there is collected data for this form
+            // EN: Check if there is collected data for this form
             foreach (array('form_data_recolected', 'form_data_recolected_entry') as $tabla) {
                 $sQuery =
                     "SELECT COUNT(*) AS N FROM form_field AS ff, $tabla AS fd ".
@@ -243,6 +256,7 @@ class paloSantoDataForm
             }
             
             // Leer los IDs de los campos del formulario
+            // EN: Read form field IDs
             $sQuery = 'SELECT id FROM form_field WHERE id_form = ?';
             $recordset = $this->_db->fetchTable($sQuery, TRUE, array($id));
             if (!is_array($recordset)) {
@@ -255,6 +269,7 @@ class paloSantoDataForm
         }
         
         // Clasificar los campos que se envían para actualizar
+        // EN: Classify fields sent for update
         $camposRef = array();
         foreach ($formfields as $field) {
             if (!in_array($field['tipo'], array('TEXT', 'LIST', 'DATE', 'TEXTAREA', 'LABEL'))) {
@@ -292,12 +307,14 @@ class paloSantoDataForm
         $camposBorrar = array_diff($camposExistentes, $camposRef);
         
         // No debe de borrarse campos de un formulario si lo usan las campañas
+        // EN: Fields of a form should not be deleted if campaigns use it
         if (count($camposBorrar) > 0 && $iNumCampaniasUsanForm > 0) {
             $this->errMsg = _tr("This form is been used by any campaign");
             return FALSE;
         }        
         
         // Ejecutar la actualización
+        // EN: Execute the update
         $this->_db->beginTransaction();
         if (is_null($id)) {
             $sql = 'INSERT INTO form (nombre, descripcion, estatus) VALUES (?, ?, "A")';
@@ -314,6 +331,7 @@ class paloSantoDataForm
         if (is_null($id)) $id = $this->_db->getLastInsertId();
         
         // Campos a borrar
+        // EN: Fields to delete
         foreach ($camposBorrar as $id_field) {
             if (!$this->_db->genQuery(
                 'DELETE FROM form_field WHERE id_form = ? AND id = ?',
@@ -325,6 +343,7 @@ class paloSantoDataForm
         }
         
         // Campos a actualizar
+        // EN: Fields to update
         foreach ($camposActualizar as $field) {
             if (!$this->_db->genQuery(
                 'UPDATE form_field SET etiqueta = ?, value = ?, tipo = ?, orden = ? WHERE id_form = ? AND id = ?',
@@ -337,6 +356,7 @@ class paloSantoDataForm
         }
         
         // Campos a insertar
+        // EN: Fields to insert
         foreach ($camposInsertar as $field) {
             if (!$this->_db->genQuery(
                 'INSERT INTO form_field (id_form, etiqueta, value, tipo, orden) VALUES (?, ?, ?, ?, ?)',

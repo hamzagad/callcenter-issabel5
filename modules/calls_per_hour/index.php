@@ -25,6 +25,7 @@ require_once "libs/paloSantoForm.class.php";
 require_once "libs/misc.lib.php";
 require_once "libs/paloSantoConfig.class.php";
 require_once "libs/paloSantoGrid.class.php";
+require_once "modules/agent_console/libs/issabel2.lib.php";
 
 if (!function_exists('_tr')) {
     function _tr($s)
@@ -137,7 +138,6 @@ function listHistogram($pDB, $smarty, $module_name, $local_templates_dir)
     $oCalls = new paloSantoCallsHour($pDB);
     $arrCalls = $oCalls->getCalls($sTipoLlamada, $sEstadoLlamada, $sFechaInicial, $sFechaFinal);
 
-    // TODO: manejar error al obtener llamadas
     if (!is_array($arrCalls)) {
         $smarty->assign("mb_title", _tr("Validation Error"));
         $smarty->assign("mb_message", $oCalls->errMsg);

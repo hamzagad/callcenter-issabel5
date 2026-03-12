@@ -22,12 +22,13 @@
   $Id: paloSantoDB.class.php, Thu 20 May 2021 07:59:25 AM EDT, nicolas@issabel.com
 */
 // La siguiente clase es una clase prototipo... Usela bajo su propio riesgo
+// EN: The following class is a prototype class... Use it at your own risk
 class paloDB {
 
-    var $conn;          // Referencia a la conexion activa a la DB
-    var $connStatus;    // Se asigna a VERDADERO si ocurrió error de DB
-    var $errMsg;        // Texto del mensaje de error
-    var $engine;        // Base de datos
+    var $conn;          // Referencia a la conexion activa a la DB // EN: Reference to active DB connection
+    var $connStatus;    // Se asigna a VERDADERO si ocurrió error de DB // EN: Assigned to TRUE if DB error occurred
+    var $errMsg;        // Texto del mensaje de error // EN: Error message text
+    var $engine;        // Base de datos // EN: Database
     private $_forceintcast = FALSE;
 
     /**
@@ -38,13 +39,21 @@ class paloDB {
      * En caso de error, se asigna VERDADERO a $this->connStatus y se asigna
      * en $this->errMsg la cadena de error de conexión.
      *
+     * EN: Class constructor, receives as parameter the PEAR DSN to use for
+     * database connection. The DSN must indicate as default base the base
+     * where ACLs are located. On success, FALSE is assigned to
+     * $this->connStatus. On error, TRUE is assigned to $this->connStatus
+     * and the connection error string is assigned to $this->errMsg.
+     *
      * @param string    $dsn    cadena de conexión, de la forma "mysql://user:password@dbhost/baseomision"
+     *                      EN: connection string, in the form "mysql://user:password@dbhost/database"
      */
-    function __construct($dsn) // Creo que aqui debo pasar el dsn
+    function __construct($dsn) // Creo que aqui debo pasar el dsn // EN: I think I must pass the dsn here
     {
         $this->_forceintcast = (explode(".", phpversion()) >= array(5, 3, 0));
 
         // Creo una conexion y hago login en la base de datos
+        // EN: Create a connection and login to the database
         $this->conn = NULL;
         $this->errMsg = "";
         if (is_object($dsn)) {
@@ -71,7 +80,7 @@ class paloDB {
                 $this->connStatus = false;  //logica negativa
                 $this->conn = new PDO($dsn, $user, $password);
             } catch (PDOException $e) {
-                $this->errMsg = "Error de conexion a la base de datos - " . $e->getMessage();
+                $this->errMsg = "Error de conexion a la base de datos - " . $e->getMessage(); // EN: Database connection error
                 $this->connStatus = true;
                 $this->conn = NULL;
             }
@@ -80,10 +89,13 @@ class paloDB {
 
     /**
      * Procedimiento para indicar la desconexión de la base de datos a PEAR
+     *
+     * EN: Procedure to indicate database disconnection to PEAR
      */
     function disconnect()
     {
         //Esta funcion deberia ser borrada pues se cambio de PEAR A PDO
+        // EN: This function should be deleted since we changed from PEAR to PDO
         //if (!is_null($this->conn)) $this->conn->disconnect();
     }
 
@@ -110,7 +122,14 @@ class paloDB {
                  * truncamiento de dicho cero. Véase bug Elastix #1694. Además
                  * debe evitarse la conversión a entero si la máquina no puede
                  * representar el número indicado como int debido a que excede
-                 * INT_MAX. Véase bug Elastix #2477.*/
+                 * INT_MAX. Véase bug Elastix #2477.
+                 * EN: The statement LIMIT '1' is illegal in MySQL due to quotes.
+                 * Therefore, numeric strings must be inserted as integers. However,
+                 * conversion should be avoided if the numeric string has a leading
+                 * zero, to avoid truncation of said zero. See Elastix bug #1694.
+                 * Also, conversion to integer should be avoided if the machine
+                 * cannot represent the indicated number as int because it exceeds
+                 * INT_MAX. See Elastix bug #2477.*/
                 $data_type =
                     (ctype_digit("{$param[$i]}") &&
                         ($param[$i][0] != '0' || strlen($param[$i]) == 1) &&
@@ -133,14 +152,21 @@ class paloDB {
      * En caso de error, se asigna mensaje a $this->errMsg
      * Nota: Solo usado para hacer manipulacion de los datos de la base.
      *
-     * @param string $query Sentencia SQL a ejecutar
+     * EN: Procedure to execute an SQL statement (DML Data Manipulation Language)
+     * that does not return result rows. On error, message is assigned to
+     * $this->errMsg. Note: Only used to manipulate database data.
+     *
+     * @param string $query Sentencia SQL a ejecutar // EN: SQL statement to execute
      * @param mixed  $param NULL, o parámetros a pasar a query parametrizado
+     *                      EN: NULL, or parameters to pass to parameterized query
      *
      * @return bool VERDADERO en caso de éxito, FALSO en caso de error
+     *              EN: TRUE on success, FALSE on error
      */
     function genQuery($query, $param = NULL)
     {
         // Revisar existencia de conexión activa
+        // EN: Check for active connection existence
         if ($this->connStatus) {
             return FALSE;
         } else {
@@ -180,12 +206,20 @@ class paloDB {
      * Procedimiento que recupera todas las filas resultado de una
      * petición SQL que devuelve una o más filas.
      *
+     * EN: Procedure that retrieves all result rows from an SQL request
+     * that returns one or more rows.
+     *
      * @param   string  $query          Cadena de la petición SQL
+     *                                  EN: SQL request string
      * @param   bool    $arr_colnames   VERDADERO si se desea que cada tupla tenga por
-     *  índice el nombre de columna
+     *                                  índice el nombre de columna
+     *                                  EN: TRUE if you want each tuple to have column
+     *                                  name as index
      * @param mixed  $param NULL, o parámetros a pasar a query parametrizado
+     *                  EN: NULL, or parameters to pass to parameterized query
      *
      * @return  mixed   Matriz de las filas de recordset en éxito, o FALSE en error
+     *                  EN: Matrix of recordset rows on success, or FALSE on error
      */
     function fetchTable($query, $arr_colnames = FALSE, $param = NULL)
     {
@@ -234,12 +268,20 @@ class paloDB {
      * una fila, un arreglo vacía si el query no devuelve ninguna fila, o FALSE
      * en caso de error.
      *
-     * @param   string  $query          Cadena de la petición SQL
+     * EN: Procedure to retrieve a single row from the query that returns one
+     * or more rows. Returns a row with fields if the query returns at least
+     * one row, an empty array if the query returns no rows, or FALSE on error.
+     *
+     * @param   string  $query          Cadena de la petición SQL // EN: SQL request string
      * @param   bool    $arr_colnames   VERDADERO si se desea que la tupla tenga por
-     *  índice el nombre de columna
+     *                                  índice el nombre de columna
+     *                                  EN: TRUE if you want the tuple to have column
+     *                                  name as index
      * @param mixed  $param NULL, o parámetros a pasar a query parametrizado
+     *                  EN: NULL, or parameters to pass to parameterized query
      *
      * @return  mixed   tupla del recordset en éxito, o FALSE en error
+     *                  EN: Recordset tuple on success, or FALSE on error
      */
     function getFirstRowQuery($query, $arr_colnames = FALSE, $param = NULL)
     {
@@ -260,14 +302,22 @@ class paloDB {
      * En caso de error, se asigna mensaje a $this->errMsg
      * Nota: Solo usado para crear definiones de la metadata y permisos.
      *
-     * @param string $query Sentencia SQL a ejecutar
+     * EN: Procedure to execute an SQL statement (DDL Data Definition Language,
+     * DCL Data Control Language) that does not return result rows. On error,
+     * message is assigned to $this->errMsg. Note: Only used to create metadata
+     * definitions and permissions.
+     *
+     * @param string $query Sentencia SQL a ejecutar // EN: SQL statement to execute
      * @param mixed  $param NULL, o parámetros a pasar a query parametrizado
+     *                      EN: NULL, or parameters to pass to parameterized query
      *
      * @return bool VERDADERO en caso de éxito, FALSO en caso de error
+     *              EN: TRUE on success, FALSE on error
      */
     function genExec($query, $param = NULL)
     {
         // Revisar existencia de conexión activa
+        // EN: Check for active connection existence
         if ($this->connStatus) {
             return false;
         } else {
@@ -308,9 +358,11 @@ class paloDB {
      * Procedimiento para obtener el ultimo id en AUTO_INCREMENT
      * en un insert
      *
-     * @param niguno
+     * EN: Procedure to get the last AUTO_INCREMENT id in an insert
      *
-     * @return string Valor del id ultimo generado
+     * @param niguno // EN: none
+     *
+     * @return string Valor del id ultimo generado // EN: Value of the last generated id
      */
     function getLastInsertId($objSequence = NULL)
     {
@@ -338,9 +390,10 @@ class paloDB {
 
     /**
      * Procedimiento para iniciar una Transaccción
-     * @param niguno
+     * EN: Procedure to start a Transaction
+     * @param niguno // EN: none
      *
-     * @return nada
+     * @return nada // EN: nothing
      */
     function beginTransaction()
     {
@@ -349,9 +402,10 @@ class paloDB {
 
      /**
      * Procedimiento de rollBack para Transaccción
-     * @param niguno
+     * EN: RollBack procedure for Transaction
+     * @param niguno // EN: none
      *
-     * @return nada
+     * @return nada // EN: nothing
      */
     function rollBack()
     {
@@ -360,9 +414,10 @@ class paloDB {
 
     /**
      * Procedimiento de commit para Transaccción
-     * @param niguno
+     * EN: Commit procedure for Transaction
+     * @param niguno // EN: none
      *
-     * @return nada
+     * @return nada // EN: nothing
      */
     function commit()
     {
@@ -373,9 +428,12 @@ class paloDB {
      * Procedimiento para escapar comillas y encerrar entre
      * comillas un valor de texto para una sentencia SQL
      *
-     * @param string  $sVal    Cadena de texto a escapar
+     * EN: Procedure to escape quotes and enclose in quotes a text value
+     * for an SQL statement
      *
-     * @return string Valor con las comillas escapadas
+     * @param string  $sVal    Cadena de texto a escapar // EN: Text string to escape
+     *
+     * @return string Valor con las comillas escapadas // EN: Value with escaped quotes
      */
     function DBCAMPO($sVal)
     {
@@ -394,10 +452,17 @@ class paloDB {
      * así que se debe usar DBCAMPO($val) si se requieren comillas
      * simples o escapes de comillas.
      *
-     * @param string    $sTabla     Nombre de la tabla de la base de datos
-     * @param array     $arrValores Arreglo asociativo de columna => expresion
+     * EN: Procedure to build an INSERT for a table. The table name is
+     * expected in $sTabla, and an associative array in $arrValores,
+     * which consists of <key> => <value> where <key> is the column to
+     * modify, and <value> is the expression to assign to the column.
+     * Single quotes are not inserted, so DBCAMPO($val) must be used if
+     * single quotes or quote escapes are required.
      *
-     * @return string   Cadena que representa al INSERT generado
+     * @param string    $sTabla     Nombre de la tabla de la base de datos // EN: Database table name
+     * @param array     $arrValores Arreglo asociativo de columna => expresion // EN: Associative array of column => expression
+     *
+     * @return string   Cadena que representa al INSERT generado // EN: String that represents the generated INSERT
      */
     function construirInsert($sTabla, $arrValores)
     {
@@ -426,10 +491,17 @@ class paloDB {
      * así que se debe usar DBCAMPO($val) si se requieren comillas
      * simples o escapes de comillas.
      *
-     * @param string    $sTabla     Nombre de la tabla de la base de datos
-     * @param array     $arrValores Arreglo asociativo de columna => expresion
+     * EN: Procedure to build a REPLACE for a table. The table name is
+     * expected in $sTabla, and an associative array in $arrValores,
+     * which consists of <key> => <value> where <key> is the column to
+     * modify, and <value> is the expression to assign to the column.
+     * Single quotes are not inserted, so DBCAMPO($val) must be used if
+     * single quotes or quote escapes are required.
      *
-     * @return string   Cadena que representa al REPLACE generado
+     * @param string    $sTabla     Nombre de la tabla de la base de datos // EN: Database table name
+     * @param array     $arrValores Arreglo asociativo de columna => expresion // EN: Associative array of column => expression
+     *
+     * @return string   Cadena que representa al REPLACE generado // EN: String that represents the generated REPLACE
      */
     function construirReplace($sTabla, $arrValores)
     {
@@ -460,11 +532,21 @@ class paloDB {
      * de una columna, con una especificación de igualdad a la expresión
      * indicada, si no es NULL, o equivalente a NULL.
      *
-     * @param string    $sTabla     Nombre de la tabla de la base de datos
-     * @param array     $arrValores Arreglo asociativo de columna => expresion
-     * @param array     $where      Arreglo que describe las condiciones WHERE
+     * EN: Procedure to build an UPDATE for a table. The $sTabla parameter
+     * contains the table to modify. The $arrValores parameter contains an
+     * associative array of the form <column_name> => <value_expression>.
+     * The $where parameter has, if not NULL, an associative array that is
+     * interpreted as follows: a numeric key indicates that the value is a
+     * complex expression built at the discretion of the code that called
+     * construirUpdate(). A text key is assumed to be the name of a column,
+     * with an equality specification to the indicated expression, if not
+     * NULL, or equivalent to NULL.
      *
-     * @return string Cadena que representa al UPDATE generado
+     * @param string    $sTabla     Nombre de la tabla de la base de datos // EN: Database table name
+     * @param array     $arrValores Arreglo asociativo de columna => expresion // EN: Associative array of column => expression
+     * @param array     $where      Arreglo que describe las condiciones WHERE // EN: Array that describes WHERE conditions
+     *
+     * @return string Cadena que representa al UPDATE generado // EN: String that represents the generated UPDATE
      */
     function construirUpdate($sTabla, $arrValores, $where = NULL)
     {
@@ -474,16 +556,18 @@ class paloDB {
         // Si la condicion $where es un arreglo, se construye
         // lista AND con los valores de igualdad. Si no, se
         // asume una condición WHERE directa.
+        // EN: If the $where condition is an array, an AND list is built
+        // with equality values. Otherwise, a direct WHERE condition is assumed.
         if (!is_null($where)) {
             $sPredicado = "";
             if (is_array($where)) {
                 foreach ($where as $sCol => $sVal) {
                     if ($sPredicado != "") $sPredicado .= " AND ";
                     if (is_integer($sCol))
-                        $sPredicado .= "$sVal";   // Se asume condición compleja
+                        $sPredicado .= "$sVal";   // Se asume condición compleja // EN: Complex condition assumed
                     else if (is_null($sVal))
                         $sPredicado .= "$sCol IS NULL";
-                    else $sPredicado .= "$sCol = $sVal"; // Se asume igualdad
+                    else $sPredicado .= "$sCol = $sVal"; // Se asume igualdad // EN: Equality assumed
                 }
             } else {
                 $sPredicado = $where;
@@ -492,6 +576,7 @@ class paloDB {
         }
 
         // Construir la lista de valores nuevos a modificar
+        // EN: Build the list of new values to modify
         foreach ($arrValores as $sCol => $sVal) {
             if ($sValores != "") $sValores .= ", ";
             if (is_null($sVal))

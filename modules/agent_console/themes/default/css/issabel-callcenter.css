@@ -313,3 +313,69 @@ td.issabel-callcenter-class-estado-activo {
 .externalurl-btn:hover {
     background-color: #45a049;
 }
+
+/* Shift bar container (filter + counters) */
+#issabel-callcenter-shift-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 10px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 5px;
+}
+
+/* Shift filter panel (left side) */
+#issabel-callcenter-shift-filter {
+    display: inline-block;
+    font-size: 0.9em;
+}
+
+#issabel-callcenter-shift-filter label {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+#issabel-callcenter-shift-filter select {
+    margin-right: 15px;
+    padding: 2px 5px;
+}
+
+#issabel-callcenter-shift-filter button {
+    padding: 3px 10px;
+    margin-right: 10px;
+}
+
+#shiftRangeIndicator {
+    font-style: italic;
+    color: #666;
+}
+
+/* Shift-based time statistics squares (right side) */
+#issabel-callcenter-shift-stats {
+    display: inline-block;
+}
+
+.shift-stat-box {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-left: 5px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #FFFFFF;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.shift-stat-login {
+    background-color: #2E7D32;  /* Green - login time */
+}
+
+.shift-stat-break {
+    background-color: #C62828;  /* Red - break time */
+}
+
+.shift-stat-hold {
+    background-color: #F57C00;  /* Orange - hold time */
+}

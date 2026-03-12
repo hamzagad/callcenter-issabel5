@@ -39,6 +39,11 @@ $arrLangModule=array(
 "RINGING" => "RINGING",
 "CALL" => "CALL",
 "BREAK" => "BREAK",
-
+"Total break time" => "Total break time",
+"Total hold time" => "Total hold time",
+"HOLD" => "HOLD",
+"Shift From" => "From",
+"Shift To" => "To",
+"Apply" => "Apply",
 
 );?>

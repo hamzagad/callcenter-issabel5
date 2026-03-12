@@ -37,5 +37,8 @@ $arrLangModule = array(
     "RINGING" => "TIMBRANDO",
     "CALL" => "EN LLAMADA",
     "BREAK" => "EN PAUSA",
+    "Total break time" => "Tiempo total de pausas",
+    "Total hold time" => "Tiempo total en espera",
+    "HOLD" => "EN ESPERA",
 );
 ?>

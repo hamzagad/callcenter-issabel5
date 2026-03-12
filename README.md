@@ -42,13 +42,11 @@ Callcenter Issabel 5
 
 Call Center Module V5.0.0-1, Updated for installing on rocky 8 , with php compatiblle with v5.4 up to v8.0 , In callback and agent modes. 
 
-esta version puede ser instalada en asterisk 16 o 18 en IssabelPBX.
-It is tested with Asterisk 18, and it is no logner backward compatible with Issabel 4
+esta version puede ser instalada en asterisk 18 en IssabelPBX.
+This repo is tested with Asterisk 18, and it is no logner backward compatible with Issabel 4
 
 #### Version actualizada por la comunidad de Issabel, cualquier duda o problema escribir a https://t.me/IssabelPBXip:
 Gracias a la colaboracion de Nicolás Gudiño, Julio pacheco, y comunidad de Issabel en telegram
-
-
 
 
 ## Installation Commands
@@ -70,5 +68,4 @@ bash build/5.0/remove-issabel-callcenter.sh
 systemctl start issabeldialer
 systemctl status issabeldialer
 systemctl stop issabeldialer
-
 ```

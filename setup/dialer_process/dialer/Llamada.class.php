@@ -147,6 +147,8 @@ class Llamada
     private $_waiting_id_current_call = FALSE;  // Se pone a VERDADERO cuando se espera el id_current_call
                                                 // Set to TRUE when waiting for id_current_call
     var $request_hold = FALSE;  // Se asigna a VERDADERO al invocar requerimiento hold, y se verifica en Unlink
+    var $atxfer_hold = FALSE;   // TRUE when hold is initiated during atxfer state - Bridge() will retrieve, not AgentRequest
+    var $transfer_pending = FALSE;  // TRUE when a blind transfer is in progress - prevents msg_Hangup from fully finalizing
                                 // Set to TRUE when invoking hold request, and verified in Unlink
     private $_park_exten = NULL;// Extensión de lote de parqueo de llamada enviada a hold
                                 // Extension of parking lot for call sent to hold
@@ -210,9 +212,9 @@ class Llamada
         $this->_log = $log;
     }
 
-    private function _nul($i) { return is_null($i) ? '(ninguno)' : "$i"; }
+    private function _nul($i) { return is_null($i) ? '(ninguno/none)' : "$i"; }
     private function _nultime($i) { return is_null($i) ? '----/--/-- --:--:--' : date('Y/m/d H:i:s', $i); }
-    private function _agentecorto($a) { return is_null($a) ? '(ninguno)' : $a->__toString(); }
+    private function _agentecorto($a) { return is_null($a) ? '(ninguno/none)' : $a->__toString(); }
 
     public function __toString()
     {
@@ -225,7 +227,7 @@ class Llamada
 
     public function dump($log)
     {
-        $s = "----- LLAMADA -----\n";
+        $s = "----- LLAMADA / CALL -----\n";
         $s .= "\ttipo_llamada.................".$this->tipo_llamada."\n";
         $s .= "\tid_llamada...................".$this->_nul($this->id_llamada)."\n";
         $s .= "\tphone........................".$this->_nul($this->phone)."\n";
@@ -241,7 +243,7 @@ class Llamada
         if (!is_null($this->failure_cause_txt))
             $s .= "\tfailure_cause_txt............".$this->_nul($this->failure_cause_txt)."\n";
         $s .= "\tactionid.....................".$this->_nul($this->actionid)."\n";
-        if ($this->_waiting_id_current_call) $s .= "\tESPERANDO id_current_call\n";
+        if ($this->_waiting_id_current_call) $s .= "\tESPERANDO/WAITING id_current_call\n";
         $s .= "\tid_current_call..............".$this->_nul($this->id_current_call)."\n";
         $s .= "\tduration.....................".$this->_nul($this->duration)."\n";
         if ($this->_stillborn) $s .= "\tSTILLBORN\n";
@@ -252,13 +254,13 @@ class Llamada
         $s .= "\ttimestamp_hangup.............".$this->_nultime($this->timestamp_hangup)."\n";
         $s .= "\tduration_wait................".$this->_nul($this->duration_wait)."\n";
         $s .= "\tduration_answer..............".$this->_nul($this->duration_answer)."\n";
-        $s .= "\tesperando_contestar..........".($this->esperando_contestar ? 'SI' : 'NO')."\n";
-        $s .= "\trequest_hold.................".($this->request_hold ? 'SI' : 'NO')."\n";
+        $s .= "\tesperando_contestar/waiting_answer..".($this->esperando_contestar ? 'SI/YES' : 'NO')."\n";
+        $s .= "\trequest_hold.................".($this->request_hold ? 'SI/YES' : 'NO')."\n";
         $s .= "\tid_queue_call_entry..........".$this->_nul($this->id_queue_call_entry)."\n";
         $s .= "\t_queuenumber.................".$this->_nul($this->_queuenumber)."\n";
         $s .= "\tagente.......................".$this->_agentecorto($this->agente)."\n";
         $s .= "\tagente_agendado..............".$this->_agentecorto($this->agente_agendado)."\n";
-        $s .= "\tcampania.....................".(is_null($this->campania) ? '(ninguna)' : $this->campania->__toString())."\n";
+        $s .= "\tcampania/campaign............".(is_null($this->campania) ? '(ninguna/none)' : $this->campania->__toString())."\n";
 
         $s .= "\tAuxChannels..................".print_r($this->AuxChannels, TRUE)."\n";
         $s .= "\t_actualizacionesPendientes...".print_r($this->_actualizacionesPendientes, TRUE)."\n";
@@ -300,7 +302,7 @@ class Llamada
         case 'mutedchannels':   return $this->_mutedchannels;
         case 'park_exten':      return $this->_park_exten;
         default:
-            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s);
+            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s.' | EN: property not implemented: '.$s);
             die(__METHOD__.' - propiedad no implementada: '.$s."\n");
         }
     }
@@ -487,7 +489,7 @@ class Llamada
             $this->_waiting_id_current_call = FALSE;
             break;
         default:
-            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s);
+            $this->_log->output('ERR: '.__METHOD__.' - propiedad no implementada: '.$s.' | EN: property not implemented: '.$s);
             die(__METHOD__.' - propiedad no implementada: '.$s."\n");
         }
     }
@@ -598,6 +600,13 @@ class Llamada
             $paramProgreso['agente_agendado'] = $this->agente_agendado->channel; // para emitir ScheduledCallStart
             $paramProgreso['id_agent'] = $this->agente_agendado->id_agent;
         }
+
+        // Set trunk on the object so resumenLlamada() can return it immediately
+        // ES: Establecer trunk en el objeto para que resumenLlamada() lo retorne de inmediato
+        if (!is_null($trunk)) {
+            $this->_trunk = $trunk;
+        }
+
         $this->_tuberia->msg_SQLWorkerProcess_notificarProgresoLlamada($paramProgreso);
 
         $sExten = NULL; $sDialstring = NULL;
@@ -628,9 +637,12 @@ class Llamada
         $this->_tuberia->enviarRespuesta($sFuente, $bExito);
         if (!$bExito) {
             $this->_log->output('ERR: '.__METHOD__.
-                "campania {$this->tipo_llamada} ID={$this->campania->id} ".
+                " campania {$this->tipo_llamada} ID={$this->campania->id} ".
                 (($this->tipo_llamada == 'outgoing') ? " cola {$this->campania->queue} " : '').
-                "no se puede llamar a número: ".print_r($r, TRUE));
+                "no se puede llamar a número: ".print_r($r, TRUE).
+                " | EN: campaign {$this->tipo_llamada} ID={$this->campania->id} ".
+                (($this->tipo_llamada == 'outgoing') ? " queue {$this->campania->queue} " : '').
+                "cannot call number");
             if ($this->status == 'Placing') $this->status = 'Failure';
 
             // Notificar el progreso de la llamada
@@ -717,7 +729,7 @@ class Llamada
             $this->status = $sStatus;
         if (!in_array($this->status, array('Placing', 'Ringing', 'Dialing', 'Failure'))) {
             $this->_log->output("WARN: ".__METHOD__." llamada recibe OriginateResponse con status=".
-                $this->status." inesperado, se asume Ringing");
+                $this->status." inesperado, se asume Ringing | EN: call received OriginateResponse with unexpected status=".$this->status.", assuming Ringing");
             $this->status = 'Ringing';
         }
 
@@ -728,7 +740,7 @@ class Llamada
         /*
         if ($this->DEBUG) {
             // Desactivado porque rellena el log
-            $this->_log->output("DEBUG: llamada identificada es: {$this->actionid} : ".
+            $this->_log->output("DEBUG: llamada identificada es/identified call is: {$this->actionid} : ".
                 print_r($this, TRUE));
         }
         */
@@ -968,7 +980,7 @@ class Llamada
         // Consistency check
         if ($this->agente->estado_consola != 'logged-in') {
             $this->_log->output("WARN: llamada ha sido asignada a agente en estado ".
-                $this->agente->estado_consola.'. Esto no debería haber pasado: ');
+                $this->agente->estado_consola.'. Esto no debería haber pasado | EN: call has been assigned to agent in state '.$this->agente->estado_consola.'. This should not have happened: ');
             $this->dump($this->_log);
         }
     }
@@ -976,6 +988,11 @@ class Llamada
     public function llamadaEnviadaHold($parkexten, $uniqueid_nuevo)
     {
         if (!$this->request_hold) return;
+
+        // Debug: Log park_exten assignment
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] llamadaEnviadaHold called - parkexten=$parkexten uniqueid_nuevo=$uniqueid_nuevo" .
+            " request_hold=" . ($this->request_hold ? 'TRUE' : 'FALSE'));
 
         $this->status = 'OnHold';
         $this->request_hold = FALSE;
@@ -989,7 +1006,7 @@ class Llamada
         $this->uniqueid = $uniqueid_nuevo;
     }
 
-    public function llamadaRegresaHold($ami, $iTimestamp, $sAgentChannel = NULL, $uniqueid_agente = NULL)
+    public function llamadaRegresaHold($ami, $iTimestamp, $sAgentChannel = NULL, $uniqueid_agente = NULL, $sActualAgentChannel = NULL)
     {
         /* Para agentes dinámicos, el Originate de recuperación de la llamada
          * ocasiona que se asigne un nuevo canal de agente SIP/xxxx-abcde que
@@ -998,6 +1015,11 @@ class Llamada
          * a new SIP/xxxx-abcde agent channel to be assigned that
          * must be captured and assigned. */
         if (!is_null($sAgentChannel)) $this->_agentchannel = $sAgentChannel;
+        if (!is_null($sActualAgentChannel)) {
+            $this->_actualAgentChannel = $sActualAgentChannel;
+        } elseif (!is_null($sAgentChannel)) {
+            $this->_actualAgentChannel = $sAgentChannel;
+        }
 
         if (!is_null($this->agente)) {
             $a = $this->agente;
@@ -1045,6 +1067,89 @@ class Llamada
             );
             $this->_tuberia->msg_SQLWorkerProcess_sqlupdatecurrentcalls($paramActualizar);
         }
+    }
+
+    /**
+     * Release source agent during a call transfer WITHOUT finalizing the call.
+     * Unlike llamadaFinalizaSeguimiento(), this method keeps the call in
+     * _listaLlamadas so the call can be re-linked to the target agent
+     * via the normal msg_Link() path.
+     *
+     * Liberar agente origen durante transferencia SIN finalizar la llamada.
+     * A diferencia de llamadaFinalizaSeguimiento(), este método mantiene
+     * la llamada en _listaLlamadas para que pueda ser re-enlazada al
+     * agente destino por el flujo normal de msg_Link().
+     */
+    public function llamadaTransferidaDesdeAgente($timestamp)
+    {
+        $this->_log->output('INFO: '.__METHOD__.': releasing source agent for transfer, '.
+            'call='.$this->_nul($this->uniqueid).
+            ' agent='.$this->_nul(!is_null($this->agente) ? $this->agente->channel : NULL).
+            ' | ES: liberando agente origen para transferencia, '.
+            'llamada='.$this->_nul($this->uniqueid).
+            ' agente='.$this->_nul(!is_null($this->agente) ? $this->agente->channel : NULL));
+
+        // Clear agent channel properties
+        $this->_agentchannel = NULL;
+        $this->_actualAgentChannel = NULL;
+
+        // Delete from current_calls/current_call_entry
+        if (!is_null($this->id_current_call)) {
+            $this->_tuberia->msg_SQLWorkerProcess_sqldeletecurrentcalls(array(
+                'tipo_llamada'  =>  $this->tipo_llamada,
+                'id'            =>  $this->id_current_call,
+            ));
+        } elseif (isset($this->_actualizacionesPendientes['sqlinsertcurrentcalls'])) {
+            unset($this->_actualizacionesPendientes['sqlinsertcurrentcalls']);
+        }
+        $this->_id_current_call = NULL;
+
+        // Send AgentUnlinked event for source agent
+        if (!is_null($this->agente) && !is_null($this->id_llamada)) {
+            $fDuration = $timestamp - $this->timestamp_link;
+            $paramProgreso = array(
+                'datetime_entry'    =>  date('Y-m-d H:i:s', $timestamp),
+                'queue'             =>  $this->_queuenumber,
+                'duration'          =>  $fDuration,
+                'new_status'        =>  'Transfer',
+            );
+            $paramProgreso['id_call_'.$this->tipo_llamada] = $this->id_llamada;
+            if (!is_null($this->campania))
+                $paramProgreso['id_campaign_'.$this->tipo_llamada] = $this->campania->id;
+
+            $this->_tuberia->msg_SQLWorkerProcess_AgentUnlinked(
+                $this->agente->channel, $this->tipo_llamada,
+                is_null($this->campania) ? NULL : $this->campania->id,
+                $this->id_llamada, $this->phone,
+                date('Y-m-d H:i:s', $timestamp),
+                $fDuration, FALSE,
+                $paramProgreso);
+        }
+
+        // Release agent without removing call from list
+        if (!is_null($this->agente)) {
+            $this->agente->llamada_agendada = NULL;
+            $this->agente->quitarLlamadaAtendida();
+            $this->agente = NULL;
+        }
+        $this->agente_agendado = NULL;
+
+        // Keep timestamp_link set so transfer detection in msg_Link() fires
+        // (the check is: !is_null(timestamp_link) && is_null(agente))
+        // timestamp_link will be reset by llamadaEnlazadaAgente() when target links
+        // Do NOT clear transfer_pending here — for outgoing calls, a Local channel
+        // hangup may arrive after this method is called by _finalizarTransferencia.
+        // msg_Hangup clears transfer_pending itself after calling this method.
+
+        // Do NOT set timestamp_hangup — the call is still active
+        // Do NOT update call status — it will be updated when target agent links
+        // Do NOT remove from _listaLlamadas — the call must remain findable by uniqueid
+
+        $this->_log->output('INFO: '.__METHOD__.': source agent released, call preserved for re-link '.
+            'uniqueid='.$this->_nul($this->uniqueid).
+            ' timestamp_link='.$this->_nul($this->timestamp_link).
+            ' agente='.$this->_nul($this->agente).
+            ' | ES: agente origen liberado, llamada preservada para re-enlace');
     }
 
     public function llamadaFinalizaSeguimiento($timestamp, $iUmbralLlamadaCorta)
@@ -1271,7 +1376,9 @@ class Llamada
     {
         $callable = array($this, '_cb_Park');
         $call_params = array($sFuente, $ami, $timestamp);
-        //$this->_log->output('DEBUG: '.__METHOD__.": asyncPark({$this->actualchannel}, {$this->agentchannel})");
+        // Debug: Log asyncPark call
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] asyncPark called for actualchannel={$this->actualchannel} agentchannel={$this->agentchannel}");
         // Don't pass AnnounceChannel to suppress parking slot announcement to customer
         $ami->asyncPark(
             $callable, $call_params,
@@ -1280,7 +1387,12 @@ class Llamada
 
     public function _cb_Park($r, $sFuente, $ami, $timestamp)
     {
-        //$this->_log->output('DEBUG: '.__METHOD__.': r='.print_r($r, TRUE));
+        // Debug: Log Park response
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] _cb_Park response received - Response={$r['Response']}" .
+            (isset($r['Message']) ? " Message={$r['Message']}" : "") .
+            " request_hold=" . ($this->request_hold ? 'TRUE' : 'FALSE') .
+            " park_exten=" . (isset($this->_park_exten) ? $this->_park_exten : 'NULL'));
         $this->_tuberia->enviarRespuesta($sFuente,
             ($r['Response'] == 'Success')
                 ? array(0, '')

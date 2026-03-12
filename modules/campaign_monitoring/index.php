@@ -66,6 +66,7 @@ function _moduleContent(&$smarty, $module_name)
         break;
     default:
         // Página principal con plantilla
+        // EN: Main page with template
         $sContenido = manejarMonitoreo_HTML($module_name, $smarty, $local_templates_dir);
     }
     return $sContenido;
@@ -235,18 +236,21 @@ function manejarMonitoreo_getCampaignDetail($module_name, $smarty, $sDirLocalPla
         );
 
         // Traducción de estado de las llamadas no conectadas
+        // EN: Translation of unconnected calls status
         $estadoCampaniaLlamadas = array();
         foreach ($estadoCampania['activecalls'] as $activecall) {
             $estadoCampaniaLlamadas[] = formatoLlamadaNoConectada($activecall);
         }
 
         // Traducción de estado de los agentes
+        // EN: Translation of agent status
         $estadoCampaniaAgentes = array();
         foreach ($estadoCampania['agents'] as $agent) {
             $estadoCampaniaAgentes[] = formatoAgente($agent);
         }
 
         // Traducción de log de la campaña
+        // EN: Translation of campaign log
         $logFinalCampania = array();
         foreach ($logCampania as $entradaLog) {
         	$logFinalCampania[] = formatoLogCampania($entradaLog);
@@ -303,6 +307,7 @@ function manejarMonitoreo_loadPreviousLogEntries($module_name, $smarty, $sDirLoc
             $respuesta['message'] = $oPaloConsola->errMsg;
         } else {
             // Traducción de log de la campaña
+            // EN: Translation of campaign log
             $logFinalCampania = array();
             foreach ($logCampania as $entradaLog) {
                 $logFinalCampania[] = formatoLogCampania($entradaLog);
@@ -360,8 +365,10 @@ function manejarMonitoreo_checkStatus($module_name, $smarty, $sDirLocalPlantilla
     $respuesta = crearRespuestaVacia();
 
     // Cuenta de estados
+    // EN: Status count
     foreach (array_keys($estadoCliente['statuscount']) as $k) {
         // Actualización de valores de contadores
+        // EN: Update counter values
     	if ($estadoCliente['statuscount'][$k] != $estadoCampania['statuscount'][$k]) {
     		$respuesta['statuscount']['update'][$k] = $estadoCampania['statuscount'][$k];
             $estadoCliente['statuscount'][$k] = $estadoCampania['statuscount'][$k];

@@ -7,7 +7,7 @@
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!40101 SET NAMES utf8 */;
+/*!40101 SET NAMES utf8mb4 */;
 /*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
 /*!40103 SET TIME_ZONE='+00:00' */;
 /*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `agent` (
   `eccp_password` varchar(128),
   PRIMARY KEY  (`id`),
   KEY `agent_type` (`estatus`,`type`,`number`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `audit`
@@ -48,12 +48,13 @@ CREATE TABLE IF NOT EXISTS `audit` (
   `datetime_end` datetime default NULL,
   `duration` time default NULL,
   `ext_parked` varchar(10) default NULL,
+  `login_extension` varchar(20) default NULL,
   PRIMARY KEY  (`id`),
   KEY `id_agent` (`id_agent`),
   KEY `id_break` (`id_break`),
   CONSTRAINT `audit_ibfk_1` FOREIGN KEY (`id_agent`) REFERENCES `agent` (`id`),
   CONSTRAINT `audit_ibfk_2` FOREIGN KEY (`id_break`) REFERENCES `break` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `break`
@@ -66,7 +67,7 @@ CREATE TABLE IF NOT EXISTS `break` (
   `status` varchar(1) NOT NULL default 'A',
   `tipo` enum('B','H') default 'B',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `break`
@@ -90,7 +91,7 @@ CREATE TABLE IF NOT EXISTS `call_attribute` (
   PRIMARY KEY  (`id`),
   KEY `id_call` (`id_call`),
   CONSTRAINT `call_attribute_ibfk_1` FOREIGN KEY (`id_call`) REFERENCES `calls` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `calls`
@@ -143,7 +144,7 @@ CREATE TABLE IF NOT EXISTS `calls` (
   KEY `campaign_date_schedule` (`id_campaign`, `date_init`, `date_end`, `time_init`, `time_end`),
   CONSTRAINT `calls_ibfk_1` FOREIGN KEY (`id_campaign`) REFERENCES `campaign` (`id`),
   CONSTRAINT `calls_ibfk_2` FOREIGN KEY (`id_agent`) REFERENCES `agent` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `campaign`
@@ -169,7 +170,7 @@ CREATE TABLE IF NOT EXISTS `campaign` (
 
   PRIMARY KEY  (`id`),
   FOREIGN KEY (id_url)  REFERENCES campaign_external_url(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 /* Upgrade from old length, if it applies */
 ALTER TABLE campaign
@@ -187,7 +188,7 @@ CREATE TABLE IF NOT EXISTS `campaign_form` (
   KEY `id_form` (`id_form`),
   CONSTRAINT `campaign_form_ibfk_1` FOREIGN KEY (`id_campaign`) REFERENCES `campaign` (`id`),
   CONSTRAINT `campaign_form_ibfk_2` FOREIGN KEY (`id_form`) REFERENCES `form` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 --
@@ -201,7 +202,7 @@ CREATE TABLE IF NOT EXISTS `contact` (
   `apellido` varchar(50) NOT NULL,
   `origen` varchar(4) default 'crm',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 --
@@ -224,7 +225,7 @@ CREATE TABLE IF NOT EXISTS `current_call_entry` (
   CONSTRAINT `current_call_entry_ibfk_1` FOREIGN KEY (`id_agent`) REFERENCES `agent` (`id`),
   CONSTRAINT `current_call_entry_ibfk_2` FOREIGN KEY (`id_queue_call_entry`) REFERENCES `queue_call_entry` (`id`),
   CONSTRAINT `current_call_entry_ibfk_3` FOREIGN KEY (`id_call_entry`) REFERENCES `call_entry` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 --
@@ -244,7 +245,7 @@ CREATE TABLE IF NOT EXISTS `current_calls` (
   PRIMARY KEY  (`id`),
   KEY `id_call` (`id_call`),
   CONSTRAINT `current_calls_ibfk_1` FOREIGN KEY (`id_call`) REFERENCES `calls` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 --
@@ -256,7 +257,7 @@ CREATE TABLE IF NOT EXISTS `form` (
   `descripcion` varchar(150) NOT NULL,
   `estatus` varchar(1) NOT NULL default 'A',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 --
@@ -272,7 +273,7 @@ CREATE TABLE IF NOT EXISTS `form_data_recolected` (
   KEY `id_calls` (`id_calls`),
   CONSTRAINT `form_data_recolected_ibfk_1` FOREIGN KEY (`id_form_field`) REFERENCES `form_field` (`id`),
   CONSTRAINT `form_data_recolected_ibfk_2` FOREIGN KEY (`id_calls`) REFERENCES `calls` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 --
@@ -288,7 +289,7 @@ CREATE TABLE IF NOT EXISTS `form_field` (
   PRIMARY KEY  (`id`),
   KEY `id_form` (`id_form`),
   CONSTRAINT `form_field_ibfk_1` FOREIGN KEY (`id_form`) REFERENCES `form` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 ALTER TABLE form_field CHANGE COLUMN etiqueta etiqueta TEXT NOT NULL;
 ALTER TABLE form_field CHANGE COLUMN value value TEXT NOT NULL;
 
@@ -305,7 +306,7 @@ CREATE TABLE IF NOT EXISTS `queue_call_entry` (
   `estatus` varchar(1) NOT NULL default 'A',
   `script` text,
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `dont_call`
@@ -316,7 +317,7 @@ CREATE TABLE IF NOT EXISTS `dont_call` (
   `date_income` datetime default NULL,
   `status` varchar(1) default NULL,
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 /*
  * Tabla valor_config, almacena configuraciones compartidas de Web
@@ -326,7 +327,7 @@ CREATE TABLE IF NOT EXISTS valor_config
     config_key     varchar(32)     NOT NULL        PRIMARY KEY,
     config_value   varchar(128)    NOT NULL,
     config_blob    BLOB
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 /*
  * Tabla campaign_entry, almacena las campañas entrantes que hayan sido creadas
@@ -348,7 +349,7 @@ CREATE TABLE IF NOT EXISTS campaign_entry
     FOREIGN KEY (id_queue_call_entry) REFERENCES queue_call_entry(id),
     FOREIGN KEY (id_form) REFERENCES form(id),
     FOREIGN KEY (id_url)  REFERENCES campaign_external_url(id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 /*
  * Tabla form_data_recolected_entry, almacena la información recolectada para campañas entrantes
@@ -362,7 +363,7 @@ CREATE TABLE IF NOT EXISTS form_data_recolected_entry
 
     FOREIGN KEY (id_call_entry) REFERENCES call_entry (id),
     FOREIGN KEY (id_form_field) REFERENCES form_field (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `campaign_form_entry`
@@ -375,7 +376,7 @@ CREATE TABLE IF NOT EXISTS `campaign_form_entry` (
   KEY `id_form` (`id_form`),
   CONSTRAINT `campaign_form_entry_ibfk_1` FOREIGN KEY (`id_campaign`) REFERENCES `campaign_entry` (`id`),
   CONSTRAINT `campaign_form_entry_ibfk_2` FOREIGN KEY (`id_form`) REFERENCES `form` (`id`)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `call_entry`
@@ -404,7 +405,7 @@ CREATE TABLE IF NOT EXISTS `call_entry` (
   CONSTRAINT `call_entry_ibfk_2` FOREIGN KEY (`id_queue_call_entry`) REFERENCES `queue_call_entry` (`id`),
   CONSTRAINT `call_entry_ibfk_3` FOREIGN KEY (`id_contact`) REFERENCES `contact` (`id`),
   CONSTRAINT `call_entry_ibfk_4` FOREIGN KEY (`id_campaign`) REFERENCES `campaign_entry` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `current_call_entry`
@@ -426,7 +427,7 @@ CREATE TABLE IF NOT EXISTS `current_call_entry` (
   CONSTRAINT `current_call_entry_ibfk_1` FOREIGN KEY (`id_agent`) REFERENCES `agent` (`id`),
   CONSTRAINT `current_call_entry_ibfk_2` FOREIGN KEY (`id_queue_call_entry`) REFERENCES `queue_call_entry` (`id`),
   CONSTRAINT `current_call_entry_ibfk_3` FOREIGN KEY (`id_call_entry`) REFERENCES `call_entry` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `eccp_authorized_clients`
@@ -436,7 +437,7 @@ CREATE TABLE IF NOT EXISTS `eccp_authorized_clients` (
     `username` varchar(64) NOT NULL,
     `md5_password` varchar(32) NOT NULL,
     PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `campaign_external_url`
@@ -449,7 +450,7 @@ CREATE TABLE IF NOT EXISTS `campaign_external_url` (
     `opentype`      varchar(16)     NOT NULL    DEFAULT 'window', /* window iframe jsonp */
 
     PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `call_progress_log`
@@ -478,7 +479,7 @@ CREATE TABLE IF NOT EXISTS `call_progress_log` (
     CONSTRAINT `call_progress_log_ibfk_6` FOREIGN KEY (`id_campaign_outgoing`) REFERENCES `campaign` (`id`),
     KEY `incoming_datetime_entry` (`id_call_incoming`, `datetime_entry`),
     KEY `outgoing_datetime_entry` (`id_call_outgoing`, `datetime_entry`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `call_recording`
@@ -496,7 +497,7 @@ CREATE TABLE IF NOT EXISTS `call_recording` (
     PRIMARY KEY (`id`),
     CONSTRAINT `call_recording_ibfk_1` FOREIGN KEY (`id_call_incoming`) REFERENCES `call_entry` (`id`),
     CONSTRAINT `call_recording_ibfk_2` FOREIGN KEY (`id_call_outgoing`) REFERENCES `calls` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
 /* Procedimiento que agrega soporte para DNC (DO NOT CALL) y quita la columna agent.queue */
@@ -927,7 +928,7 @@ BEGIN
     WHERE TABLE_SCHEMA = 'call_center'
         AND TABLE_NAME = 'call_recording';
     IF l_engine = 'MyISAM' THEN
-        ALTER TABLE call_recording ENGINE=InnoDB DEFAULT CHARSET=utf8;
+        ALTER TABLE call_recording ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
         ALTER TABLE call_recording ADD FOREIGN KEY (id_call_incoming) REFERENCES call_entry(id);
         ALTER TABLE call_recording ADD FOREIGN KEY (id_call_outgoing) REFERENCES calls(id);
     END IF;
@@ -1102,6 +1103,41 @@ DELIMITER ; ++
 
 CALL temp_trunk_length_2025_01_21();
 DROP PROCEDURE IF EXISTS temp_trunk_length_2025_01_21;
+
+
+/* Procedure to convert all tables to utf8mb4 charset for full Unicode support */
+DELIMITER ++ ;
+
+DROP PROCEDURE IF EXISTS temp_charset_utf8mb4_2026_03_05 ++
+CREATE PROCEDURE temp_charset_utf8mb4_2026_03_05 ()
+    READS SQL DATA
+    MODIFIES SQL DATA
+BEGIN
+    DECLARE l_table_name VARCHAR(64);
+    DECLARE l_done INT DEFAULT 0;
+    DECLARE cur CURSOR FOR
+        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = 'call_center'
+          AND TABLE_TYPE = 'BASE TABLE'
+          AND TABLE_COLLATION != 'utf8mb4_general_ci';
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET l_done = 1;
+
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO l_table_name;
+        IF l_done THEN LEAVE read_loop; END IF;
+        SET @sql = CONCAT('ALTER TABLE `', l_table_name, '` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END LOOP;
+    CLOSE cur;
+END;
+++
+DELIMITER ; ++
+
+CALL temp_charset_utf8mb4_2026_03_05();
+DROP PROCEDURE IF EXISTS temp_charset_utf8mb4_2026_03_05;
 
 
 /*!40000 ALTER TABLE `queue_call_entry` ENABLE KEYS */;

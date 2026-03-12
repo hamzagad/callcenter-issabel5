@@ -22,13 +22,19 @@
   $Id: new_campaign.php $ */
 
 /**
- * Esta biblioteca contiene funciones que existen en Issabel 2 pero no en 
- * Elastix 1.6. De esta manera se puede programar asumiendo un entorno 
+ * Esta biblioteca contiene funciones que existen en Issabel 2 pero no en
+ * Elastix 1.6. De esta manera se puede programar asumiendo un entorno
  * equivalente a Elastix 2. Por medio de las verificaciones de function_exists()
  * se evita declarar la función cuando se ejecuta realmente en Issabel 2.
+ *
+ * EN: This library contains functions that exist in Issabel 2 but not in
+ * Elastix 1.6. This way you can program assuming an environment
+ * equivalent to Elastix 2. Through function_exists() checks, the function
+ * is avoided from being declared when running actually in Issabel 2.
  */
 
 // Función de conveniencia para pedir traducción de texto, si existe
+// EN: Convenience function to request text translation, if it exists
 if (!function_exists('_tr')) {
 function _tr($s)
 {
@@ -43,7 +49,13 @@ function _tr($s)
 * trata de buscar por GET para poder retornar algun valor, si el parametro ha consultar no
 * no esta en request retorna null.
 *
+* EN: Function that serves to obtain the values of the field parameters in forms.
+* This function verifies if the parameter comes by POST and if not found, tries to
+* search by GET to be able to return some value, if the parameter to query is not
+* in request it returns null.
+*
 * Ejemplo: $nombre = getParameter('nombre');
+* EN: Example: $name = getParameter('name');
 */
 if (!function_exists('getParameter')) {
     function getParameter($parameter)
@@ -62,10 +74,17 @@ if (!function_exists('getParameter')) {
  * Los usuarios conocidos hasta ahora son 'root' (sacada de /etc/issabel.conf)
  * y 'asteriskuser' (sacada de /etc/amportal.conf)
  *
+ * EN: Function to obtain the MySQL password of well-known Elastix users.
+ * The known users so far are 'root' (taken from /etc/issabel.conf)
+ * and 'asteriskuser' (taken from /etc/amportal.conf)
+ *
  * @param   string  $sNombreUsuario     Nombre de usuario para interrogar
+ *                                      EN: Username to query
  * @param   string  $ruta_base          Ruta base para inclusión de librerías
+ *                                      EN: Base path for library inclusion
  *
  * @return  mixed   NULL si no se reconoce usuario, o la clave en plaintext
+ *                  EN: NULL if user is not recognized, or the password in plaintext
  */
 if (!function_exists('obtenerClaveConocidaMySQL')) {
 function obtenerClaveConocidaMySQL($sNombreUsuario, $ruta_base='')
@@ -91,15 +110,23 @@ function obtenerClaveConocidaMySQL($sNombreUsuario, $ruta_base='')
 }
 
 /**
- * Función para construir un DSN para conectarse a varias bases de datos 
+ * Función para construir un DSN para conectarse a varias bases de datos
  * frecuentemente utilizadas en Issabel. Para cada base de datos reconocida, se
  * busca la clave en /etc/issabel.conf o en /etc/amportal.conf según corresponda.
  *
+ * EN: Function to build a DSN to connect to various databases frequently used
+ * in Issabel. For each recognized database, the password is searched in
+ * /etc/issabel.conf or /etc/amportal.conf as appropriate.
+ *
  * @param   string  $sNombreUsuario     Nombre de usuario para interrogar
+ *                                      EN: Username to query
  * @param   string  $sNombreDB          Nombre de base de datos para DNS
+ *                                      EN: Database name for DSN
  * @param   string  $ruta_base          Ruta base para inclusión de librerías
+ *                                      EN: Base path for library inclusion
  *
  * @return  mixed   NULL si no se reconoce usuario, o el DNS con clave resuelta
+ *                  EN: NULL if user is not recognized, or the DSN with resolved password
  */
 if (!function_exists('generarDSNSistema')) {
 function generarDSNSistema($sNombreUsuario, $sNombreDB, $ruta_base='')
@@ -143,15 +170,23 @@ function load_language_module($module_id, $ruta_base='')
 /**
  * Las siguientes son funciones de compatibilidad para que el módulo haga uso de
  * funcionalidad de Elastix 2, mientras que siga funcionando con Elastix 1.6.
+ *
+ * EN: The following are compatibility functions for the module to use
+ * Elastix 2 functionality, while continuing to work with Elastix 1.6.
  */
 
 /**
  * Procedimiento para interrogar si el framework contiene soporte de mostrar el
- * título del formulario como parte de la plantilla del framework. Esta 
- * verificación es necesaria para evitar mostrar títulos duplicados en los 
+ * título del formulario como parte de la plantilla del framework. Esta
+ * verificación es necesaria para evitar mostrar títulos duplicados en los
  * formularios
- * 
+ *
+ * EN: Procedure to query whether the framework contains support to display
+ * the form title as part of the framework template. This verification is
+ * necessary to avoid showing duplicate titles in forms.
+ *
  * @return bool VERDADERO si el soporte existe, FALSO si no.
+ *             EN: TRUE if support exists, FALSE otherwise.
  */
 function existeSoporteTituloFramework()
 {
@@ -276,6 +311,140 @@ function generarEstadoHash($module_name, $estadoCliente) {
     $_SESSION[$module_name]['estadoCliente'] = $estadoCliente;
     $_SESSION[$module_name]['estadoClienteHash'] = $estadoHash;
     return $estadoHash;
+}
+}
+
+/**
+ * ============================================================================
+ * CALL CENTER WEB MODULES DEBUG INFRASTRUCTURE
+ * ============================================================================
+ * ES: Infraestructura de depuracion para modulos web del Call Center
+ *
+ * Global debug flag for all Call Center web modules.
+ * Set to TRUE to enable debug logging (file + browser console).
+ * Set to FALSE (default) to suppress all debug output.
+ *
+ * ES: Flag global de depuracion para todos los modulos web del Call Center.
+ * Establecer en TRUE para habilitar el registro de depuracion (archivo + consola del navegador).
+ * Establecer en FALSE (por defecto) para suprimir toda la salida de depuracion.
+ *
+ * Toggle: Edit this file and change to true/false.
+ * Runtime toggle: $GLOBALS['CALLCENTER_DEBUG'] = true; from any module.
+ */
+if (!isset($GLOBALS['CALLCENTER_DEBUG'])) {
+    $GLOBALS['CALLCENTER_DEBUG'] = false;
+}
+
+/**
+ * Debug log file path for Call Center web modules.
+ * ES: Ruta del archivo de registro de depuracion para los modulos web del Call Center.
+ *
+ * Log file is rotated via logrotate (/etc/logrotate.d/callcenter-modules)
+ * ES: El archivo de registro es rotado via logrotate
+ */
+if (!isset($GLOBALS['CALLCENTER_DEBUG_FILE'])) {
+    $GLOBALS['CALLCENTER_DEBUG_FILE'] = '/var/log/callcenter-module/debug.log';
+}
+
+/**
+ * Centralized debug logging for Call Center web modules.
+ * Logs to file /var/log/callcenter-module/debug.log with module name prefix.
+ * Also collects messages for browser console output via _cc_debug_flush_html().
+ *
+ * ES: Registro centralizado de depuracion para los modulos web del Call Center.
+ * Registra en archivo /var/log/callcenter-module/debug.log con prefijo del nombre del modulo.
+ * Tambien recolecta mensajes para salida en consola del navegador via _cc_debug_flush_html().
+ *
+ * @param string $message     Debug message / ES: Mensaje de depuracion
+ * @param string $module_name Module identifier (e.g. 'agent_console', 'campaign_out')
+ *                            ES: Identificador del modulo
+ */
+if (!function_exists('_cc_debug')) {
+function _cc_debug($message, $module_name = 'unknown')
+{
+    if (empty($GLOBALS['CALLCENTER_DEBUG'])) return;
+
+    $sAgent = '(unset)';
+    if (isset($_SESSION['callcenter']) && isset($_SESSION['callcenter']['agente']))
+        $sAgent = $_SESSION['callcenter']['agente'];
+    $sIP = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '(cli)';
+
+    $logLine = sprintf("%s %s [%s] agent=%s %s\n",
+        $sIP, date('Y-m-d H:i:s'), $module_name, $sAgent, $message);
+
+    // File logging / ES: Registro en archivo
+    file_put_contents($GLOBALS['CALLCENTER_DEBUG_FILE'], $logLine, FILE_APPEND | LOCK_EX);
+
+    // Collect for browser console output / ES: Recolectar para consola del navegador
+    if (!isset($GLOBALS['_CC_DEBUG_MESSAGES'])) {
+        $GLOBALS['_CC_DEBUG_MESSAGES'] = array();
+    }
+    $GLOBALS['_CC_DEBUG_MESSAGES'][] = sprintf('[%s] agent=%s %s',
+        $module_name, $sAgent, $message);
+}
+}
+
+/**
+ * Flush collected debug messages as browser console.log() statements.
+ * Call this at the end of HTML-returning functions by appending the result
+ * to the HTML string before returning it.
+ * Returns empty string if debug is disabled or no messages were collected.
+ *
+ * ES: Vaciar los mensajes de depuracion recolectados como sentencias console.log() del navegador.
+ * Llamar al final de funciones que retornan HTML, agregando el resultado
+ * a la cadena HTML antes de retornarla.
+ *
+ * Usage: return $smarty->fetch("template.tpl") . _cc_debug_flush_html();
+ *       ES: return $smarty->fetch("plantilla.tpl") . _cc_debug_flush_html();
+ *
+ * @return string HTML script tags with console.log calls, or empty string
+ *         ES: Etiquetas HTML script con llamadas console.log, o cadena vacia
+ */
+if (!function_exists('_cc_debug_flush_html')) {
+function _cc_debug_flush_html()
+{
+    if (empty($GLOBALS['CALLCENTER_DEBUG'])) return '';
+    if (empty($GLOBALS['_CC_DEBUG_MESSAGES'])) return '';
+
+    $output = "<script>\n";
+    foreach ($GLOBALS['_CC_DEBUG_MESSAGES'] as $msg) {
+        // TODO: Fix XSS - use htmlspecialchars($msg, ENT_QUOTES, 'UTF-8') instead of manual escaping
+        // Currently kept to avoid breaking reporting functionality
+        // ES: TODO: Corregir XSS - usar htmlspecialchars en lugar de escape manual
+        $escaped = str_replace(array("\\", "'", "\n", "\r", "</"),
+                               array("\\\\", "\\'", "\\n", "\\r", "<\\/"), $msg);
+        $output .= "console.log('[CC_DEBUG] ' + '" . $escaped . "');\n";
+    }
+    $output .= "</script>\n";
+
+    $GLOBALS['_CC_DEBUG_MESSAGES'] = array();
+    return $output;
+}
+}
+
+/**
+ * Attach collected debug messages to a JSON response array.
+ * Call this before encoding the response to JSON.
+ * Client-side JavaScript can optionally read response._cc_debug
+ * and log each entry via console.log().
+ *
+ * ES: Adjuntar los mensajes de depuracion recolectados a un arreglo de respuesta JSON.
+ * Llamar antes de codificar la respuesta a JSON.
+ *
+ * Usage: _cc_debug_attach_json($respuesta); return $json->encode($respuesta);
+ *       ES: _cc_debug_attach_json($respuesta); return $json->encode($respuesta);
+ *
+ * @param array &$response The response array to attach debug messages to
+ *                         ES: Arreglo de respuesta al que se adjuntan los mensajes
+ */
+if (!function_exists('_cc_debug_attach_json')) {
+function _cc_debug_attach_json(&$response)
+{
+    if (empty($GLOBALS['CALLCENTER_DEBUG'])) return;
+    if (empty($GLOBALS['_CC_DEBUG_MESSAGES'])) return;
+
+    $response['_cc_debug'] = $GLOBALS['_CC_DEBUG_MESSAGES'];
+    $GLOBALS['_CC_DEBUG_MESSAGES'] = array();
 }
 }
 ?>

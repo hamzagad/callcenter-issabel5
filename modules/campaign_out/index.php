@@ -55,11 +55,13 @@ function _moduleContent(&$smarty, $module_name)
     $smarty->assign("relative_dir_rich_text", $relative_dir_rich_text);
 
     // Conexión a la base de datos CallCenter
+    // EN: CallCenter database connection
     $pDB = new paloDB($arrConf['cadena_dsn']);
 
     checkDataBase();
 
     // Mostrar pantalla correspondiente
+    // EN: Show corresponding screen
     $contenidoModulo = '';
     $sAction = 'list_campaign';
     if (isset($_GET['action'])) $sAction = $_GET['action'];
@@ -161,6 +163,8 @@ function listCampaign($pDB, $smarty, $module_name, $local_templates_dir)
                 ($campaign['retries'] != "") ? $campaign['retries'] : "&nbsp;",
                 is_null($campaign['trunk']) ? '(Dialplan)' : $campaign['trunk'],
                 $campaign['queue'],
+                ($campaign['total_calls'] != "") ? $campaign['total_calls'] : "0",
+                ($campaign['pending_calls'] != "") ? $campaign['pending_calls'] : "0",
                 ($campaign['num_completadas'] != "") ? $campaign['num_completadas'] : "N/A",
                 ($campaign['promedio'] != "") ? number_format($campaign['promedio'],0) : "N/A",
                 campaignStatusLabel($campaign['estatus']),
@@ -171,13 +175,14 @@ function listCampaign($pDB, $smarty, $module_name, $local_templates_dir)
     }
 
     // Definición de la tabla de las campañas
+    // EN: Definition of campaigns table
     $oGrid->setTitle(_tr("Campaigns List"));
     $oGrid->setWidth("99%");
     $oGrid->setIcon("images/list.png");
     $oGrid->setURL($url);
     $oGrid->setColumns(array('', _tr('Name Campaign'), _tr('Range Date'),
         _tr('Schedule per Day'), _tr('Retries'), _tr('Trunk'), _tr('Queue'),
-        _tr('Completed Calls'), _tr('Average Time'), _tr('Status'), _tr('Options')));
+        _tr('Total Calls'), _tr('Pending Calls'), _tr('Completed Calls'), _tr('Average Time'), _tr('Status'), _tr('Options')));
     $_POST['cbo_estado']=$sEstado;
     $oGrid->addFilterControl(
         _tr("Filter applied ")._tr("Status")." = ".$estados[$sEstado],
@@ -319,6 +324,7 @@ function formEditCampaign($pDB, $smarty, $module_name, $local_templates_dir, $id
         $smarty->assign('label_manage_external_url', _tr('Manage External URLs'));
 
         // Definición del formulario de nueva campaña
+        // EN: Definition of new campaign form
         $smarty->assign("REQUIRED_FIELD", _tr("Required field"));
         $smarty->assign("CANCEL", _tr("Cancel"));
         $smarty->assign("SAVE", _tr("Save"));
@@ -327,9 +333,9 @@ function formEditCampaign($pDB, $smarty, $module_name, $local_templates_dir, $id
         $smarty->assign('LABEL_CHANNEL_ZERO_DISABLE', _tr('(Leave as 0 to disable channel limit)'));
 
         // Valores por omisión para primera carga
-        $arrNoElegidos = array();   // Lista de selección de formularios elegibles
-        $arrElegidos = array();     // Lista de selección de formularios ya elegidos
-        $values_form = NULL;        // Selección hecha en el formulario
+        $arrNoElegidos = array();   // Lista de selección de formularios elegibles // EN: Selection list of eligible forms
+        $arrElegidos = array();     // Lista de selección de formularios ya elegidos // EN: Selection list of already chosen forms
+        $values_form = NULL;        // Selección hecha en el formulario // EN: Selection made in form
         if (is_null($id_campaign)) {
             if (!isset($_POST['nombre'])) $_POST['nombre']='';
             if (!isset($_POST["context"]) || $_POST["context"]=="") {
@@ -385,6 +391,7 @@ function formEditCampaign($pDB, $smarty, $module_name, $local_templates_dir, $id
         }
 
         // Generación del objeto de formulario
+        // EN: Form object generation
         $formCampos = getFormCampaign($arrDataTrunks, $arrDataQueues,
             $arrNoElegidos, $arrElegidos, $arrUrlsExternos);
         $oForm = new paloForm($smarty, $formCampos);
@@ -872,7 +879,7 @@ function displayCampaignCSV($pDB, $smarty, $module_name, $local_templates_dir)
                 $lineaCSV = array_merge($lineaCSV, array_map('csv_replace', $datosCampania['FORMS'][$id_form]['LABEL']));
                 $lineaEspaciador = array_merge(
                     $lineaEspaciador,
-                    array_fill(0, count($datosCampania['FORMS'][$id_form]['LABEL']), '"FORMULARIO"')); // TODO: internacionalizar
+                    array_fill(0, count($datosCampania['FORMS'][$id_form]['LABEL']), '""'._tr('Form').'"'));
             }
             $sDatosCSV .= join(',', $lineaEspaciador)."\r\n";
             $sDatosCSV .= join(',', $lineaCSV)."\r\n";

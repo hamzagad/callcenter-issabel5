@@ -1,3 +1,98 @@
+5.0.0-10
+* IMPROVED: Hangup button clicking during attended Transfer Consultation for 
+  agent type now terminates only the consultation call only and reconnect 
+  the agent to the customer. This required a new dialplan custom context
+  addition atxfer-cancel-consult.
+* ADDED: Agent console now can distinguish agent type login from callback 
+  extension type login.
+* ISSUE: Attended transfer functionality for agent type login requires full
+  rework. Now attended transfer is disabled in the UI for agent type.
+* TODO: Fix and improve the logic of attended transfer, unify the attended 
+  transfer dialplan, handle too much scenarios where atxfer manipulate the 
+  channel state and agent status.
+* Attended Transfer Re-enabling Requirements:
+  * Issue: The Hangup button gets disabled after the call reconnect with the 
+    customer (Pressing F5 enables it again)
+  * Issue: Sometimes the call gets disconnected from session or the session get 
+    terminated, reason is unknown and can't be reproduced
+  * Improve: client hangup during an attended transfer consultation should not 
+    terminate the consultation call, this will require Hangup button 
+    handling and Hold, Transfer buttons enabling conditioning by checking 
+    call status
+  * Improve: atxfer-hold context forces the default MoH, should be handled to use
+    the corrosponding MoH based on Queue
+
+5.0.0-9
+* IMPROVED: Attended Transfer Consultation Hangup and Customer Hangup Fixes.
+  Now, customer termination of the call from his end during consultation will
+  terminate the consultation call also.
+* Fixed: Hangup button clicking during attended Transfer Consultation for 
+  agent type now terminates both calls rather than terminating the 
+  consultation call only and losing the customer call tracking.
+
+5.0.0-8
+* FIXED: End Hold button 5s delay after attended transfer attempting.
+  This required adding a new dialplan custom context atxfer-consult, and code
+  modifications to distinguish the normal Hold from the Hold after attempting 
+  attended transfer for minimal side effect.
+  
+5.0.0-7
+* FIXED: Error in agent channel state after using Hold feature.
+* FIXED: Issue of End Hold button stuck after customer hangup during consulting.
+  
+5.0.0-6
+* IMPROVED: Transfer Button is now disabled during Hold.
+  Putting the customer on hold will disable the Transfer button.
+  
+5.0.0-5
+* ADDED: New dialplan contexts to handle the attended transfer for callback
+  extensions. This eliminates the 20s busy tone when colleague declines 
+  attended transfer consultation call. Compatible with both SIP and PJSIP.
+* IMPROVED: Hold/Transfer Button State During Attended Transfer Consultation.
+  Hold/Transfer buttons are disabled when the consultation starts, enabled
+  back on colleague rejection or decline.
+* IMPROVED: Installation script now reloads the asterisk dialplan to ensure
+  new dialplan custom context usage.
+  
+5.0.0-4
+* REWORKED: Attended transfer functionality for Agent type login got completely
+  reworked, now uses Redirect() instead of Atxfer() with ExtraChannel parameter.
+  This moves both channels to a new dialplan contexts which got added.
+* ADDED: New dialplan contexts to handle the attended transfer functionality, 
+  all scenario handled (cancellation, returning, hanging-up).
+* TODO: Control over the MoH rather than using default while the callee is 
+  waiting the consulting result for attended transfer context 
+  (callcenter-atxfer-hold).
+* ADDED: Added optional `ExtraExten`, `ExtraContext`, `ExtraPriority` 
+  parameters to the Redirect action definition. 
+* Fixed: Attended transfer issue caused agent session to drop.
+  Changed `prepararAtxferComplete` from async message to synchronous RPC. 
+  The async message was not processed before the Redirect fired, so the 
+  Agentlogoff suppression flag was not set in time.
+* CHANGE: The installation script now uses the default Asterisk MoH class for
+  agents rather than Silence, suppressing warnings for different name configs.
+* IMPROVED: custom contexts naming uniformed.
+
+5.0.0-3
+* REWORKED: Asterisk version handling for backward compatibility with Issabel4.
+  Now, Call Center module can be installed on both Issabel 4 and 5 from the 
+  same repo, chan_agent vs app_agent_pool templating handled
+* IMPROVED: Multiple fixes for backward PHP v5.4 compatible modules.
+* Improved: Agent Journey module now displays the extension used in the agent
+  in the Details column.
+* Improved: English translation lines of logs completed and now reliable for 
+  Only English speakers
+
+5.0.0-2
+* ADDED: Translation: All modules and installer comments, logs, docblocks are 
+  translated to English.
+* IMPROVED: user login now stores the login extension in the database, added a new
+  column in audit table (login_extension), handled in both installer.php and 
+  call_center.sql, storing the information handled in Agente.class.php and 
+  SQLWorkerProcess.class.php.
+* Improved: Agent Journey module now displays the extension used in the agent
+  in the Details column.
+
 5.0.0-1
 * ADDED: Documentation: Added ECCP_Protocol.md (English compact translation of protocol spec).
 * ADDED: Translation: All dialer comments, logs, docblocks are translated to English.
@@ -1211,7 +1306,7 @@
   campaign with at least one logged-in static agent.
 * Callback Extensions: fixed multiple bugs in a single function: 1) removed
   incorrect attempt to use database root user for ordinary module operation.
-  2) fixed incorrect assumption that selected database user can read both the
+  1) fixed incorrect assumption that selected database user can read both the
   'call_center' and the 'asterisk' databases. 3) added missing error reporting
   so that database failures are not hidden.
 * Campaign Monitoring: added new module. This module displays a campaign-centric

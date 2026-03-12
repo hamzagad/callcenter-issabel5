@@ -37,6 +37,7 @@ $arrLangModule=array(
 'Answering delay' => 'Answering delay',
 'Enable dialer debug' => 'Enable dialer debug',
 'Dump all received Asterisk events' => 'Dump all received Asterisk events',
+'Dump related Asterisk events' => 'Dump related Asterisk events',
 'Running' => 'Running',
 'Stopped' => 'Stopped',
 'Start' => 'Start',

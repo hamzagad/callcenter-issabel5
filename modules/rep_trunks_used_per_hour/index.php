@@ -24,6 +24,7 @@
 include_once "libs/paloSantoGrid.class.php";
 include_once "libs/paloSantoForm.class.php";
 include_once "libs/paloSantoTrunk.class.php";//Trunks
+require_once "modules/agent_console/libs/issabel2.lib.php";
 
 if (!function_exists('_tr')) {
     function _tr($s)
