@@ -46,7 +46,7 @@ esta version puede ser instalada en asterisk 18 en IssabelPBX.
 This repo is tested with Asterisk 18, and it is no logner backward compatible with Issabel 4
 
 #### Version actualizada por la comunidad de Issabel, cualquier duda o problema escribir a https://t.me/IssabelPBXip:
-Gracias a la colaboracion de Nicolás Gudiño, Julio pacheco, y comunidad de Issabel en telegram
+Gracias a la colaboracion de Nicolás Gudiño, Hamza ,Julio pacheco, y comunidad de Issabel en telegram
 
 
 ## Installation Commands
