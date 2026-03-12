@@ -45,10 +45,13 @@ class AMIEventProcess extends TuberiaProcess
     // Incoming queue info, which may include an incoming campaign
     private $_listaLlamadas;
     private $_agentesEnAtxferComplete = array(); // Agents completing attended transfer (suppress Agentlogoff)
+    private $_agentesEnConsultation = array();   // Agents in attended transfer consultation (callback type)
+    private $_agentesEnTransferPendiente = array(); // Agents with pending blind transfer (prevent double transfer)
 
     // Estimación de la versión de Asterisk que se usa
     // Estimation of the Asterisk version being used
     private $_asteriskVersion = array(1, 4, 0, 0);
+    private $_compat = NULL; // AsteriskCompat instance for version-aware behavior
 
     // Fecha y hora de inicio de Asterisk, para detectar reinicios
     // Date and time of Asterisk start, to detect restarts
@@ -123,14 +126,19 @@ class AMIEventProcess extends TuberiaProcess
         // Register event handlers from ECCPWorkerProcess
         foreach (array('quitarBreakAgente',
             'llamadaSilenciada', 'llamadaSinSilencio', 'finalizarTransferencia',
-            'prepararAtxferComplete') as $k)
+            'marcarConsultationIniciada',
+            'liberarReservaTransferencia') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
-        foreach (array('agregarIntentoLoginAgente', 'infoSeguimientoAgente',
+        foreach (array('prepararAtxferComplete',
+            'agregarIntentoLoginAgente', 'infoSeguimientoAgente',
             'reportarInfoLlamadaAtendida', 'reportarInfoLlamadasCampania',
             'cancelarIntentoLoginAgente', 'reportarInfoLlamadasColaEntrante',
             'pingAgente', 'dumpstatus', 'listarTotalColasTrabajoAgente',
             'infoSeguimientoAgentesCola', 'reportarInfoLlamadaAgendada',
-            'iniciarBreakAgente', 'iniciarHoldAgente') as $k)
+            'iniciarBreakAgente', 'iniciarHoldAgente',
+            'esAgenteEnAtxferComplete',
+            'esAgenteEnConsultation',
+            'reservarAgenteParaTransferencia') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "rpc_$k"));
 
         // Registro de manejadores de eventos desde HubProcess
@@ -281,10 +289,18 @@ class AMIEventProcess extends TuberiaProcess
             // Only available in Asterisk >= 1.6.0
             if ($r['Response'] == 'Success' && isset($r['AsteriskVersion'])) {
                 $this->_asteriskVersion = explode('.', $r['AsteriskVersion']);
-                $this->_log->output("INFO: CoreSettings reporta Asterisk ".implode('.', $this->_asteriskVersion));
+                $this->_log->output("INFO: CoreSettings reporta Asterisk ".implode('.', $this->_asteriskVersion)." | EN: CoreSettings reports Asterisk ".implode('.', $this->_asteriskVersion));
             } else {
-                $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x.");
+                $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x. | EN: no CoreSettings support in Asterisk Manager, assuming Asterisk 1.4.x.");
             }
+
+            $this->_compat = new AsteriskCompat($this->_asteriskVersion);
+            $this->_log->output('INFO: Modo de compatibilidad Asterisk: '.
+                ($this->_compat->hasAppAgentPool() ? 'app_agent_pool' : 'chan_agent').
+                ' (versión '.$this->_compat->getVersionString().')'.
+                ' | EN: Asterisk compatibility mode: '.
+                ($this->_compat->hasAppAgentPool() ? 'app_agent_pool' : 'chan_agent').
+                ' (version '.$this->_compat->getVersionString().')');
 
             /* Ejecutar el comando CoreStatus para obtener la fecha de arranque de
              * Asterisk. Si se tiene una fecha previa distinta a la obtenida aquí,
@@ -338,7 +354,8 @@ class AMIEventProcess extends TuberiaProcess
                 'QueueStatusComplete', 'Leave', 'Reload', 'Agents', 'AgentsComplete',
                 'AgentCalled', 'AgentDump', 'AgentConnect', 'AgentComplete',
                 'QueueMemberPaused', 'ParkedCall', /*'ParkedCallTimeOut',*/
-                'ParkedCallGiveUp', 'QueueCallerAbandon', 'BridgeEnter'
+                'ParkedCallGiveUp', 'QueueCallerAbandon', 'BridgeEnter',
+                'UserEvent'
             ) as $k)
                 $astman->add_event_handler($k, array($this, "msg_$k"));
 
@@ -346,6 +363,8 @@ class AMIEventProcess extends TuberiaProcess
             // Seen in Asterisk 1.6.2.x
             $astman->add_event_handler('DialBegin', array($this, "msg_Dial"));
             $astman->add_event_handler('QueueCallerJoin', array($this, "msg_Join"));
+            // Asterisk 12+ renamed QueueMemberPaused to QueueMemberPause
+            $astman->add_event_handler('QueueMemberPause', array($this, "msg_QueueMemberPaused"));
             $astman->add_event_handler('QueueCallerLeave', array($this, "msg_Leave")); 
 
             if ($this->DEBUG && $this->_config['dialer']['allevents'])
@@ -429,7 +448,9 @@ class AMIEventProcess extends TuberiaProcess
             if (!is_null($a->id_sesion) && $a->id_sesion != $id_sesion) {
                 $this->_log->output('ERR: '.__METHOD__." - posible carrera, ".
                     "id_sesion ya asignado para $sAgente, se pierde anterior. ".
-                    "ID anterior={$a->id_sesion} ID nuevo={$id_sesion}");
+                    "ID anterior={$a->id_sesion} ID nuevo={$id_sesion}".
+                    " | EN: possible race condition, id_sesion already assigned for $sAgente, losing previous. ".
+                    "Previous ID={$a->id_sesion} New ID={$id_sesion}");
             }
             $a->id_sesion = $id_sesion;
         }
@@ -572,7 +593,7 @@ class AMIEventProcess extends TuberiaProcess
             switch ($listaECCP[3]) {
             case 'AgentLogin':
                 if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: AgentLogin({$listaECCP[4]}) detectado");
+                    $this->_log->output("DEBUG: AgentLogin({$listaECCP[4]}) detectado | EN: AgentLogin({$listaECCP[4]}) detected");
                 }
                 $a = $this->_listaAgentes->buscar('agentchannel', $listaECCP[4]);
                 if (is_null($a)) {
@@ -585,12 +606,12 @@ class AMIEventProcess extends TuberiaProcess
                     if ($params['Response'] == 'Success') {
                         if ($this->DEBUG) {
                             $this->_log->output("DEBUG: AgentLogin({$listaECCP[4]}) ".
-                                "llamada contestada, esperando clave de agente...");
+                                "llamada contestada, esperando clave de agente... | EN: call answered, waiting for agent password...");
                         }
                     } else {
                         if ($this->DEBUG) {
                             $this->_log->output("DEBUG: AgentLogin({$listaECCP[4]}) ".
-                                "llamada ha fallado.");
+                                "llamada ha fallado. | EN: call has failed.");
                         }
                     }
                 }
@@ -604,7 +625,7 @@ class AMIEventProcess extends TuberiaProcess
             case 'QueueMemberAdded':
                 /* Nada que hacer */
                 /* Nothing to do */
-                $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberAdded detectado");
+                $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberAdded detectado | EN: QueueMemberAdded detected");
                 return TRUE;
             default:
                 $this->_log->output("ERR: ".__METHOD__.": no se ha implementado soporte ECCP para: {$sKey} | EN: ECCP support not implemented for: {$sKey}");
@@ -622,7 +643,7 @@ class AMIEventProcess extends TuberiaProcess
         $a->respuestaLoginAgente('Failure', NULL, NULL);
         if ($this->DEBUG) {
             $this->_log->output("DEBUG: AgentLogin({$a->channel}) cuelga antes de ".
-                "introducir contraseña");
+                "introducir contraseña | EN: hangs up before entering password");
         }
         return TRUE;
     }
@@ -853,7 +874,7 @@ class AMIEventProcess extends TuberiaProcess
             	$llamada->id_llamada = $id_call;
             }
     	} else {
-    		$this->_log->output('ERR: '.__METHOD__." no se ha implementado llamada con tipo=$tipo_llamada id=$id_call");
+    		$this->_log->output('ERR: '.__METHOD__." no se ha implementado llamada con tipo=$tipo_llamada id=$id_call | EN: call type not implemented with type=$tipo_llamada id=$id_call");
     	}
     }
 
@@ -886,7 +907,7 @@ class AMIEventProcess extends TuberiaProcess
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (!is_null($a)) {
             if ($this->DEBUG) {
-                $this->_log->output('DEBUG: '.__METHOD__.': '.$sAgente);
+                $this->_log->output('DEBUG: '.__METHOD__.': ping recibido/received: '.$sAgente);
             }
             $a->resetTimeout();
         }
@@ -923,7 +944,7 @@ class AMIEventProcess extends TuberiaProcess
     {
     	switch ($k) {
     	case 'asterisk_cred':
-            $this->_log->output('INFO: actualizando credenciales de Asterisk...');
+            $this->_log->output('INFO: actualizando credenciales de Asterisk... | EN: updating Asterisk credentials...');
             $this->_config['asterisk']['asthost'] = $v[0];
             $this->_config['asterisk']['astuser'] = $v[1];
             $this->_config['asterisk']['astpass'] = $v[2];
@@ -958,6 +979,9 @@ class AMIEventProcess extends TuberiaProcess
             	$this->_ami->remove_event_handler('*');
                 if ($v) $this->_ami->add_event_handler('*', array($this, 'msg_Default'));
             }
+            break;
+        case 'dialer_relatedevents':
+            $this->_config['dialer']['relatedevents'] = $v;
             break;
         default:
             $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k.' | EN: ignoring unimplemented config key: '.$k);
@@ -1021,7 +1045,7 @@ class AMIEventProcess extends TuberiaProcess
                 $a->forzarLogoffAgente($this->_ami, $this->_log);
             }
             if (!is_null($a->logging_inicio) && time() - $a->logging_inicio > 5 * 60) {
-                $this->_log->output('ERR: proceso de login trabado para '.$a->channel.', se indica fallo...');
+                $this->_log->output('ERR: proceso de login trabado para '.$a->channel.', se indica fallo... | EN: login process stuck for '.$a->channel.', indicating failure...');
                 $a->respuestaLoginAgente('Failure', NULL, NULL);
             }
         }
@@ -1131,6 +1155,11 @@ class AMIEventProcess extends TuberiaProcess
      */
     private function _finalizarTransferencia($sAgente)
     {
+        // === TIMESTAMP TRACKER: Finalize Transferencia Entry ===
+        $fEntryMicrotime = microtime(TRUE);
+        $fEntryTime = date('Y-m-d H:i:s.', (int)$fEntryMicrotime) . sprintf('%03d', ($fEntryMicrotime - (int)$fEntryMicrotime) * 1000);
+        $this->_log->output("TIMING: ".__METHOD__.": [ENTER] Agent=$sAgente, microtime=$fEntryMicrotime, time=$fEntryTime | ES: Iniciando finalización de transferencia");
+
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (is_null($a)) {
             $this->_log->output("ERR: ".__METHOD__." no se encuentra agente ".$sAgente." | EN: agent not found ".$sAgente);
@@ -1143,10 +1172,37 @@ class AMIEventProcess extends TuberiaProcess
 
         $this->_log->output("INFO: ".__METHOD__." finalizando seguimiento de llamada transferida para agente ".$sAgente." | EN: ending tracking of transferred call for agent ".$sAgente);
 
-        // Finalize call tracking - this releases the agent
-        $a->llamada->llamadaFinalizaSeguimiento(
-            microtime(TRUE),
-            $this->_config['dialer']['llamada_corta']);
+        // If call was on hold, clear hold state first so holdexit event is sent
+        // before AgentUnlinked. This ensures frontend properly resets hold state.
+        if ($a->llamada->status == 'OnHold') {
+            $this->_log->output("DEBUG: ".__METHOD__." call was on hold - clearing hold state before finalization");
+            $a->llamada->atxfer_hold = FALSE;
+            $a->llamada->llamadaRegresaHold($this->_ami, microtime(TRUE));
+        }
+
+        // === TIMESTAMP TRACKER: Before Transfer Release ===
+        $fBeforeFinalize = microtime(TRUE);
+        $this->_log->output("TIMING: ".__METHOD__.": [BEFORE_TRANSFER_RELEASE] Agent=$sAgente, has_call=".(is_null($a->llamada)?'NO':'YES').", call_uniqueid=".(is_null($a->llamada)?'NULL':$a->llamada->uniqueid).", microtime=$fBeforeFinalize | ES: Antes de liberar agente para transferencia");
+
+        // Release source agent but keep call alive in _listaLlamadas
+        // so msg_Link() can re-link it to the target agent
+        $a->llamada->llamadaTransferidaDesdeAgente(microtime(TRUE));
+
+        // === TIMESTAMP TRACKER: After Transfer Release ===
+        $fAfterFinalize = microtime(TRUE);
+        $fElapsed = ($fAfterFinalize - $fBeforeFinalize) * 1000;
+        $this->_log->output("TIMING: ".__METHOD__.": [AFTER_TRANSFER_RELEASE] Agent=$sAgente, elapsed_ms=".round($fElapsed,3).", agent_call_null=".(is_null($a->llamada)?'YES':'NO').", microtime=$fAfterFinalize | ES: Después de liberar agente para transferencia");
+
+        // Clear transfer reservation if source agent had one pending
+        // Limpiar reserva de transferencia si el agente origen tenía una pendiente
+        foreach ($this->_agentesEnTransferPendiente as $sTarget => $info) {
+            if ($info['source_agent'] == $sAgente) {
+                $this->_cancelarAlarma($info['alarm_key']);
+                unset($this->_agentesEnTransferPendiente[$sTarget]);
+                $this->_log->output('INFO: '.__METHOD__.": Transfer reservation auto-cleared for target=$sTarget (source=$sAgente finalized) | ES: Reserva de transferencia auto-limpiada para destino=$sTarget (origen=$sAgente finalizado)");
+                break;
+            }
+        }
     }
 
     private function _quitarSilencio($llamada)
@@ -1165,7 +1221,7 @@ class AMIEventProcess extends TuberiaProcess
     public function _cb_MixMonitorMute($r)
     {
         if ($r['Response'] != 'Success') {
-            $this->_log->output('ERR: No se puede cambiar mute de la grabacion: '.$r['Message']);
+            $this->_log->output('ERR: No se puede cambiar mute de la grabacion: '.$r['Message'].' | EN: cannot change recording mute: '.$r['Message']);
         }
     }
 
@@ -1175,7 +1231,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
 
         if (!is_null($this->_alarma_faltaconfig)) {
@@ -1187,15 +1243,15 @@ class AMIEventProcess extends TuberiaProcess
         if ($por_pedido) {
             if (is_null($this->_config)) {
                 $this->_config = $datos[0];
-                $this->_log->output('INFO: recibidas credenciales AMI pedidas expresamente...');
+                $this->_log->output('INFO: recibidas credenciales AMI pedidas expresamente... | EN: received explicitly requested AMI credentials...');
                 $bExito = $this->_iniciarConexionAMI();
             } else {
-                $this->_log->output('INFO: IGNORANDO credenciales AMI pedidas expresamente, ya se tiene AMI.');
+                $this->_log->output('INFO: IGNORANDO credenciales AMI pedidas expresamente, ya se tiene AMI. | EN: IGNORING explicitly requested AMI credentials, AMI already available.');
                 $bExito = TRUE;
             }
         } else {
             $this->_config = $datos[0];
-            $this->_log->output('INFO: recibidas credenciales iniciales AMI...');
+            $this->_log->output('INFO: recibidas credenciales iniciales AMI... | EN: received initial AMI credentials...');
             $bExito = $this->_iniciarConexionAMI();
         }
 
@@ -1245,7 +1301,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
     	if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_nuevasCampanias'), $datos));
@@ -1255,7 +1311,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_nuevasLlamadasMarcar'), $datos));
@@ -1265,7 +1321,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
 
         /* Se omite aquí la llamada a enviarRespuesta a propósito. La función
@@ -1282,7 +1338,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_agregarIntentoLoginAgente'), $datos));
@@ -1292,7 +1348,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_cancelarIntentoLoginAgente'), $datos));
@@ -1302,7 +1358,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_infoSeguimientoAgente'), $datos));
@@ -1312,7 +1368,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_infoSeguimientoAgentesCola'), $datos));
@@ -1322,7 +1378,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_reportarInfoLlamadaAtendida'), $datos));
@@ -1332,7 +1388,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_reportarInfoLlamadaAgendada'), $datos));
@@ -1342,7 +1398,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_reportarInfoLlamadasCampania'), $datos));
@@ -1352,7 +1408,7 @@ class AMIEventProcess extends TuberiaProcess
         $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_agentesAgendables'), $datos));
@@ -1362,7 +1418,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_reportarInfoLlamadasColaEntrante'), $datos));
@@ -1372,7 +1428,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_pingAgente'), $datos));
@@ -1382,7 +1438,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_dumpstatus'), $datos));
@@ -1392,7 +1448,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
             array($this, '_listarTotalColasTrabajoAgente'), $datos));
@@ -1402,7 +1458,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
 
         list($sAgente, $idBreak, $idAuditBreak, $nombrePausa) = $datos;
@@ -1424,7 +1480,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
 
         list($sAgente, $idHold, $idAuditHold, $timestamp) = $datos;
@@ -1444,6 +1500,26 @@ class AMIEventProcess extends TuberiaProcess
             return;
         }
 
+        // Debug: Log hold state before initiating
+        if (!is_null($a) && !is_null($a->llamada)) {
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] Hold initiating - Agent={$sAgente} call actualchannel=" . $a->llamada->actualchannel .
+                " status=" . $a->llamada->status .
+                " request_hold=" . ($a->llamada->request_hold ? 'TRUE' : 'FALSE') .
+                " park_exten=" . (isset($a->llamada->park_exten) ? $a->llamada->park_exten : 'NULL'));
+        }
+
+        // If agent is Agent type and in atxfer state, set ATXFER_ON_HOLD on
+        // the agent's SIP channel so dialplan keeps agent in Wait() instead of AgentLogin
+        $bIsAgent = ($a->type == 'Agent');
+        $bIsAtxfer = isset($this->_agentesEnAtxferComplete[$sAgente]);
+        $sLoginChan = $a->login_channel;
+        if ($bIsAgent && $bIsAtxfer && !empty($sLoginChan)) {
+            $this->_ami->SetVar($sLoginChan, 'ATXFER_ON_HOLD', 'yes');
+            $a->llamada->atxfer_hold = TRUE;
+            $this->_log->output("DEBUG_HOLD: Set ATXFER_ON_HOLD=yes on {$sLoginChan} and atxfer_hold flag (agent in atxfer state)");
+        }
+
         $a->setHold($this->_ami, $idHold, $idAuditHold);
         $a->llamada->mandarLlamadaHold($this->_ami, $sFuente, $timestamp);
 
@@ -1459,12 +1535,12 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
 
-        list($queue) = $datos;
+        list($queue, $predictive) = $datos;
 
-        $this->_tuberia->enviarRespuesta($sFuente, $this->_queueshadow->infoPrediccionCola($queue));
+        $this->_tuberia->enviarRespuesta($sFuente, $this->_queueshadow->infoPrediccionCola($queue, $predictive));
     }
 
     /**************************************************************************/
@@ -1534,6 +1610,7 @@ class AMIEventProcess extends TuberiaProcess
                 $a = $this->_listaAgentes->nuevoAgente($tupla['id'],
                     $tupla['number'], $tupla['name'], ($tupla['estatus'] == 'A'),
                     $tupla['type']);
+                if (!is_null($this->_compat)) $a->setCompat($this->_compat);
             } elseif ($a->id_agent != $tupla['id']) {
                 // Agente ha cambiado de ID de base de datos, y está deslogoneado
                 // Agent has changed database ID and is logged out
@@ -1610,7 +1687,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_idNuevaSesionAgente'), $datos);
     }
@@ -1619,7 +1696,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_quitarBreakAgente'), $datos);
     }
@@ -1628,7 +1705,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_quitarReservaAgente'), $datos);
     }
@@ -1637,7 +1714,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_idnewcall'), $datos);
     }
@@ -1646,7 +1723,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_idcurrentcall'), $datos);
     }
@@ -1655,7 +1732,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_actualizarConfig'), $datos);
     }
@@ -1664,7 +1741,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_llamadaSilenciada'), $datos);
     }
@@ -1673,7 +1750,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_llamadaSinSilencio'), $datos);
     }
@@ -1682,7 +1759,7 @@ class AMIEventProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_finalizarTransferencia'), $datos);
     }
@@ -1693,19 +1770,233 @@ class AMIEventProcess extends TuberiaProcess
      * Agentlogoff followed by Agentlogin. We need to ignore the Agentlogoff
      * to prevent the ECCP session from being closed.
      */
-    public function msg_prepararAtxferComplete($sFuente, $sDestino,
+    public function rpc_prepararAtxferComplete($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
-        $sAgente = $datos[0];
+        $this->_tuberia->enviarRespuesta($sFuente, call_user_func_array(
+            array($this, '_prepararAtxferComplete'), $datos));
+    }
+
+    private function _prepararAtxferComplete($sAgente)
+    {
         $this->_log->output('DEBUG: '.__METHOD__.' - Setting atxfer completion flag for '.$sAgente);
         $this->_agentesEnAtxferComplete[$sAgente] = time();
+        return TRUE;
+    }
+
+    public function rpc_esAgenteEnAtxferComplete($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        list($sAgente) = $datos;
+        $this->_tuberia->enviarRespuesta($sFuente,
+            isset($this->_agentesEnAtxferComplete[$sAgente]));
+    }
+
+    public function rpc_esAgenteEnConsultation($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        list($sAgente) = $datos;
+        $this->_tuberia->enviarRespuesta($sFuente,
+            isset($this->_agentesEnConsultation[$sAgente]));
+    }
+
+    public function msg_marcarConsultationIniciada($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        call_user_func_array(array($this, '_marcarConsultationIniciada'), $datos);
+    }
+
+    private function _marcarConsultationIniciada($sAgente)
+    {
+        $this->_log->output('DEBUG: '.__METHOD__.' - Marking consultation started for '.$sAgente);
+        $this->_agentesEnConsultation[$sAgente] = time();
+        // Emit event to front-end to disable Hold/Transfer buttons
+        $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+            array('ConsultationStart', array($sAgente))
+        ));
+    }
+
+    /**
+     * Atomically validate target agent availability AND acquire transfer reservation.
+     * This runs in AMIEventProcess (single process), so check-and-set is inherently atomic.
+     *
+     * Validar atómicamente la disponibilidad del agente destino Y adquirir reserva de transferencia.
+     * Esto corre en AMIEventProcess (proceso único), así que verificar-y-establecer es inherentemente atómico.
+     */
+    private function _reservarAgenteParaTransferencia($sSourceAgent, $sTargetAgent)
+    {
+        $this->_log->output('INFO: '.__METHOD__.": Validating transfer reservation: source=$sSourceAgent, target=$sTargetAgent | ES: Validando reserva de transferencia: origen=$sSourceAgent, destino=$sTargetAgent");
+
+        // 1. Find target agent
+        $a = $this->_listaAgentes->buscar('agentchannel', $sTargetAgent);
+        if (is_null($a)) {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent not found: $sTargetAgent | ES: Agente destino no encontrado: $sTargetAgent");
+            return array('success' => false, 'error_code' => 404,
+                'error_msg' => 'Target agent not found | Agente destino no encontrado',
+                'status' => 'not_found');
+        }
+
+        // 2. Check if another transfer is already pending to this agent (RACE CONDITION PREVENTION)
+        if (isset($this->_agentesEnTransferPendiente[$sTargetAgent])) {
+            $pendingInfo = $this->_agentesEnTransferPendiente[$sTargetAgent];
+            $this->_log->output('WARN: '.__METHOD__.": Transfer to $sTargetAgent already in progress from {$pendingInfo['source_agent']} (since ".date('H:i:s', $pendingInfo['timestamp']).") | ES: Transferencia a $sTargetAgent ya en progreso desde {$pendingInfo['source_agent']}");
+            return array('success' => false, 'error_code' => 409,
+                'error_msg' => 'Transfer to target agent already in progress | Transferencia al agente destino ya en progreso',
+                'status' => 'transfer_pending');
+        }
+
+        // 3. Check agent is logged in
+        if ($a->estado_consola != 'logged-in') {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent not logged in: $sTargetAgent (estado_consola={$a->estado_consola}) | ES: Agente destino no conectado: $sTargetAgent");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => 'Target agent is not logged in | Agente destino no está conectado',
+                'status' => 'offline');
+        }
+
+        // 4. Check agent is not on a call (dialer internal state)
+        if (!is_null($a->llamada)) {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent is on call: $sTargetAgent | ES: Agente destino está en llamada: $sTargetAgent");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => 'Target agent is busy | Agente destino está ocupado',
+                'status' => 'oncall');
+        }
+
+        // 5. Check agent is not paused (break or hold)
+        if ($a->num_pausas > 0) {
+            $this->_log->output('ERR: '.__METHOD__.": Target agent is paused: $sTargetAgent (num_pausas={$a->num_pausas}) | ES: Agente destino está en pausa: $sTargetAgent");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => 'Target agent is on pause | Agente destino está en pausa',
+                'status' => 'paused');
+        }
+
+        // 6. Check Asterisk device state via cached queue_status
+        $max_queue_status = AST_DEVICE_UNKNOWN;
+        foreach ($a->colas_actuales as $queue) {
+            $status = $a->estadoEnCola($queue);
+            if ($status > $max_queue_status) $max_queue_status = $status;
+        }
+        $busyDeviceStates = array(AST_DEVICE_INUSE, AST_DEVICE_BUSY, AST_DEVICE_RINGING, AST_DEVICE_RINGINUSE, AST_DEVICE_ONHOLD);
+        if (in_array($max_queue_status, $busyDeviceStates)) {
+            $statusNames = array(
+                AST_DEVICE_INUSE => 'INUSE', AST_DEVICE_BUSY => 'BUSY',
+                AST_DEVICE_RINGING => 'RINGING', AST_DEVICE_RINGINUSE => 'RINGINUSE',
+                AST_DEVICE_ONHOLD => 'ONHOLD'
+            );
+            $sStatusName = isset($statusNames[$max_queue_status]) ? $statusNames[$max_queue_status] : 'UNKNOWN_'.$max_queue_status;
+            $this->_log->output('ERR: '.__METHOD__.": Target agent device is busy: $sTargetAgent (queue_status=$max_queue_status/$sStatusName) | ES: Dispositivo del agente destino ocupado: $sTargetAgent (estado_cola=$max_queue_status/$sStatusName)");
+            return array('success' => false, 'error_code' => 417,
+                'error_msg' => "Target agent device is busy | Es: Dispositivo del agente destino ocupado ",
+                'status' => 'device_busy', 'queue_status' => $max_queue_status);
+        }
+
+        // 7. ALL CHECKS PASSED - Atomically set reservation with 30s timeout
+        $sAlarmKey = $this->_agregarAlarma(30, array($this, '_timeoutReservaTransferencia'), array($sTargetAgent));
+        $this->_agentesEnTransferPendiente[$sTargetAgent] = array(
+            'timestamp'    => time(),
+            'source_agent' => $sSourceAgent,
+            'alarm_key'    => $sAlarmKey,
+        );
+
+        // Set transfer_pending flag on the source agent's call so msg_Hangup
+        // uses llamadaTransferidaDesdeAgente() instead of full finalization.
+        // This RPC is synchronous, so the flag is set BEFORE the Redirect
+        // triggers any Hangup events from Asterisk.
+        $aSource = $this->_listaAgentes->buscar('agentchannel', $sSourceAgent);
+        if (!is_null($aSource) && !is_null($aSource->llamada)) {
+            $aSource->llamada->transfer_pending = TRUE;
+            $this->_log->output('INFO: '.__METHOD__.": transfer_pending flag SET on call uid=".
+                $aSource->llamada->uniqueid." for source=$sSourceAgent".
+                " | ES: bandera transfer_pending activada en llamada uid=".
+                $aSource->llamada->uniqueid." para origen=$sSourceAgent");
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": Transfer reservation ACQUIRED for target=$sTargetAgent by source=$sSourceAgent (alarm=$sAlarmKey, queue_status=$max_queue_status) | ES: Reserva de transferencia ADQUIRIDA para destino=$sTargetAgent por origen=$sSourceAgent");
+
+        return array('success' => true, 'status' => 'reserved');
+    }
+
+    /**
+     * Safety-net timeout: clear stale transfer reservation after 30 seconds.
+     * Tiempo límite de seguridad: limpiar reserva de transferencia obsoleta después de 30 segundos.
+     */
+    private function _timeoutReservaTransferencia($sTargetAgent)
+    {
+        if (isset($this->_agentesEnTransferPendiente[$sTargetAgent])) {
+            $info = $this->_agentesEnTransferPendiente[$sTargetAgent];
+            $this->_log->output('WARN: '.__METHOD__.": Transfer reservation EXPIRED for target=$sTargetAgent (source={$info['source_agent']}, age=".(time() - $info['timestamp'])."s) | ES: Reserva de transferencia EXPIRADA para destino=$sTargetAgent (origen={$info['source_agent']})");
+            unset($this->_agentesEnTransferPendiente[$sTargetAgent]);
+        }
+    }
+
+    /**
+     * Explicitly release a transfer reservation (called when Redirect fails or ExtensionState rejects).
+     * Liberar explícitamente una reserva de transferencia (llamado cuando Redirect falla o ExtensionState rechaza).
+     */
+    private function _liberarReservaTransferencia($sTargetAgent)
+    {
+        if (isset($this->_agentesEnTransferPendiente[$sTargetAgent])) {
+            $info = $this->_agentesEnTransferPendiente[$sTargetAgent];
+            $this->_cancelarAlarma($info['alarm_key']);
+            unset($this->_agentesEnTransferPendiente[$sTargetAgent]);
+            $this->_log->output('INFO: '.__METHOD__.": Transfer reservation RELEASED for target=$sTargetAgent (source={$info['source_agent']}) | ES: Reserva de transferencia LIBERADA para destino=$sTargetAgent (origen={$info['source_agent']})");
+        } else {
+            $this->_log->output('DEBUG: '.__METHOD__.": No transfer reservation found for target=$sTargetAgent (already cleared) | ES: No se encontró reserva de transferencia para destino=$sTargetAgent (ya limpiada)");
+        }
+    }
+
+    /**
+     * RPC wrapper for transfer reservation.
+     * Validates all state atomically and acquires lock.
+     */
+    public function rpc_reservarAgenteParaTransferencia($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
+        }
+        list($sSourceAgent, $sTargetAgent) = $datos;
+        $this->_tuberia->enviarRespuesta($sFuente,
+            $this->_reservarAgenteParaTransferencia($sSourceAgent, $sTargetAgent));
+    }
+
+    /**
+     * Message handler wrapper for releasing transfer reservation.
+     * Called when transfer fails or needs to be aborted.
+     */
+    public function msg_liberarReservaTransferencia($sFuente, $sDestino,
+        $sNombreMensaje, $iTimestamp, $datos)
+    {
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
+        }
+        list($sTargetAgent) = $datos;
+        $this->_liberarReservaTransferencia($sTargetAgent);
+    }
+
+    public function msg_UserEvent($sEvent, $params, $sServer, $iPort)
+    {
+        if (!isset($params['UserEvent'])) return FALSE;
+
+        if ($params['UserEvent'] == 'ConsultationEnd' && isset($params['Agent'])) {
+            $sAgente = trim($params['Agent']);
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] ConsultationEnd UserEvent received for agent=$sAgente" .
+                " was_in_consultation=" . (isset($this->_agentesEnConsultation[$sAgente]) ? 'YES' : 'NO'));
+            if (isset($this->_agentesEnConsultation[$sAgente])) {
+                unset($this->_agentesEnConsultation[$sAgente]);
+                $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                    array('ConsultationEnd', array($sAgente))
+                ));
+            }
+        }
+        return FALSE;
     }
 
     public function msg_abortarNuevasLlamadasMarcar($sFuente, $sDestino,
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido/received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_abortarNuevasLlamadasMarcar'), $datos);
     }
@@ -1718,9 +2009,14 @@ class AMIEventProcess extends TuberiaProcess
         	if ($a->estado_consola != 'logged-out') {
                 if (!is_null($this->_ami)) {
                 	if ($a->type == 'Agent') {
-                        // app_agent_pool: Hangup the AgentLogin channel to logout
-                        if (!is_null($a->login_channel)) {
-                            $this->_ami->Hangup($a->login_channel);
+                        if (!is_null($this->_compat) && $this->_compat->hasChanAgent()) {
+                            // chan_agent (Asterisk 11): use Agentlogoff
+                            $this->_ami->Agentlogoff($a->number);
+                        } else {
+                            // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel
+                            if (!is_null($a->login_channel)) {
+                                $this->_ami->Hangup($a->login_channel);
+                            }
                         }
                 	} else {
                 	    foreach ($a->colas_actuales as $q) $this->_ami->QueueRemove($q, $a->channel);
@@ -1736,9 +2032,9 @@ class AMIEventProcess extends TuberiaProcess
 
     public function msg_VarSet($sEvent, $params, $sServer, $iPort)
     {
-        if ($this->DEBUG) {
+        if ($this->DEBUG && $this->_config['dialer']['relatedevents']) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
                 "\n$sEvent: => ".print_r($params, TRUE)
                 );
         }
@@ -1776,7 +2072,7 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
                 "\n$sEvent: => ".print_r($params, TRUE)
                 );
         }
@@ -1787,7 +2083,7 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
                 "\n$sEvent: => ".print_r($params, TRUE)
                 );
         }
@@ -1795,7 +2091,7 @@ Uniqueid: 1429642067.241008
         if (isset($params['Channel']) &&
             preg_match('#^(Local/.+@[[:alnum:]-]+)-[\dabcdef]+(,|;)(1|2)$#', $params['Channel'], $regs)) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": se ha creado pata {$regs[3]} de llamada {$regs[1]}");
+                $this->_log->output("DEBUG: ".__METHOD__.": se ha creado pata {$regs[3]} de llamada {$regs[1]} | EN: created leg {$regs[3]} of call {$regs[1]}");
             }
             $llamada = $this->_listaLlamadas->buscar('dialstring', $regs[1]);
             if (!is_null($llamada)) {
@@ -1803,7 +2099,7 @@ Uniqueid: 1429642067.241008
                     // Pata 1, se requiere para los eventos Link/Join
                     $llamada->uniqueid = $params['Uniqueid'];
                     if ($this->DEBUG) {
-                        $this->_log->output("DEBUG: ".__METHOD__.": Llamada localizada, Uniqueid={$params['Uniqueid']}");
+                        $this->_log->output("DEBUG: ".__METHOD__.": Llamada localizada, Uniqueid={$params['Uniqueid']} | EN: Call located, Uniqueid={$params['Uniqueid']}");
                     }
                 } elseif ($regs[3] == '2') {
                     /* Pata 2, se requiere para recuperar razón de llamada
@@ -1813,7 +2109,7 @@ Uniqueid: 1429642067.241008
                     $llamada->AuxChannels[$params['Uniqueid']] = array();
                     $llamada->registerAuxChannels();
                     if ($this->DEBUG) {
-                        $this->_log->output("DEBUG: ".__METHOD__.": Llamada localizada canal auxiliar Uniqueid={$params['Uniqueid']}");
+                        $this->_log->output("DEBUG: ".__METHOD__.": Llamada localizada canal auxiliar Uniqueid={$params['Uniqueid']} | EN: Call located auxiliary channel Uniqueid={$params['Uniqueid']}");
                     }
                 }
             }
@@ -1826,7 +2122,7 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
                 "\n$sEvent: => ".print_r($params, TRUE)
                 );
         }
@@ -1873,7 +2169,7 @@ Uniqueid: 1429642067.241008
             	$llamada->AuxChannels[$destUniqueID]['Dial'] = $params;
                 $llamada->registerAuxChannels();
                 if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: ".__METHOD__.": encontrado canal auxiliar para llamada: {$llamada->actionid}");
+                    $this->_log->output("DEBUG: ".__METHOD__.": encontrado canal auxiliar para llamada: {$llamada->actionid} | EN: found auxiliary channel for call: {$llamada->actionid}");
                 }
 
                 if (strpos($params['Destination'], 'Local/') !== 0) {
@@ -1901,7 +2197,7 @@ Uniqueid: 1429642067.241008
                         	if ($this->DEBUG) {
                         		$this->_log->output("DEBUG: ".__METHOD__.": canal ".
                                     "auxiliar previo para llamada {$llamada->actionid} ".
-                                    "ha colgado, se renueva.");
+                                    "ha colgado, se renueva. | EN: previous auxiliary channel for call {$llamada->actionid} has hung up, renewing.");
                         	}
                             $this->_asignarCanalRemotoReal($params, $llamada);
                         } else {
@@ -1912,7 +2208,7 @@ Uniqueid: 1429642067.241008
                                 $a = $this->_listaAgentes->buscar('agentchannel', $sCanalPosibleAgente);
                                 if (!is_null($a) && $a->estado_consola == 'logged-in') {
                                 	if ($this->DEBUG) {
-                                		$this->_log->output('DEBUG: '.__METHOD__.': canal remoto es agente, se ignora.');
+                                		$this->_log->output('DEBUG: '.__METHOD__.': canal remoto es agente, se ignora. | EN: remote channel is agent, ignoring.');
                                 	}
                                 } else {
                                     $sCanalPosibleAgente = NULL;
@@ -1921,7 +2217,7 @@ Uniqueid: 1429642067.241008
                             if (is_null($sCanalPosibleAgente)) {
                                 $this->_log->output('WARN: '.__METHOD__.': canal remoto en '.
                                     'conflicto, anterior '.$llamada->actualchannel.' nuevo '.
-                                    $params['Destination']);
+                                    $params['Destination'].' | EN: remote channel conflict, previous '.$llamada->actualchannel.' new '.$params['Destination']);
                             }
                         }
                     }
@@ -1936,7 +2232,7 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                ': capturado canal remoto real: '.$params['Destination']);
+                ': capturado canal remoto real/captured real remote channel: '.$params['Destination']);
         }
         $llamada->llamadaIniciaDial($params['local_timestamp_received'], $params['Destination']);
     }
@@ -1945,7 +2241,7 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
                 "\n$sEvent: => ".print_r($params, TRUE)
                 );
         }
@@ -1979,6 +2275,8 @@ Uniqueid: 1429642067.241008
             if ($r['Response'] != 'Success') {
             	$this->_log->output('ERR: '.__METHOD__.
                     ': fallo en obtener CALLERID(num) para canal '.$params['Channel'].
+                    ': '.$r['Response'].' - '.$r['Message'].
+                    ' | EN: failed to get CALLERID(num) for channel '.$params['Channel'].
                     ': '.$r['Response'].' - '.$r['Message']);
             } else {
                 $r['Value'] = in_array(trim($r['Value']), array('', '<null>', '(null)'))
@@ -1988,6 +2286,8 @@ Uniqueid: 1429642067.241008
                     if ($r['Response'] != 'Success') {
                         $this->_log->output('ERR: '.__METHOD__.
                             ': fallo en asignar CALLERID(num) para canal '.$params['Channel'].
+                            ': '.$r['Response'].' - '.$r['Message'].
+                            ' | EN: failed to set CALLERID(num) for channel '.$params['Channel'].
                             ': '.$r['Response'].' - '.$r['Message']);
                     }
                 }
@@ -2003,8 +2303,8 @@ Uniqueid: 1429642067.241008
 
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\n$sEvent: recibido/received => ".print_r($params, TRUE)
                 );
         }
 
@@ -2014,9 +2314,10 @@ Uniqueid: 1429642067.241008
 
         $sAgente = $params['Location'];
 
-        // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
-        if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
-            $sAgente = "Agent/".$regs[1];
+        // Normalize agent queue interface to canonical Agent/XXXX for lookup
+        if (!is_null($this->_compat)) {
+            $sNormalized = $this->_compat->normalizeAgentFromInterface($sAgente);
+            if (!is_null($sNormalized)) $sAgente = $sNormalized;
         }
 
         /* tomado de msg_agentLogin */
@@ -2027,8 +2328,8 @@ Uniqueid: 1429642067.241008
         /* if (is_null($a) || $a->estado_consola == 'logged-out') { // Original line */
        if (is_null($a)) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada.");
-                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogin");
+                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada. | EN: AgentLogin($sAgente) not started by program, doing nothing.");
+                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogin | EN: EXIT OnAgentlogin");
             }
             return FALSE;
         }
@@ -2050,7 +2351,9 @@ Uniqueid: 1429642067.241008
                 } else {
                     $this->_log->output('WARN: '.__METHOD__.': se ignora ingreso a '.
                         'cola '.$params['Queue'].' de '.$sAgente.
-                        ' - cola no está en colas dinámicas.');
+                        ' - cola no está en colas dinámicas.'.
+                        ' | EN: ignoring queue join to '.$params['Queue'].' by '.$sAgente.
+                        ' - queue is not in dynamic queues.');
                 }
             } else {
                 // $a->extension debió de setearse en $a->iniciarLoginAgente()
@@ -2062,7 +2365,7 @@ Uniqueid: 1429642067.241008
         } else {
         	if ($this->DEBUG) {
         		$this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) duplicado (múltiples colas), ignorando | EN: duplicate AgentLogin($sAgente) (multiple queues), ignoring");
-                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogin");
+                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogin | EN: EXIT OnAgentlogin");
         	}
         }
     }
@@ -2071,8 +2374,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\n$sEvent: recibido/received => ".print_r($params, TRUE)
                 );
         }
 
@@ -2082,17 +2385,18 @@ Uniqueid: 1429642067.241008
 
         $sAgente = $params['Location'];
 
-        // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
-        if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
-            $sAgente = "Agent/".$regs[1];
+        // Normalize agent queue interface to canonical Agent/XXXX for lookup
+        if (!is_null($this->_compat)) {
+            $sNormalized = $this->_compat->normalizeAgentFromInterface($sAgente);
+            if (!is_null($sNormalized)) $sAgente = $sNormalized;
         }
 
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
 
         if (is_null($a)) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin({$sAgente}) no iniciado por programa, no se hace nada.");
-                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogoff");
+                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin({$sAgente}) no iniciado por programa, no se hace nada. | EN: AgentLogin({$sAgente}) not started by program, doing nothing.");
+                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogoff | EN: EXIT OnAgentlogoff");
             }
             return FALSE;
         }
@@ -2107,7 +2411,7 @@ Uniqueid: 1429642067.241008
         if ($a->estado_consola == 'logged-in') {
             if ($a->type == 'Agent') {
                 if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberRemoved({$params['Location']}) , ignorando...");
+                    $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberRemoved({$params['Location']}) , ignorando... | EN: QueueMemberRemoved({$params['Location']}), ignoring...");
                 }
             } elseif ($a->hayColasDinamicasLogoneadas()) {
                 if ($this->DEBUG) {
@@ -2119,13 +2423,13 @@ Uniqueid: 1429642067.241008
             }
         } else {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberRemoved({$params['Location']}) en estado no-logoneado, ignorando...");
+                $this->_log->output("DEBUG: ".__METHOD__.": QueueMemberRemoved({$params['Location']}) en estado no-logoneado, ignorando... | EN: QueueMemberRemoved({$params['Location']}) in non-logged-in state, ignoring...");
             }
         }
 
         if ($this->_finalizandoPrograma) $this->_verificarFinalizacionLlamadas();
         if ($this->DEBUG) {
-            $this->_log->output("DEBUG: ".__METHOD__.": EXIT QueueMemberRemoved");
+            $this->_log->output("DEBUG: ".__METHOD__.": SALIDA QueueMemberRemoved | EN: EXIT QueueMemberRemoved");
         }
         return FALSE;
     }
@@ -2134,8 +2438,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\n$sEvent: recibido/received => ".print_r($params, TRUE)
                 );
         }
 
@@ -2181,6 +2485,8 @@ Uniqueid: 1429642067.241008
             if ($this->DEBUG) {
                 $this->_log->output('DEBUG: '.__METHOD__.
                     ': fallo en obtener MIXMONITOR_FILENAME para canal '.$channel.
+                    ': '.$r['Response'].' - '.$r['Message'].
+                    ' | EN: failed to get MIXMONITOR_FILENAME for channel '.$channel.
                     ': '.$r['Response'].' - '.$r['Message']);
             }
         } else {
@@ -2207,7 +2513,7 @@ Uniqueid: 1429642067.241008
             unset($this->_saved_bridge_channel[$bunique.'_local']);
             unset($this->_saved_bridge_channel[$bunique.'_actual']);
         }
-        $this->_log->output('DEBUG: '.__METHOD__. "Bridge Destroy $bunique");
+        $this->_log->output('DEBUG: '.__METHOD__. " Puente destruido/Bridge Destroy $bunique");
 
     }
 
@@ -2223,7 +2529,8 @@ Uniqueid: 1429642067.241008
 
         $bunique = $params['BridgeUniqueid'];
 
-        // Handle Local/XXXX@agents;N channels from app_agent_pool
+        // Handle Local/XXXX@agents;N channels from app_agent_pool (Asterisk 12+)
+        // On chan_agent (Asterisk 11), channel is Agent/XXXX and this won't match
         $isLocalAgentChannel = false;
         $originalChannel = $params['Channel'];  // Save original BEFORE conversion
         if(preg_match("|Local/(\d+)@agents[;-].*|",$params['Channel'],$matches)) {
@@ -2239,9 +2546,9 @@ Uniqueid: 1429642067.241008
                 $this->_saved_bridge_channel[$bunique.'_local'] = true;
                 $this->_saved_bridge_channel[$bunique.'_actual'] = $originalChannel;
             }
-            $this->_log->output('DEBUG: '.__METHOD__. " Bridge Enter $bunique number channels 1 saving data");
+            $this->_log->output('DEBUG: '.__METHOD__. " Entrada puente/Bridge Enter $bunique canales/channels 1, guardando datos/saving data");
         } else if ($params['BridgeNumChannels']==2) {
-            $this->_log->output('DEBUG: '.__METHOD__. " Bridge Enter $bunique number channels 2, constructing link channel ".$params['Channel']);
+            $this->_log->output('DEBUG: '.__METHOD__. " Entrada puente/Bridge Enter $bunique canales/channels 2, construyendo enlace canal/constructing link channel ".$params['Channel']);
             
             if(isset($this->_saved_bridge_unique[$bunique])) {
                 $params['Uniqueid1']=$params['Uniqueid'];
@@ -2261,11 +2568,11 @@ Uniqueid: 1429642067.241008
                 $this->msg_Link("bridge", $params, $sServer, $iPort); 
             } else {
                 $llamada = $this->_listaLlamadas->buscar('auxchannel', $params['Uniqueid']);
-                $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter NICO estaba destruido busco auxchnnale $llamada");
+                $this->_log->output('DEBUG: '.__METHOD__. " Bridge Enter estaba destruido, busco auxchannel/was destroyed, searching auxchannel $llamada");
                 $llamada->dump($this->_log);
 
                 $llamada = $this->_listaLlamadas->buscar('channel', $params['Uniqueid']);
-                $this->_log->output('DEBUG: '.__METHOD__. "Bridge Enter NICO estaba destruido busco chnnale $llamada");
+                $this->_log->output('DEBUG: '.__METHOD__. " Bridge Enter estaba destruido, busco channel/was destroyed, searching channel $llamada");
                 $llamada->dump($this->_log);
 
                 // $llamada->actualchannel = $sCanalCandidato
@@ -2280,8 +2587,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\n$sEvent: recibido/received => ".print_r($params, TRUE)
                 );
         }
 
@@ -2294,31 +2601,90 @@ Uniqueid: 1429642067.241008
         // Recuperar el agente local y el canal remoto
         list($sAgentNum, $sAgentChannel, $sChannel, $sRemChannel) = $this->_identificarCanalAgenteLink($params);
 
+        // Detect agent returning from attended transfer consultation (callback type).
+        // When Channel1=Channel2, the agent re-entered the original bridge after
+        // the consultation call was rejected/hung up. The llamada lookup by uniqueid
+        // would fail here because both uniqueids are the agent's, not the call's.
+        if ($params['Channel1'] == $params['Channel2'] && !is_null($sChannel)) {
+            if (isset($this->_agentesEnConsultation[$sChannel])) {
+                unset($this->_agentesEnConsultation[$sChannel]);
+                $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                    array('ConsultationEnd', array($sChannel))
+                ));
+                return FALSE;
+            }
+            return FALSE;
+        }
+
         if (is_null($llamada)) $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid1']);
         if (is_null($llamada)) $llamada = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid2']);
 
+        if ($this->DEBUG) {
+            $this->_log->output('DEBUG: '.__METHOD__.': call lookup result: '.
+                'llamada='.(!is_null($llamada) ? 'FOUND(uid='.$llamada->uniqueid.')' : 'NULL').
+                ' timestamp_link='.(!is_null($llamada) ? ($llamada->timestamp_link ?? 'NULL') : 'N/A').
+                ' agente='.(!is_null($llamada) && !is_null($llamada->agente) ? $llamada->agente->channel : 'NULL').
+                ' sChannel='.$sChannel.
+                ' | ES: resultado de búsqueda de llamada');
+        }
+
         if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
             !is_null($llamada->agente) && $llamada->agente->channel != $sChannel) {
-            /* Si la llamada ya ha sido enlazada previamente, y ahora se enlaza
-             * a un canal distinto del agente original, se asume que ha sido
-             * transferida a una extensión fuera de monitoreo, y ya no debe de
-             * monitorearse. Ya que Asterisk no ejecuta un Hangup en este caso,
-             * se lo debe simular.
+
+            // For Agent type (app_agent_pool), Asterisk swaps the Local/XXXX@agents
+            // channel with the agent's physical SIP extension in the bridge after
+            // returning from hold. This bridge swap must not be treated as a transfer.
+            if ($llamada->agente->extension == $sChannel) {
+                // Check if call is returning from hold (via Bridge() in atxfer-unhold)
+                if ($llamada->status == 'OnHold') {
+                    $this->_log->output('DEBUG: '.__METHOD__.
+                        ': Agent type hold recovery via bridge swap for agent '.
+                        $llamada->agente->channel.', extension='.$sChannel);
+                    // Pass NULL for agentchannel to preserve Agent/XXXX identifier.
+                    // The physical SIP channel ($sChannel=SIP/101) must NOT replace
+                    // _agentchannel (Agent/1001) - the hangup handler needs Agent/XXXX.
+                    $llamada->llamadaRegresaHold($this->_ami,
+                        $params['local_timestamp_received'], NULL,
+                        ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
+                        $sAgentChannel);
+                    return FALSE;
+                }
+                // Normal bridge swap - ignore
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: '.__METHOD__.
+                        ': ignoring app_agent_pool bridge swap for agent '.
+                        $llamada->agente->channel.', extension='.$sChannel.
+                        ' | EN: ignoring app_agent_pool bridge swap for agent '.
+                        $llamada->agente->channel.', extension='.$sChannel);
+                }
+                return FALSE;
+            }
+
+            /* If the call has been previously linked, and now links
+             * to a different channel than the original agent, it is assumed
+             * to have been transferred to an unmonitored extension, and should
+             * no longer be monitored. Since Asterisk does not execute a Hangup
+             * in this case, it must be simulated.
              */
             $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
             if (!is_null($a)) {
             	$this->_log->output('WARN: '.__METHOD__.': se ha detectado '.
                     'transferencia a otro agente, pero seguimiento de llamada '.
-                    'con múltiples agentes no está (todavía) implementado.');
+                    'con múltiples agentes no está (todavía) implementado.'.
+                    ' | EN: transfer to another agent detected, but call tracking '.
+                    'with multiple agents is not (yet) implemented.');
             } elseif (!is_null($sAgentNum)) {
                 $this->_log->output("ERR: ".__METHOD__.": no se ha ".
-                    "cargado información de agente $sAgentNum");
+                    "cargado información de agente $sAgentNum".
+                    " | EN: agent information not loaded for agent $sAgentNum");
                 $this->_tuberia->msg_SQLWorkerProcess_requerir_nuevaListaAgentes();
             } else {
                 if ($this->DEBUG) {
                 	$this->_log->output('DEBUG: '.__METHOD__.': llamada '.
                         'transferida a extensión no monitoreada '.$sChannel.
-                        ', se finaliza seguimiento...');
+                        ', se finaliza seguimiento...'.
+                        ' | EN: call transferred to unmonitored extension '.$sChannel.
+                        ', ending tracking...');
                 }
             }
             $llamada->llamadaFinalizaSeguimiento(
@@ -2327,17 +2693,53 @@ Uniqueid: 1429642067.241008
             return FALSE;
         }
 
+        // Detect agent returning from consultation to the original call.
+        // After hold recovery, Channel1 != Channel2 (bridge saved the caller's
+        // channel, not the agent's), so the Channel1==Channel2 check above
+        // does not fire. Instead, detect by: call already linked to same agent
+        // AND agent is in consultation AND call is NOT on hold.
+        // OnHold check is critical: if agent had a stale consultation state
+        // (e.g. from a previous successful transfer where ConsultationEnd UserEvent
+        // never fired), hold recovery must take precedence over consultation detection.
+        if (!is_null($llamada) && !is_null($llamada->timestamp_link) &&
+            !is_null($llamada->agente) && $llamada->agente->channel == $sChannel &&
+            !is_null($sChannel) && isset($this->_agentesEnConsultation[$sChannel]) &&
+            $llamada->status != 'OnHold') {
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] ConsultationEnd via Link detected for agent=$sChannel" .
+                " call actualchannel=" . $llamada->actualchannel .
+                " call status=" . $llamada->status);
+            if ($this->DEBUG) {
+                $this->_log->output('DEBUG: '.__METHOD__.
+                    ': agent '.$sChannel.' returned from consultation to original call'.
+                    ' | EN: agent '.$sChannel.' returned from consultation to original call');
+            }
+            unset($this->_agentesEnConsultation[$sChannel]);
+            $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                array('ConsultationEnd', array($sChannel))
+            ));
+            return FALSE;
+        }
+
         /* Se ha detectado llamada que regresa de hold. En el evento ParkedCall
          * se asignó el uniqueid nuevo. */
+        /* A call returning from hold has been detected. In the ParkedCall event,
+        * a new uniqueid was assigned. */
         if (!is_null($llamada) && $llamada->status == 'OnHold') {
             if ($this->DEBUG) {
                 $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada ".
                     "que regresa de HOLD {$llamada->actualchannel}, ".
-                    "agentchannel={$sAgentChannel} se quita estado OnHold...");
+                    "agentchannel={$sChannel} actualAgentChannel={$sAgentChannel} se quita estado OnHold...".
+                    " | EN: identified call returning from HOLD {$llamada->actualchannel}, ".
+                    "agentchannel={$sChannel} actualAgentChannel={$sAgentChannel} removing OnHold state...");
             }
+            // Pass $sChannel (logical name: Agent/1001 or SIP/101) as agentchannel
+            // and $sAgentChannel (actual channel: Local/1001@agents-xxx or SIP/101-xxx)
+            // as actualAgentChannel, consistent with llamadaEnlazadaAgente()
             $llamada->llamadaRegresaHold($this->_ami,
-                $params['local_timestamp_received'], $sAgentChannel,
-                ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1']);
+                $params['local_timestamp_received'], $sChannel,
+                ($llamada->uniqueid == $params['Uniqueid1']) ? $params['Uniqueid2'] : $params['Uniqueid1'],
+                $sAgentChannel);
             return FALSE;
         }
 
@@ -2347,6 +2749,12 @@ Uniqueid: 1429642067.241008
          * distinguir los dos casos, se verifica el estado de Hold de la
          * llamada.
          */
+        /* If there is no key, it could still be a scheduled call that must be 
+        searched for by channel name. It could also be a call returning from Hold, 
+        which has been assigned a different UniqueID. To distinguish between 
+        the two cases, the call's Hold status is checked..
+         */
+
         $sNuevo_Uniqueid = NULL;
         if (is_null($llamada)) {
             $llamada = $this->_listaLlamadas->buscar('actualchannel', $params["Channel1"]);
@@ -2359,15 +2767,30 @@ Uniqueid: 1429642067.241008
         if (!is_null($sNuevo_Uniqueid) && $llamada->uniqueid != $sNuevo_Uniqueid) {
             if (!is_null($llamada->agente_agendado) && $llamada->agente_agendado->channel == $sChannel) {
                 if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada agendada".
-                        "{$llamada->channel}, cambiado Uniqueid a {$sNuevo_Uniqueid} ");
+                    $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada agendada ".
+                        "{$llamada->channel}, cambiado Uniqueid a {$sNuevo_Uniqueid}".
+                        " | EN: identified scheduled call ".
+                        "{$llamada->channel}, changed Uniqueid to {$sNuevo_Uniqueid}");
                 }
+                $llamada->uniqueid = $sNuevo_Uniqueid;
+            } elseif (!is_null($llamada->timestamp_link) && is_null($llamada->agente)) {
+                // Transfer scenario: outgoing calls use Local channels so the tracked
+                // uniqueid differs from the trunk channel's uniqueid in the new bridge.
+                // Accept the call and update uniqueid so transfer detection handles it.
+                $this->_log->output('INFO: '.__METHOD__.': transfer - outgoing call found by '.
+                    'actualchannel='.$llamada->actualchannel.', updating uniqueid from '.
+                    $llamada->uniqueid.' to '.$sNuevo_Uniqueid.
+                    ' | ES: transferencia - llamada saliente encontrada por '.
+                    'actualchannel='.$llamada->actualchannel.', actualizando uniqueid de '.
+                    $llamada->uniqueid.' a '.$sNuevo_Uniqueid);
                 $llamada->uniqueid = $sNuevo_Uniqueid;
             } else {
                 if ($this->DEBUG) {
                     $this->_log->output("DEBUG: ".__METHOD__.": identificada ".
                         "llamada que comparte un actualchannel={$llamada->actualchannel} ".
-                        "pero no regresa de HOLD ni es agendada, se ignora.");
+                        "pero no regresa de HOLD ni es agendada, se ignora.".
+                        " | EN: identified call sharing actualchannel={$llamada->actualchannel} ".
+                        "but not returning from HOLD nor scheduled, ignoring.");
                 }
             	$llamada = NULL;
             }
@@ -2376,14 +2799,64 @@ Uniqueid: 1429642067.241008
 
         if (!is_null($llamada)) {
             // Se tiene la llamada principal monitoreada
-            if (!is_null($llamada->timestamp_link)) return FALSE;   // Múltiple link se ignora
+            // The main call is being monitored
+            if (!is_null($llamada->timestamp_link)) {
+                if (is_null($llamada->agente)) {
+                    // TRANSFER SCENARIO: call was linked before but source agent released
+                    // by _finalizarTransferencia(). Reassign to the new target agent.
+                    $this->_log->output('INFO: '.__METHOD__.': transfer detected - reassigning call '.
+                        $llamada->uniqueid.' to agent '.$sChannel.
+                        ' | ES: transferencia detectada - reasignando llamada '.
+                        $llamada->uniqueid.' al agente '.$sChannel);
+
+                    $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
+                    if (is_null($a) || $a->estado_consola != 'logged-in') {
+                        // Agent-type fallback: direct extension transfer shows SIP/XXX
+                        // but agentchannel is Agent/XXXX, lookup by extension instead.
+                        // Also fallback when agentchannel finds a logged-out agent
+                        // (e.g. SIP/101 agent exists but Agent/1001 using SIP/101 is logged-in)
+                        $a = $this->_listaAgentes->buscar('extension', $sChannel);
+                    }
+                    if (!is_null($a)) {
+                        $sUniqueidAgente = ($llamada->uniqueid == $params['Uniqueid1'])
+                            ? $params['Uniqueid2'] : $params['Uniqueid1'];
+
+                        // Use $a->channel for agentchannel (e.g. Agent/1001) not $sChannel
+                        // (e.g. SIP/101) to ensure downstream hangup handlers work correctly
+                        $llamada->llamadaEnlazadaAgente(
+                            $params['local_timestamp_received'], $a,
+                            $sRemChannel, $sUniqueidAgente,
+                            $a->channel, $sAgentChannel);
+
+                        // Clear transfer_pending now that call is re-linked to target agent,
+                        // so future hangups use normal finalization
+                        $llamada->transfer_pending = FALSE;
+
+                        $this->_log->output('INFO: '.__METHOD__.': call successfully reassigned to '.
+                            $a->channel.' | ES: llamada reasignada exitosamente a '.$a->channel);
+
+                        // TODO: Source agent attribution is lost - id_agent in calls/call_entry
+                        // is overwritten to target agent. Consider adding a call_agent_history
+                        // table to track all agents that handled a call for accurate reporting.
+
+                        $this->_liberarReservaTransferencia($a->channel);
+                    } else {
+                        $this->_log->output('WARN: '.__METHOD__.': transfer target agent not found for channel '.
+                            $sChannel.' | ES: agente destino no encontrado para canal '.$sChannel);
+                    }
+                    return FALSE;
+                }
+                // Normal multiple link - ignore | Múltiple link se ignora
+                return FALSE;
+            }
 
             $a = $this->_listaAgentes->buscar('agentchannel', $sChannel);
             if (is_null($a)) {
             	$this->_log->output("ERR: ".__METHOD__.": no se puede identificar agente ".
                     "asignado a llamada. Se dedujo que el canal de agente era $sChannel ".
-                    "a partir de params=".print_r($params, 1).
-                    "\nResumen de llamada asociada es: ".print_r($llamada->resumenLlamada(), 1));
+                    "a partir de/from params=".print_r($params, 1).
+                    "\nResumen de llamada asociada/Associated call summary: ".print_r($llamada->resumenLlamada(), 1).
+                    " | EN: cannot identify agent assigned to call. Agent channel was deduced as $sChannel");
             } else {
                 // For Agent type: $sChannel is Agent/1001 (for lookup/backward compat),
                 // $sAgentChannel is the actual channel (Local/... after substitution in _identificarCanalAgenteLink)
@@ -2397,13 +2870,18 @@ Uniqueid: 1429642067.241008
                     } else {
                         $this->_log->output('WARN: '.__METHOD__.
                             ' actualchannel no identificado, identificación no implementada para agente dinámico.'.
-                            "\nResumen de llamada asociada es: ".print_r($llamada->resumenLlamada(), 1));
+                            ' | EN: actualchannel not identified, identification not implemented for dynamic agent.'.
+                            "\nResumen de llamada asociada/Associated call summary: ".print_r($llamada->resumenLlamada(), 1));
                     }
                 }
             }
         } else {
             /* El Link de la pata auxiliar con otro canal puede indicar el
              * ActualChannel requerido para poder manipular la llamada. */
+            /* The Link of the auxiliary leg with another channel can indicate 
+            the ActualChannel required to be able to manipulate the call. 
+            */
+
             $sCanalCandidato = NULL;
             if (is_null($llamada)) {
                 $llamada = $this->_listaLlamadas->buscar('auxchannel', $params['Uniqueid1']);
@@ -2419,18 +2897,22 @@ Uniqueid: 1429642067.241008
                     $llamada->actualchannel = $sCanalCandidato;
                     if ($this->DEBUG) {
             			$this->_log->output('DEBUG: '.__METHOD__.
-                            ': capturado canal remoto real: '.$sCanalCandidato);
+                            ': capturado canal remoto real/captured real remote channel: '.$sCanalCandidato);
             		}
             	} elseif ($llamada->actualchannel != $sCanalCandidato) {
                     if (is_null($llamada->timestamp_link)) {
                 		$this->_log->output('WARN: '.__METHOD__.': canal remoto en '.
                             'conflicto, anterior '.$llamada->actualchannel.' nuevo '.
+                            $sCanalCandidato.
+                            ' | EN: remote channel conflict, previous '.$llamada->actualchannel.' new '.
                             $sCanalCandidato);
                     } else {
                         if ($this->DEBUG) {
                             $this->_log->output('DEBUG: '.__METHOD__.': canal remoto en '.
                                 'conflicto, anterior '.$llamada->actualchannel.' nuevo '.
-                                $sCanalCandidato.', se ignora por ser luego de Link.');
+                                $sCanalCandidato.', se ignora por ser luego de Link.'.
+                                ' | EN: remote channel conflict, previous '.$llamada->actualchannel.' new '.
+                                $sCanalCandidato.', ignored because it is after Link.');
                         }
                     }
             	}
@@ -2509,7 +2991,9 @@ Uniqueid: 1429642067.241008
          * type. If both are Agent (how did they call each other?) preference is
          * given to channel 1. */
         $this->_log->output('WARN: '.__METHOD__.': llamada entre dos agentes logoneados '.
-            $r1[1].' y '.$r2[1]);
+            $r1[1].' y '.$r2[1].
+            ' | EN: call between two logged-in agents '.
+            $r1[1].' and '.$r2[1]);
         if ($a1->type == 'Agent') return array($r1[2], $r1[0], $r1[1], $params['Channel2']);
         if ($a2->type == 'Agent') return array($r2[2], $r2[0], $r2[1], $params['Channel1']);
 
@@ -2522,8 +3006,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\n$sEvent: recibido/received => ".print_r($params, TRUE)
                 );
         }
 
@@ -2533,8 +3017,34 @@ Uniqueid: 1429642067.241008
         }
 
         if (strpos($params['Channel'], 'Local/')===0) {
-            $this->_log->output('DEBUG: ignoro hangup local');
-            return FALSE;
+            // Normally Local channel hangups are ignored because the real trunk
+            // channel hangup handles cleanup. However, when the trunk fails
+            // (e.g., CHANUNAVAIL) but the dialplan routes the call to a queue
+            // where an agent answers, the Local channel hangup is the only
+            // event that can finalize the call.
+            $bLocalTracked = FALSE;
+            if (!is_null($this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid']))) {
+                $bLocalTracked = TRUE;
+            } elseif (!is_null($this->_listaAgentes->buscar('uniqueidlink', $params['Uniqueid']))) {
+                // Skip agent callback channels (Local/XXXX@agents) - these are internal
+                // callbacks for Agent type logins that hang up after the agent answers.
+                // Their hangup should NOT finalize the customer call.
+                if (preg_match('/^Local\/\d+@agents/', $params['Channel'])) {
+                    $this->_log->output('DEBUG: '.__METHOD__.
+                        ': ignoring agent callback channel hangup | channel='.$params['Channel']);
+                } else {
+                    $bLocalTracked = TRUE;
+                }
+            } elseif (!is_null($this->_listaLlamadas->buscar('actualchannel', $params['Channel']))) {
+                $bLocalTracked = TRUE;
+            }
+            if (!$bLocalTracked) {
+                $this->_log->output('DEBUG: '.__METHOD__.': ignoro hangup local | EN: ignoring local hangup');
+                return FALSE;
+            }
+            $this->_log->output('DEBUG: '.__METHOD__.
+                ': Local channel hangup matches tracked call, processing normally'.
+                ' | uniqueid='.$params['Uniqueid'].' channel='.$params['Channel']);
         }
 
         $a = NULL;
@@ -2561,7 +3071,40 @@ Uniqueid: 1429642067.241008
         }
 
         if (!is_null($llamada)) {
-            $this->_procesarLlamadaColgada($llamada, $params);
+            // Check if a blind transfer is in progress - if so, release source
+            // agent but keep the call in _listaLlamadas for the target agent's
+            // Link event to find and re-link.
+            if ($llamada->transfer_pending) {
+                if (!is_null($llamada->agente)) {
+                    // Agent still linked - release with lightweight method
+                    $this->_log->output('INFO: '.__METHOD__.': hangup during transfer - '.
+                        'using lightweight release instead of full finalization. '.
+                        'channel='.$params['Channel'].' uniqueid='.$params['Uniqueid'].
+                        ' call_uid='.$llamada->uniqueid.
+                        ' | ES: hangup durante transferencia - '.
+                        'usando liberación ligera en vez de finalización completa');
+                    $llamada->llamadaTransferidaDesdeAgente($params['local_timestamp_received']);
+                } elseif ($params['Channel'] == $llamada->actualchannel) {
+                    // Customer/trunk channel hung up - transfer failed, finalize
+                    $this->_log->output('INFO: '.__METHOD__.': customer channel hangup during '.
+                        'transfer - finalizing call. channel='.$params['Channel'].
+                        ' call_uid='.$llamada->uniqueid.
+                        ' | ES: hangup de canal del cliente durante transferencia - '.
+                        'finalizando llamada');
+                    $llamada->transfer_pending = FALSE;
+                    $this->_procesarLlamadaColgada($llamada, $params);
+                } else {
+                    // Intermediate channel hangup (e.g. Local channel for outgoing calls)
+                    // Ignore - call is waiting for re-link via msg_Link
+                    $this->_log->output('INFO: '.__METHOD__.': intermediate channel hangup during '.
+                        'transfer - ignoring. channel='.$params['Channel'].
+                        ' call_uid='.$llamada->uniqueid.
+                        ' | ES: hangup de canal intermedio durante transferencia - '.
+                        'ignorando');
+                }
+            } else {
+                $this->_procesarLlamadaColgada($llamada, $params);
+            }
         } elseif (is_null($a)) {
             /* No se encuentra la llamada entre las monitoreadas. Puede ocurrir
              * que este sea el Hangup de un canal auxiliar que tiene información
@@ -2578,7 +3121,9 @@ Uniqueid: 1429642067.241008
                         $this->_log->output(
                             "DEBUG: ".__METHOD__.": Hangup de canal auxiliar de ".
                             "llamada por fallo de Originate para llamada ".
-                            $llamada->uniqueid." canal auxiliar ".$params['Uniqueid']);
+                            $llamada->uniqueid." canal auxiliar ".$params['Uniqueid'].
+                            " | EN: Hangup of auxiliary channel of call due to Originate failure for call ".
+                            $llamada->uniqueid." auxiliary channel ".$params['Uniqueid']);
                     }
                     $llamada->actualizarCausaFallo($params['Cause'], $params['Cause-txt']);
                 }
@@ -2615,6 +3160,11 @@ Uniqueid: 1429642067.241008
                     $this->_log->output('DEBUG: '.__METHOD__.': se ignora Hangup para llamada que se envía a HOLD. | EN: ignoring Hangup for call that is being sent to HOLD.');
                 }
             } else {
+                // If the agent is in attended transfer consultation, redirect
+                // the agent to atxfer-complete to terminate the consultation
+                // call automatically (customer hung up, no point continuing)
+                $this->_terminarConsultaSiClienteCuelga($llamada);
+
                 // Llamada ha sido enlazada al menos una vez
                 // Call has been linked at least once
                 $llamada->llamadaFinalizaSeguimiento(
@@ -2624,12 +3174,70 @@ Uniqueid: 1429642067.241008
         }
     }
 
+    /**
+     * When the customer hangs up during an attended transfer consultation,
+     * redirect the agent to atxfer-complete to terminate the consultation call
+     * and re-enter AgentLogin. Without this, the agent is left in atxfer-consult
+     * dialplan with disabled buttons and no way to end the consulting call.
+     */
+    private function _terminarConsultaSiClienteCuelga($llamada)
+    {
+        if (is_null($llamada->agente)) return;
+
+        $sAgente = $llamada->agente->channel;
+        if (!isset($this->_agentesEnConsultation[$sAgente])) return;
+
+        // Only handle Agent type (app_agent_pool) - callback agents use
+        // native Atxfer which handles this differently
+        if ($llamada->agente->type != 'Agent') return;
+
+        $loginChannel = $llamada->agente->login_channel;
+        if (empty($loginChannel)) {
+            $this->_log->output('WARN: '.__METHOD__.': Agent '.$sAgente.
+                ' is in consultation but has no login_channel, cannot redirect'.
+                ' | EN: Agent '.$sAgente.' is in consultation but has no login_channel, cannot redirect');
+            return;
+        }
+
+        $agentNumber = $llamada->agente->number;
+        $this->_log->output('INFO: '.__METHOD__.': Customer hung up while agent '.
+            $sAgente.' is in consultation - redirecting to atxfer-complete to end consulting call'.
+            ' | EN: Customer hung up while agent '.$sAgente.
+            ' is in consultation - redirecting to atxfer-complete to end consulting call');
+
+        // Set the atxfer completion flag to suppress Agentlogoff
+        $this->_prepararAtxferComplete($sAgente);
+
+        // Redirect agent to atxfer-complete to terminate consultation and re-enter AgentLogin
+        $r = $this->_ami->Redirect(
+            $loginChannel,        // Channel: agent's login_channel
+            '',                   // ExtraChannel: not used
+            $agentNumber,         // Exten: agent number (e.g., 1001)
+            'atxfer-complete',    // Context
+            1                     // Priority
+        );
+
+        if ($r['Response'] == 'Success') {
+            $this->_log->output('DEBUG: '.__METHOD__.': Redirect successful for '.$sAgente.
+                ' | EN: Redirect successful for '.$sAgente);
+        } else {
+            $this->_log->output('WARN: '.__METHOD__.': Redirect failed for '.$sAgente.
+                ': '.$r['Message'].' | EN: Redirect failed for '.$sAgente.': '.$r['Message']);
+        }
+
+        // Clear consultation state and emit ConsultationEnd
+        unset($this->_agentesEnConsultation[$sAgente]);
+        $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+            array('ConsultationEnd', array($sAgente))
+        ));
+    }
+
     public function msg_Agentlogin($sEvent, $params, $sServer, $iPort)
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -2641,16 +3249,28 @@ Uniqueid: 1429642067.241008
         // Check if this is a re-login after attended transfer completion
         $isAtxferRelogin = isset($this->_agentesEnAtxferComplete[$sAgente]);
         if ($isAtxferRelogin) {
-            $this->_log->output('DEBUG: '.__METHOD__.': Agent '.$sAgente.
+            $this->_log->output('DEBUG: '.__METHOD__.': Agente '.$sAgente.
+                ' re-ingresando AgentLogin después de completar transferencia atendida | EN: Agent '.$sAgente.
                 ' re-entering AgentLogin after attended transfer completion');
             // Clear the atxfer flag
             unset($this->_agentesEnAtxferComplete[$sAgente]);
+            // Clear stale consultation state - when the agent completes a transfer
+            // by hanging up during Dial(), the ConsultationEnd UserEvent in the
+            // dialplan never fires (agent channel is in hangup state). Clear it here.
+            if (isset($this->_agentesEnConsultation[$sAgente])) {
+                $this->_log->output('DEBUG: '.__METHOD__.': clearing stale consultation state for '.$sAgente.
+                    ' after attended transfer completion');
+                unset($this->_agentesEnConsultation[$sAgente]);
+                $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                    array('ConsultationEnd', array($sAgente))
+                ));
+            }
         }
 
         if (is_null($a) || $a->estado_consola == 'logged-out') {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada.");
-                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogin");
+                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada. | EN: AgentLogin($sAgente) not initiated by program, no action taken.");
+                $this->_log->output("DEBUG: ".__METHOD__.": SALIDA OnAgentlogin | EN: EXIT OnAgentlogin");
             }
             return FALSE;
         }
@@ -2664,7 +3284,7 @@ Uniqueid: 1429642067.241008
         // Agent may already be in queues (sessions persist across dialer restarts)
         if ($a->type == 'Agent') {
             $colas_act = $a->colas_actuales;
-            $this->_log->output('INFO: agente '.$sAgente.' login - colas_actuales=['.implode(' ', $colas_act).']');
+            $this->_log->output('INFO: agente '.$sAgente.' login - colas_actuales=['.implode(' ', $colas_act).'] | EN: agent '.$sAgente.' login - current_queues=['.implode(' ', $colas_act).']');
 
             // Emit queue membership event to notify campaign monitoring that agent is online
             if (count($colas_act) > 0) {
@@ -2674,7 +3294,8 @@ Uniqueid: 1429642067.241008
 
         // If this was a re-login after atxfer, log success
         if ($isAtxferRelogin) {
-            $this->_log->output('INFO: '.__METHOD__.': Agent '.$sAgente.
+            $this->_log->output('INFO: '.__METHOD__.': Agente '.$sAgente.
+                ' re-logoneado exitosamente después de completar transferencia atendida. Sesión preservada. | EN: Agent '.$sAgente.
                 ' successfully re-logged in after attended transfer completion. Session preserved.');
         }
     }
@@ -2683,8 +3304,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -2694,16 +3315,18 @@ Uniqueid: 1429642067.241008
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (is_null($a)) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada.");
-                $this->_log->output("DEBUG: ".__METHOD__.": EXIT OnAgentlogoff");
+                $this->_log->output("DEBUG: ".__METHOD__.": AgentLogin($sAgente) no iniciado por programa, no se hace nada. | EN: AgentLogin($sAgente) not initiated by program, no action taken.");
+                $this->_log->output("DEBUG: ".__METHOD__.": SALIDA OnAgentlogoff | EN: EXIT OnAgentlogoff");
             }
             return FALSE;
         }
 
-        // Check if this agent is completing an attended transfer
+        // Check if this agent is completing an attended transfer (app_agent_pool only)
         // If so, suppress the logoff - the agent will re-enter AgentLogin
-        if (isset($this->_agentesEnAtxferComplete[$sAgente])) {
-            $this->_log->output('DEBUG: '.__METHOD__.': SUPPRESSING Agentlogoff for '.$sAgente.
+        if (!is_null($this->_compat) && $this->_compat->hasAppAgentPool()
+            && isset($this->_agentesEnAtxferComplete[$sAgente])) {
+            $this->_log->output('DEBUG: '.__METHOD__.': SUPRIMIENDO Agentlogoff para '.$sAgente.
+                ' - agente está completando transferencia atendida y re-ingresará AgentLogin | EN: SUPPRESSING Agentlogoff for '.$sAgente.
                 ' - agent is completing attended transfer and will re-enter AgentLogin');
             // Keep the flag set - it will be cleared when Agentlogin fires
             return FALSE;
@@ -2720,8 +3343,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -2733,7 +3356,8 @@ Uniqueid: 1429642067.241008
                 // La extensión usada para login se ha desregistrado - deslogonear al agente
                 // The extension used for login has unregistered - log off the agent
                 $this->_log->output('INFO: '.__METHOD__.' se detecta desregistro de '.
-                    $params['Peer'].' - deslogoneando '.$a->channel.'...');
+                    $params['Peer'].' - deslogoneando '.$a->channel.'... | EN: unregistration detected for '.
+                    $params['Peer'].' - logging off '.$a->channel.'...');
                 $a->forzarLogoffAgente($this->_ami, $this->_log);
             }
     	}
@@ -2758,8 +3382,8 @@ Uniqueid: 1429642067.241008
         */
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -2787,8 +3411,8 @@ Uniqueid: 1429642067.241008
          */
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -2822,8 +3446,8 @@ Uniqueid: 1429642067.241008
          */
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -2837,8 +3461,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -2852,9 +3476,10 @@ Uniqueid: 1429642067.241008
         $this->_tmp_actionid_queuestatus = NULL;
         foreach ($this->_tmp_estadoAgenteCola as $sAgente => $estadoCola) {
 
-            // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
-            if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
-                $sAgente = "Agent/".$regs[1];
+            // Normalize agent queue interface to canonical Agent/XXXX for lookup
+            if (!is_null($this->_compat)) {
+                $sNormalized = $this->_compat->normalizeAgentFromInterface($sAgente);
+                if (!is_null($sNormalized)) $sAgente = $sNormalized;
             }
 
             $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
@@ -2862,7 +3487,7 @@ Uniqueid: 1429642067.241008
                 $this->_evaluarPertenenciaColas($a, $estadoCola);
             } else {
                 if ($this->DEBUG) {
-                    $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora');
+                    $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora | EN: agent '.$sAgente.' is not a registered agent in the callcenter, ignoring');
                 }
             }
         }
@@ -2872,10 +3497,10 @@ Uniqueid: 1429642067.241008
         /* Verification of agents that are logged in and should have queues,
          * but do not appear in the queue member enumeration. */
         foreach ($this->_listaAgentes as $a) {
-            // For Agent type, interface is Local/XXXX@agents, for others use channel directly
+            // Derive queue interface using compat (Agent/XXXX on Ast11, Local/XXXX@agents on Ast12+)
             $sInterface = $a->channel;
-            if ($a->type == 'Agent' && preg_match('|^Agent/(\d+)$|', $a->channel, $regs)) {
-                $sInterface = 'Local/'.$regs[1].'@agents';
+            if ($a->type == 'Agent' && !is_null($this->_compat)) {
+                $sInterface = $this->_compat->getAgentQueueInterface($a->number);
             }
             if (!isset($this->_tmp_estadoAgenteCola[$sInterface])) {
                 $this->_evaluarPertenenciaColas($a, array());
@@ -2906,7 +3531,7 @@ Uniqueid: 1429642067.241008
         $bAgentePausado = ($a->num_pausas > 0);
 
         $sAgente = $a->channel;
-        $this->_log->output('INFO: evaluar pertenencia agente '.$sAgente.' tiene estado consola '.$a->estado_consola);
+        $this->_log->output('INFO: evaluar pertenencia agente '.$sAgente.' tiene estado consola '.$a->estado_consola.' | EN: evaluate membership agent '.$sAgente.' has console state '.$a->estado_consola);
 
         if ($a->estado_consola == 'logged-in') {
             // Revisar y sincronizar estado de pausa en colas
@@ -2928,13 +3553,11 @@ Uniqueid: 1429642067.241008
                 // Queues to which it does not belong but should belong
                 if (count($diffcolas[0]) > 0) {
                     $this->_log->output('INFO: agente '.$sAgente.' debe ser '.
-                        'agregado a las colas ['.implode(' ', array_keys($diffcolas[0])).']');
+                        'agregado a las colas ['.implode(' ', array_keys($diffcolas[0])).'] | EN: agent '.$sAgente.' must be added to queues ['.implode(' ', array_keys($diffcolas[0])).']');
                     foreach ($diffcolas[0] as $q => $p) {
-                        // For app_agent_pool (Asterisk 12+): Agent type uses Local channel
-                        // with StateInterface for device state tracking
-                        if ($a->type == 'Agent') {
-                            $interface = 'Local/'.$a->number.'@agents';
-                            $stateInterface = 'Agent:'.$a->number;
+                        if ($a->type == 'Agent' && !is_null($this->_compat)) {
+                            $interface = $this->_compat->getAgentQueueInterface($a->number);
+                            $stateInterface = $this->_compat->getAgentStateInterface($a->number);
                             $this->_ami->asyncQueueAdd(
                                 array($this, '_cb_QueueAdd'),
                                 NULL,
@@ -2953,11 +3576,10 @@ Uniqueid: 1429642067.241008
                 // Queues to which it belongs and should not belong
                 if (count($diffcolas[1]) > 0) {
                     $this->_log->output('INFO: agente '.$sAgente.' debe ser '.
-                        'quitado de las colas ['.implode(' ', $diffcolas[1]).']');
+                        'quitado de las colas ['.implode(' ', $diffcolas[1]).'] | EN: agent '.$sAgente.' must be removed from queues ['.implode(' ', $diffcolas[1]).']');
                     foreach ($diffcolas[1] as $q) {
-                        // For app_agent_pool: Agent type uses Local channel interface
-                        if ($a->type == 'Agent') {
-                            $interface = 'Local/'.$a->number.'@agents';
+                        if ($a->type == 'Agent' && !is_null($this->_compat)) {
+                            $interface = $this->_compat->getAgentQueueInterface($a->number);
                             $this->_ami->asyncQueueRemove(
                                 array($this, '_cb_QueueRemove'),
                                 NULL,
@@ -2978,7 +3600,7 @@ Uniqueid: 1429642067.241008
                 $diffcolas = array_intersect($a->colas_actuales, $a->colas_dinamicas);
                 if (count($diffcolas) > 0) {
                     $this->_log->output('INFO: agente DESLOGONEADO '.$sAgente.' debe ser '.
-                        'quitado de las colas ['.implode(' ', $diffcolas).']');
+                        'quitado de las colas ['.implode(' ', $diffcolas).'] | EN: LOGGED-OUT agent '.$sAgente.' must be removed from queues ['.implode(' ', $diffcolas).']');
                     foreach ($diffcolas as $q) {
                         $this->_ami->asyncQueueRemove(
                             array($this, '_cb_QueueRemove'),
@@ -2993,14 +3615,14 @@ Uniqueid: 1429642067.241008
     public function _cb_QueueAdd($r)
     {
         if ($r['Response'] != 'Success') {
-            $this->_log->output("ERR: falla al agregar a cola: ".print_r($r, TRUE));
+            $this->_log->output("ERR: falla al agregar a cola: ".print_r($r, TRUE)." | EN: failed to add to queue: ".print_r($r, TRUE));
         }
     }
 
     public function _cb_QueueRemove($r)
     {
         if ($r['Response'] != 'Success') {
-            $this->_log->output("ERR: falla al quitar de cola: ".print_r($r, TRUE));
+            $this->_log->output("ERR: falla al quitar de cola: ".print_r($r, TRUE)." | EN: failed to remove from queue: ".print_r($r, TRUE));
         }
     }
 
@@ -3010,10 +3632,17 @@ Uniqueid: 1429642067.241008
     // is set in the respective queue.
     public function msg_QueueMemberStatus($sEvent, $params, $sServer, $iPort)
     {
+        // === TIMESTAMP TRACKER: QueueMemberStatus Event Entry ===
+        $fQmsMicrotime = microtime(TRUE);
+        $fQmsTime = date('Y-m-d H:i:s.', (int)$fQmsMicrotime) . sprintf('%03d', ($fQmsMicrotime - (int)$fQmsMicrotime) * 1000);
+        $sInterface = isset($params['Location']) ? $params['Location'] : (isset($params['Interface']) ? $params['Interface'] : 'UNKNOWN');
+        $iStatus = isset($params['Status']) ? $params['Status'] : -1;
+        $this->_log->output("TIMING: ".__METHOD__.": [QMS_EVENT] Interface=$sInterface, Queue=".$params['Queue'].", Status=$iStatus, microtime=$fQmsMicrotime, time=$fQmsTime | ES: Evento QueueMemberStatus recibido");
+
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -3023,19 +3652,39 @@ Uniqueid: 1429642067.241008
 
         $sAgente = $params['Location'];
 
-        // Convert Local/XXXX@agents interface to Agent/XXXX for agent lookup
-        if(preg_match('|^Local/(\d+)@agents|', $sAgente, $regs)) {
-            $sAgente = "Agent/".$regs[1];
+        // Normalize agent queue interface to canonical Agent/XXXX for lookup
+        if (!is_null($this->_compat)) {
+            $sNormalized = $this->_compat->normalizeAgentFromInterface($sAgente);
+            if (!is_null($sNormalized)) $sAgente = $sNormalized;
         }
 
         $a = $this->_listaAgentes->buscar('agentchannel', $sAgente);
         if (!is_null($a)) {
+            // === TIMESTAMP TRACKER: Before updating agent queue status ===
+            $bHasCall = !is_null($a->llamada);
+            $this->_log->output("TIMING: ".__METHOD__.": [BEFORE_UPDATE] Agent=$sAgente, has_internal_call=".($bHasCall?'YES':'NO').", queue_status=$iStatus | ES: Antes de actualizar estado en cola");
+
             // TODO: existe $params['Paused'] que indica si está en pausa
             // TODO: there is $params['Paused'] that indicates if paused
             $a->actualizarEstadoEnCola($params['Queue'], $params['Status']);
+
+            // === TIMESTAMP TRACKER: After updating agent queue status ===
+            $fAfterUpdate = microtime(TRUE);
+            $this->_log->output("TIMING: ".__METHOD__.": [AFTER_UPDATE] Agent=$sAgente, queue={$params['Queue']}, status=$iStatus, elapsed_ms=".round(($fAfterUpdate - $fQmsMicrotime) * 1000, 3)." | ES: Después de actualizar estado en cola");
+
+            // If target agent has pending transfer reservation and device state resolved, clear it
+            // Si el agente destino tiene reserva de transferencia pendiente y el estado del dispositivo se resolvió, limpiarla
+            if (isset($this->_agentesEnTransferPendiente[$sAgente])) {
+                if ($params['Status'] == AST_DEVICE_INUSE || $params['Status'] == AST_DEVICE_NOT_INUSE) {
+                    $info = $this->_agentesEnTransferPendiente[$sAgente];
+                    $this->_cancelarAlarma($info['alarm_key']);
+                    unset($this->_agentesEnTransferPendiente[$sAgente]);
+                    $this->_log->output('INFO: '.__METHOD__.": Transfer reservation cleared for target=$sAgente via QueueMemberStatus (Status={$params['Status']}) | ES: Reserva de transferencia limpiada para destino=$sAgente via QueueMemberStatus (Status={$params['Status']})");
+                }
+            }
         } else {
             if ($this->DEBUG) {
-                $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora');
+                $this->_log->output('WARN: agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora | EN: agent '.$sAgente.' is not a registered agent in the callcenter, ignoring');
             }
         }
     }
@@ -3054,8 +3703,8 @@ Uniqueid: 1429642067.241008
          */
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3079,8 +3728,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -3094,8 +3743,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
             );
         }
 
@@ -3107,8 +3756,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3125,8 +3774,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3151,7 +3800,9 @@ Uniqueid: 1429642067.241008
                     if ($a->estado_consola == 'logged-in') {
                         $this->_log->output('WARN: '.__METHOD__.' agente '.$sAgente.
                             ' está logoneado en dialer pero en estado AGENT_LOGGEDOFF,'.
-                            ' se deslogonea en dialer...');
+                            ' se deslogonea en dialer... | EN: agent '.$sAgente.
+                            ' is logged in dialer but in state AGENT_LOGGEDOFF,'.
+                            ' logging off in dialer...');
                         $this->_ejecutarLogoffAgente($sAgente, $a, $params['local_timestamp_received'], $params['Event']);
                     }
                 } else {
@@ -3166,25 +3817,33 @@ Uniqueid: 1429642067.241008
                     if ($a->estado_consola == 'logged-out') {
                         $this->_log->output('WARN: '.__METHOD__.' agente '.$sAgente.
                             ' está deslogoneado en dialer pero en estado '.$sAgentStatus.','.
-                            ' se deslogonea en Asterisk...');
+                            ' se deslogonea en Asterisk... | EN: agent '.$sAgente.
+                            ' is logged out in dialer but in state '.$sAgentStatus.','.
+                            ' logging off in Asterisk...');
                         $a->forzarLogoffAgente($this->_ami, $this->_log);
                     } elseif ($a->estado_consola == 'logged-in' && $sAgentStatus == 'AGENT_ONCALL') {
                         if (is_null($a->llamada)) {
                             $this->_log->output('WARN: '.__METHOD__.' agente '.$sAgente.
                                 ' en llamada con canal '.$agentdata['TalkingToChan'].
-                                ' pero no hay (todavía) llamada monitoreada.');
+                                ' pero no hay (todavía) llamada monitoreada. | EN: agent '.$sAgente.
+                                ' on call with channel '.$agentdata['TalkingToChan'].
+                                ' but there is no (yet) monitored call.');
                         } else {
                             if ($this->DEBUG) {
                                 if (!is_null($a->llamada->actualchannel)) {
                                     $this->_log->output('DEBUG: '.__METHOD__.': canal esperado '.
-                                        $a->llamada->actualchannel.' real '.$agentdata['TalkingToChan']);
+                                        $a->llamada->actualchannel.' real '.$agentdata['TalkingToChan'].
+                                        ' | EN: expected channel '.$a->llamada->actualchannel.
+                                        ' actual '.$agentdata['TalkingToChan']);
                                 }
                             }
                             if (is_null($a->llamada->actualchannel) &&
                                 strpos($agentdata['TalkingToChan'], 'Local/') === 0) {
                                 $this->_log->output('WARN: '.__METHOD__.": el agente ".
                                     "$sAgente está hablando con canal ".$agentdata['TalkingToChan'].
-                                    " según eventos Agents.");
+                                    " según eventos Agents. | EN: agent ".
+                                    "$sAgente is talking on channel ".$agentdata['TalkingToChan'].
+                                    " according to Agents events.");
                             }
                             if (!is_null($a->llamada->actualchannel) &&
                                 $a->llamada->actualchannel != $agentdata['TalkingToChan'] &&
@@ -3192,7 +3851,9 @@ Uniqueid: 1429642067.241008
                                 $a->llamada->channel != $agentdata['TalkingToChan']) {
                                 $this->_log->output('WARN: '.__METHOD__.
                                     ': llamada con canal remoto recogido en Link auxiliar fue '.
-                                    $a->llamada->actualchannel.' pero realmente es '.$agentdata['TalkingToChan']);
+                                    $a->llamada->actualchannel.' pero realmente es '.$agentdata['TalkingToChan'].
+                                    ' | EN: call with remote channel picked up in auxiliary Link was '.
+                                    $a->llamada->actualchannel.' but actually is '.$agentdata['TalkingToChan']);
                                 $a->llamada->dump($this->_log);
                             }
 
@@ -3209,7 +3870,7 @@ Uniqueid: 1429642067.241008
                 }
             } else {
                 if ($this->DEBUG) {
-                    $this->_log->output('WARN: '.__METHOD__.' agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora');
+                    $this->_log->output('WARN: '.__METHOD__.' agente '.$sAgente.' no es un agente registrado en el callcenter, se ignora | EN: agent '.$sAgente.' is not a registered agent in the callcenter, ignoring');
                 }
             }
         }
@@ -3222,8 +3883,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3234,8 +3895,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3246,8 +3907,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3258,8 +3919,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3270,8 +3931,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3280,6 +3941,13 @@ Uniqueid: 1429642067.241008
 
     public function msg_ParkedCall($sEvent, $params, $sServer, $iPort)
     {
+        // Debug: Log ParkedCall event entry
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] ParkedCall event received - ParkeeChannel=" .
+            (isset($params['ParkeeChannel']) ? $params['ParkeeChannel'] :
+             (isset($params['Channel']) ? $params['Channel'] : 'NULL')) .
+            " ParkingSpace=" . (isset($params['ParkingSpace']) ? $params['ParkingSpace'] :
+             (isset($params['Exten']) ? $params['Exten'] : 'NULL')));
 /*
     [Event] => ParkedCall
     [Privilege] => call,all
@@ -3297,8 +3965,8 @@ Uniqueid: 1429642067.241008
  */
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3308,18 +3976,25 @@ Uniqueid: 1429642067.241008
 
         if (is_null($sCanalLlamada)) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": ParkeeChannel not found in params");
+                $this->_log->output("DEBUG: ".__METHOD__.": ParkeeChannel no encontrado en params | EN: ParkeeChannel not found in params");
             }
             return;
         }
 
         $llamada = $this->_listaLlamadas->buscar('actualchannel', $sCanalLlamada);
         if (is_null($llamada)) {
+            $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+                "] ParkedCall - Call NOT FOUND by actualchannel=$sCanalLlamada");
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: ".__METHOD__.": call not found for channel: $sCanalLlamada");
+                $this->_log->output("DEBUG: ".__METHOD__.": llamada no encontrada para canal: $sCanalLlamada | EN: call not found for channel: $sCanalLlamada");
             }
             return;
         }
+
+        // Debug: Log call found in ParkedCall
+        $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
+            "] ParkedCall - Found call! actualchannel={$llamada->actualchannel}" .
+            " status={$llamada->status} request_hold=" . ($llamada->request_hold ? 'TRUE' : 'FALSE'));
 
         // Asterisk ParkedCall event uses ParkingSpace (not Exten) and ParkeeUniqueid (not Uniqueid)
         $parkingSpace = isset($params['ParkingSpace']) ? $params['ParkingSpace'] :
@@ -3330,7 +4005,9 @@ Uniqueid: 1429642067.241008
         if ($this->DEBUG) {
             $this->_log->output("DEBUG: ".__METHOD__.": identificada llamada ".
                 "enviada a HOLD {$llamada->actualchannel} en parkinglot ".
-                "$parkingSpace, cambiado Uniqueid a $parkeeUniqueid ");
+                "$parkingSpace, cambiado Uniqueid a $parkeeUniqueid ".
+                "| EN: identified call sent to HOLD {$llamada->actualchannel} in parkinglot ".
+                "$parkingSpace, changed Uniqueid to $parkeeUniqueid ");
         }
         $llamada->llamadaEnviadaHold($parkingSpace, $parkeeUniqueid);
 
@@ -3342,8 +4019,8 @@ Uniqueid: 1429642067.241008
     {
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3367,8 +4044,8 @@ Uniqueid: 1429642067.241008
  */
         if ($this->DEBUG) {
             $this->_log->output('DEBUG: '.__METHOD__.
-                "\nretraso => ".(microtime(TRUE) - $params['local_timestamp_received']).
-                "\n$sEvent: => ".print_r($params, TRUE)
+                "\nretraso/delay => ".(microtime(TRUE) - $params['local_timestamp_received']).
+                "\nrecibido/received $sEvent: => ".print_r($params, TRUE)
                 );
         }
 
@@ -3378,21 +4055,23 @@ Uniqueid: 1429642067.241008
         if (is_null($llamada)) return;
 
         if ($llamada->status == 'OnHold') {
-            if ($this->DEBUG) {
-                $this->_log->output('DEBUG: '.__METHOD__.': llamada colgada mientras estaba en HOLD.');
-            }
-            // First clear the hold state and close the hold audit record
+            // Clear the hold state and close the hold audit record
             $llamada->llamadaRegresaHold($this->_ami, $params['local_timestamp_received']);
 
-            // Then finalize the call since the customer has hung up
-            // This will:
-            // - Update the call status in the database
-            // - Delete the current_call record
-            // - Disassociate the agent from the call (quitarLlamadaAtendida)
-            // - Emit AgentUnlinked event so UI updates
-            $llamada->llamadaFinalizaSeguimiento(
-                $params['local_timestamp_received'],
-                $this->_config['dialer']['llamada_corta']);
+            if ($llamada->atxfer_hold) {
+                // Bridge() in atxfer-unhold is retrieving the call from parking.
+                // Do NOT finalize - the call is being reconnected, not hung up.
+                $llamada->atxfer_hold = FALSE;
+                $this->_log->output('DEBUG: '.__METHOD__.': atxfer hold recovery - skipping finalization (Bridge will reconnect)');
+            } else {
+                // Genuine caller hangup while on hold - finalize the call
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: '.__METHOD__.': llamada colgada mientras estaba en HOLD. | EN: call hung up while on HOLD.');
+                }
+                $llamada->llamadaFinalizaSeguimiento(
+                    $params['local_timestamp_received'],
+                    $this->_config['dialer']['llamada_corta']);
+            }
         }
     }
 
@@ -3417,7 +4096,7 @@ Uniqueid: 1429642067.241008
         $this->_log->output("\n");
 
         $this->_log->output("Versión detectada de Asterisk............".implode('.', $this->_asteriskVersion).' | EN: Detected Asterisk version............'.implode('.', $this->_asteriskVersion));
-        $this->_log->output("Timestamp de arranque de Asterisk........".$this->_asteriskStartTime);
+        $this->_log->output("Timestamp de arranque de Asterisk........".$this->_asteriskStartTime.' | EN: Asterisk startup timestamp........'.$this->_asteriskStartTime);
         $this->_log->output("Última verificación de llamadas viejas...".date('Y-m-d H:i:s', $this->_iTimestampVerificacionLlamadasViejas).' | EN: Last verification of old calls...'.date('Y-m-d H:i:s', $this->_iTimestampVerificacionLlamadasViejas));
 
         $this->_log->output("\n\nLista de campañas salientes:\n | EN: List of outgoing campaigns:\n");
@@ -3445,7 +4124,7 @@ Uniqueid: 1429642067.241008
             $this->_log->output("\t$q.....$n");
         }
 
-        $this->_log->output("\n\nCuenta de eventos recibidos:");
+        $this->_log->output("\n\nCuenta de eventos recibidos: | EN: Count of received events:");
         $cuenta = $this->_ami->cuentaEventos;
         if (count($cuenta) > 0) {
             arsort($cuenta);
@@ -3453,7 +4132,14 @@ Uniqueid: 1429642067.241008
             foreach ($cuenta as $ev => $cnt)
                 $this->_log->output("\t".str_pad($ev, $padlen, '.').'...'.sprintf("%6d", $cnt));
         }
-        $this->_log->output('INFO: '.__METHOD__.' fin de volcado status de seguimiento...');
+
+        // Dump pending transfer reservations
+        $this->_log->output('INFO: '.__METHOD__.' agentes con transferencia pendiente / agents with pending transfer: '.
+            (count($this->_agentesEnTransferPendiente) > 0
+                ? print_r($this->_agentesEnTransferPendiente, TRUE)
+                : '(ninguno/none)'));
+
+        $this->_log->output('INFO: '.__METHOD__.' fin de volcado status de seguimiento... | EN: end of tracking status dump...');
     }
 
     private function _agregarAlarma($timeout, $callback, $arglist)

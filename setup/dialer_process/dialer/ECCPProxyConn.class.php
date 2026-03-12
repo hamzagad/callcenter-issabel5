@@ -455,5 +455,29 @@ class ECCPProxyConn extends MultiplexConn
         $s = $xml_response->asXML();
         $this->multiplexSrv->encolarDatosEscribir($this->sKey, $s);
     }
+
+    function notificarEvento_ConsultationStart($sAgente)
+    {
+        if (is_null($this->_sUsuarioECCP)) return;
+        if (!is_null($this->_sAgenteFiltrado) && $this->_sAgenteFiltrado != $sAgente) return;
+
+        $xml_response = new SimpleXMLElement('<event />');
+        $xml_consultStart = $xml_response->addChild('consultationstart');
+        $xml_consultStart->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+
+        $this->multiplexSrv->encolarDatosEscribir($this->sKey, $xml_response->asXML());
+    }
+
+    function notificarEvento_ConsultationEnd($sAgente)
+    {
+        if (is_null($this->_sUsuarioECCP)) return;
+        if (!is_null($this->_sAgenteFiltrado) && $this->_sAgenteFiltrado != $sAgente) return;
+
+        $xml_response = new SimpleXMLElement('<event />');
+        $xml_consultEnd = $xml_response->addChild('consultationend');
+        $xml_consultEnd->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+
+        $this->multiplexSrv->encolarDatosEscribir($this->sKey, $xml_response->asXML());
+    }
 }
 ?>

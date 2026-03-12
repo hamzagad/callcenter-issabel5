@@ -48,9 +48,11 @@ function _moduleContent(&$smarty, $module_name)
     $smarty->assign("relative_dir_rich_text", $relative_dir_rich_text);
 
     // Conexión a la base de datos CallCenter
+    // EN: CallCenter database connection
     $pDB = new paloDB($arrConf['cadena_dsn']);
 
     // Mostrar pantalla correspondiente
+    // EN: Show corresponding screen
     $sAction = 'list_agents';
     if (isset($_REQUEST['action'])) $sAction = $_REQUEST['action'];
     switch ($sAction) {
@@ -185,7 +187,7 @@ function listAgent($pDB, $smarty, $module_name, $local_templates_dir)
             break;
         case 'ASTERISK':
             $tuplaData[1] = $sImgErrorAst.'&nbsp;<a href="#" class="reparar_file">'._tr('Repair').'</a>';
-            $tuplaData[5] = '&nbsp;';   // No mostrar opción de editar agente que no está en DB
+            $tuplaData[5] = '&nbsp;';   // No mostrar opción de editar agente que no está en DB   // No mostrar opción de editar agente que no está en DB
             break;
         case 'CC':
             $tuplaData[1] = $sImgErrorCC.'&nbsp;<a href="#" class="reparar_db">'._tr('Repair').'</a>';
@@ -340,6 +342,7 @@ function formEditAgent($pDB, $smarty, $module_name, $local_templates_dir, $id_ag
     // Valores por omisión para primera carga
     if (is_null($id_agent)) {
         // Creación de nuevo agente
+        // EN: New agent creation
         if (!isset($_POST['extension']))    $_POST['extension'] = '';
         if (!isset($_POST['description']))  $_POST['description'] = '';
         if (!isset($_POST['password1']))    $_POST['password1'] = '';
@@ -348,6 +351,7 @@ function formEditAgent($pDB, $smarty, $module_name, $local_templates_dir, $id_ag
         if (!isset($_POST['eccpwd2']))      $_POST['eccpwd2'] = '';
     } else {
         // Modificación de agente existente
+        // EN: Existing agent modification
         if (!isset($_POST['extension']))    $_POST['extension'] = $arrAgente['number'];
         if (!isset($_POST['description']))  $_POST['description'] = $arrAgente['name'];
         if (!isset($_POST['password1']))    $_POST['password1'] = $arrAgente['password'];

@@ -49,7 +49,7 @@ class ECCPProcess extends TuberiaProcess
         // Registration of event handlers
         foreach (array('actualizarConfig', 'emitirEventos',) as $k)
             $this->_tuberia->registrarManejador('SQLWorkerProcess', $k, array($this, "msg_$k"));
-        foreach (array('recordingMute', 'recordingUnmute') as $k)
+        foreach (array('recordingMute', 'recordingUnmute', 'emitirEventos') as $k)
             $this->_tuberia->registrarManejador('AMIEventProcess', $k, array($this, "msg_$k"));
         foreach (array('eccpresponse') as $k)
             $this->_tuberia->registrarManejador('*', $k, array($this, "msg_$k"));
@@ -86,9 +86,6 @@ class ECCPProcess extends TuberiaProcess
     public function msg_emitirEventos($sFuente, $sDestino, $sNombreMensaje,
         $iTimestamp, $datos)
     {
-        if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
-        }
         list($eventos) = $datos;
 
         $this->_lanzarEventos($eventos);
@@ -98,15 +95,14 @@ class ECCPProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' recibido: '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' recibido | EN: received: '.print_r($datos, 1));
         }
         call_user_func_array(array($this, '_actualizarConfig'), $datos);
     }
 
     public function msg_finalizando($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
-        $this->_log->output('INFO: recibido mensaje de finalización, se desconectan conexiones...');
-        // INFO: received termination message, disconnecting connections...
+        $this->_log->output('INFO: recibido mensaje de finalización, se desconectan conexiones... | EN: received termination message, disconnecting connections...');
         $this->_finalizandoPrograma = TRUE;
         $this->_multiplex->finalizarConexionesECCP();
         $this->_tuberia->msg_HubProcess_finalizacionTerminada();
@@ -115,7 +111,7 @@ class ECCPProcess extends TuberiaProcess
     public function msg_recordingMute($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         list($sAgente, $sTipoLlamada, $idCampaign, $idLlamada) = $datos;
 
@@ -125,7 +121,7 @@ class ECCPProcess extends TuberiaProcess
     public function msg_recordingUnmute($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         list($sAgente, $sTipoLlamada, $idCampaign, $idLlamada) = $datos;
 
@@ -135,7 +131,7 @@ class ECCPProcess extends TuberiaProcess
     public function msg_eccpresponse($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
 
         list($sKey, $s, $nuevos_valores, $eventos) = $datos;
@@ -144,7 +140,7 @@ class ECCPProcess extends TuberiaProcess
 
         $oConn = $this->_multiplex->getConn($sKey);
         if (is_null($oConn)) {
-            $this->_log->output("ERR: ".__METHOD__." ECCP connection $sKey no longer present, cannot deliver ECCP response.");
+            $this->_log->output("ERR: ".__METHOD__." conexión ECCP $sKey ya no está presente, no se puede entregar respuesta ECCP. | EN: ECCP connection $sKey no longer present, cannot deliver ECCP response.");
             return;
         }
         $oConn->do_eccpresponse($s, $nuevos_valores);
@@ -153,11 +149,13 @@ class ECCPProcess extends TuberiaProcess
     private function _lanzarEventos(&$eventos)
     {
         foreach ($eventos as $ev) {
-            if (!is_null($ev)) call_user_func_array(
-                array(
-                    $this->_multiplex,
-                    'notificarEvento_'.$ev[0]),
-                $ev[1]);
+            if (!is_null($ev)) {
+                call_user_func_array(
+                    array(
+                        $this->_multiplex,
+                        'notificarEvento_'.$ev[0]),
+                    $ev[1]);
+            }
         }
     }
 
@@ -165,13 +163,11 @@ class ECCPProcess extends TuberiaProcess
     {
         switch ($k) {
         case 'dialer_debug':
-            $this->_log->output('INFO: actualizando DEBUG...');
-            // INFO: updating DEBUG...
+            $this->_log->output('INFO: actualizando DEBUG... | EN: updating DEBUG...');
             $this->DEBUG = $v;
             break;
         default:
-            $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k);
-            // WARN: unimplemented config key is ignored: '.$k
+            $this->_log->output('WARN: '.__METHOD__.': se ignora clave de config no implementada: '.$k.' | EN: unimplemented config key ignored: '.$k);
             break;
         }
     }

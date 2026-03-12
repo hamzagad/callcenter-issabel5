@@ -87,7 +87,7 @@ class Campania
 
     public function dump($log)
     {
-        $s = "----- CAMPAÑA -----\n";
+        $s = "----- CAMPAÑA / CAMPAIGN -----\n";
         $s .= "\tid......................".$this->id."\n";
         $s .= "\tname....................".$this->name."\n";
         $s .= "\tqueue...................".$this->queue."\n";
@@ -99,7 +99,7 @@ class Campania
         $s .= "\t_iTiempoContestacion....".$this->_iTiempoContestacion."\n";
         $s .= "\t_historial_contestada...[".implode(' ', $this->_historial_contestada)."]\n";
         if ($this->tipo_campania != 'incoming') {
-            $s .= "\ttrunk...................".(is_null($this->trunk) ? '(por plan de marcado)' : $this->trunk)."\n";
+            $s .= "\ttrunk...................".(is_null($this->trunk) ? '(por plan de marcado / by dialplan)' : $this->trunk)."\n";
             $s .= "\tcontext.................".$this->context."\n";
             $s .= "\t_num_completadas........".$this->_num_completadas."\n";
             $s .= "\t_promedio...............".(is_null($this->_promedio) ? 'N/D' : $this->_promedio)."\n";

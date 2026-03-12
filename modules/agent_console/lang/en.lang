@@ -55,6 +55,15 @@ $arrLangModule = array(
 'Error while starting break' => 'Error while starting break',
 'Error while stopping break' => 'Error while stopping break',
 'Error while transferring call' => 'Error while transferring call',
+'Error while transferring call to agent' => 'Error while transferring call to agent',
+'Invalid or missing target agent' => 'Invalid or missing target agent',
+'Target agent is busy' => 'Target agent is busy',
+'Target agent is not logged in' => 'Target agent is not logged in',
+'Target agent is on pause' => 'Target agent is on pause',
+'Cannot transfer while call is on hold' => 'Cannot transfer while call is on hold',
+'Blind transfer' => 'Blind transfer',
+'Attended transfer' => 'Attended transfer',
+'Transfer to agent' => 'Transfer to agent',
 'Extension' => 'Extension',
 'Failed to retrieve agent password' => 'Failed to retrieve agent password',
 'Form data successfully saved' => 'Form data successfully saved',
@@ -122,5 +131,7 @@ $arrLangModule = array(
 'Information' => 'Information',
 'Script' => 'Script',
 'Waiting for call'=>'Waiting for call',
+'Extension is already in use by another agent' => 'Extension is already in use by another agent',
+'Extension is not registered' => 'Extension is not registered',
 );
 ?>

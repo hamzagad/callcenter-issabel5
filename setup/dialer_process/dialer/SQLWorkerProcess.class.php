@@ -141,6 +141,7 @@ class SQLWorkerProcess extends TuberiaProcess
                 'tiempo_contestar'  =>  $this->_configDB->dialer_tiempo_contestar,
                 'debug'             =>  $this->_configDB->dialer_debug,
                 'allevents'         =>  $this->_configDB->dialer_allevents,
+                'relatedevents'     =>  $this->_configDB->dialer_relatedevents,
             ),
         ), $por_pedido);
     }
@@ -349,7 +350,7 @@ class SQLWorkerProcess extends TuberiaProcess
                             ));
                     } elseif (in_array($k, array('asterisk_duracion_sesion',
                         'dialer_llamada_corta', 'dialer_tiempo_contestar',
-                        'dialer_debug', 'dialer_allevents'))) {
+                        'dialer_debug', 'dialer_allevents', 'dialer_relatedevents'))) {
                         $this->_tuberia->msg_AMIEventProcess_actualizarConfig(
                             $k, $this->_configDB->$k);
                     }
@@ -415,7 +416,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_sqlinsertcalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_sqlinsertcalls', $datos);
     }
@@ -423,7 +424,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_sqlupdatecalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_sqlupdatecalls', $datos);
     }
@@ -431,7 +432,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_sqlupdatecurrentcalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_sqlupdatecurrentcalls', $datos);
     }
@@ -439,7 +440,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_sqlinsertcurrentcalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_sqlinsertcurrentcalls', $datos);
     }
@@ -447,7 +448,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_sqldeletecurrentcalls($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_sqldeletecurrentcalls', $datos);
     }
@@ -455,7 +456,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_sqlupdatestatcampaign($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_sqlupdatestatcampaign', $datos);
     }
@@ -464,7 +465,7 @@ class SQLWorkerProcess extends TuberiaProcess
         $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_agregarArchivoGrabacion', $datos);
     }
@@ -472,7 +473,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_AgentLogin($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_AgentLogin', $datos);
     }
@@ -480,7 +481,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_AgentLogoff($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_AgentLogoff', $datos);
     }
@@ -488,7 +489,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_AgentLinked($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_AgentLinked', $datos);
     }
@@ -496,7 +497,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_AgentUnlinked($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_AgentUnlinked', $datos);
     }
@@ -504,7 +505,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_marcarFinalHold($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_marcarFinalHold', $datos);
     }
@@ -512,7 +513,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_nuevaMembresiaCola($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_nuevaMembresiaCola', $datos);
     }
@@ -520,7 +521,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_AgentStateChange($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_agentStateChange', $datos);
     }
@@ -528,7 +529,7 @@ class SQLWorkerProcess extends TuberiaProcess
     public function msg_notificarProgresoLlamada($sFuente, $sDestino, $sNombreMensaje, $iTimestamp, $datos)
     {
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.' - '.print_r($datos, 1));
+            $this->_log->output('DEBUG: '.__METHOD__.' - datos/data: '.print_r($datos, 1));
         }
         $this->_encolarAccionPendiente('_notificarProgresoLlamada', $datos);
     }
@@ -712,7 +713,7 @@ class SQLWorkerProcess extends TuberiaProcess
             break;
         default:
             $this->_log->output('ERR: '.__METHOD__.' no debió haberse recibido para '.
-                print_r($paramActualizar, TRUE));
+                print_r($paramActualizar, TRUE).' | EN: should not have been received for ');
             return $eventos;
         }
 
@@ -739,18 +740,6 @@ class SQLWorkerProcess extends TuberiaProcess
         $sqlCampos = array();
         $paramCampos = array();
 
-        // TODO: revisar si es necesario inc_retries, porque campañas
-        // salientes incrementan directamente al cambiar a Placing
-        // TODO: review if inc_retries is necessary, because outgoing
-        // campaigns increment directly when changing to Placing
-        //
-        // Caso especial: retries se debe de incrementar
-        // Special case: retries must be incremented
-        if (isset($paramActualizar['inc_retries'])) {
-            $sqlCampos[] = 'retries = retries + ?';
-            $paramCampos[] = $paramActualizar['inc_retries'];
-            unset($paramActualizar['inc_retries']);
-        }
         foreach ($paramActualizar as $k => $v) {
             $sqlCampos[] = "$k = ?";
             $paramCampos[] = $v;
@@ -836,7 +825,7 @@ class SQLWorkerProcess extends TuberiaProcess
             break;
         default:
             $this->_log->output('ERR: '.__METHOD__.' no debió haberse recibido para '.
-                print_r($paramActualizar, TRUE));
+                print_r($paramActualizar, TRUE).' | EN: should not have been received for ');
             return $eventos;
         }
         unset($paramActualizar['tipo_llamada']);
@@ -878,7 +867,7 @@ class SQLWorkerProcess extends TuberiaProcess
         // This should not happen (manualdialing)
         if (!in_array($paramBorrar['tipo_llamada'], array('incoming', 'outgoing'))) {
             $this->_log->output('ERR: '.__METHOD__.' no debió haberse recibido para '.
-                print_r($paramBorrar, TRUE));
+                print_r($paramBorrar, TRUE).' | EN: should not have been received for ');
             return $eventos;
         }
 
@@ -936,7 +925,7 @@ class SQLWorkerProcess extends TuberiaProcess
         return $eventos;
     }
 
-    private function _AgentLogin($sAgente, $iTimestampLogin, $id_agent)
+    private function _AgentLogin($sAgente, $iTimestampLogin, $id_agent, $sExtension = NULL)
     {
         $eventos = array();
         $eventos_forward = array();
@@ -946,7 +935,7 @@ class SQLWorkerProcess extends TuberiaProcess
             // A login attempt has failed
             $eventos_forward[] = array('AgentLogin', array($sAgente, FALSE));
         } else {
-            $id_sesion = $this->_marcarInicioSesionAgente($id_agent, $iTimestampLogin);
+            $id_sesion = $this->_marcarInicioSesionAgente($id_agent, $iTimestampLogin, $sExtension);
             if (!is_null($id_sesion)) {
                 $eventos[] = array('AMIEventProcess', 'idNuevaSesionAgente', array($sAgente, $id_sesion));
 
@@ -1003,7 +992,7 @@ class SQLWorkerProcess extends TuberiaProcess
      * @return  mixed   NULL en error, o el ID de la auditoría de inicio de sesión
      *                  NULL on error, or the ID of the login audit
      */
-    private function _marcarInicioSesionAgente($idAgente, $iTimestampLogin)
+    private function _marcarInicioSesionAgente($idAgente, $iTimestampLogin, $sExtension = NULL)
     {
         // Verificación de sesión activa
         // Active session verification
@@ -1028,12 +1017,16 @@ SQL_EXISTE_AUDIT;
                     " pero hay sesión abierta ID={$idAudit}, se reusa. | EN: agent {$idAgente} ".
                     'started session at '.date('Y-m-d H:i:s', $iTimestampLogin).
                     " but there is open session ID={$idAudit}, reusing.");
+            if (!is_null($sExtension)) {
+                $sthExt = $this->_db->prepare('UPDATE audit SET login_extension = ? WHERE id = ?');
+                $sthExt->execute(array($sExtension, $idAudit));
+            }
         } else {
             // Ingreso de sesión del agente
             // Agent session entry
             $sTimeStamp = date('Y-m-d H:i:s', $iTimestampLogin);
-            $sth = $this->_db->prepare('INSERT INTO audit (id_agent, datetime_init) VALUES (?, ?)');
-            $sth->execute(array($idAgente, $sTimeStamp));
+            $sth = $this->_db->prepare('INSERT INTO audit (id_agent, datetime_init, login_extension) VALUES (?, ?, ?)');
+            $sth->execute(array($idAgente, $sTimeStamp, $sExtension));
             $idAudit = $this->_db->lastInsertId();
         }
 
@@ -1206,8 +1199,7 @@ SQL_EXISTE_AUDIT;
 	if($campaign_type=="")
 	{
 	    $campaign_type="incoming";
-	    $this->_log->output('LOGDATA: no se encontro la informacion de campaign_type, utilizando incoming...');
-	    // campaign_type information not found, using incoming...
+	    $this->_log->output('LOGDATA: no se encontro la informacion de campaign_type, utilizando incoming... | EN: campaign_type information not found, using incoming...');
 	}
 // CUSTOMIZATIONS WC 05/08/2025
         $recordset = $this->_db->prepare(

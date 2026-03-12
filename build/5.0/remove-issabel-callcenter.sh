@@ -1,9 +1,8 @@
 #!/bin/bash
 
-#stop service and remove from startup
+#stop service and disable it
 systemctl stop issabeldialer 2>/dev/null || true
-chkconfig --del issabeldialer 2>/dev/null || true
-chkconfig --level 2345 issabeldialer off 2>/dev/null || true
+systemctl disable issabeldialer 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
 #remove folder and files
@@ -16,10 +15,29 @@ rm -rf /var/www/html/modules/{rep_incoming_campaigns_panel,rep_outgoing_campaign
 
 #remove dialer
 rm -rf /opt/issabel/dialer
-rm -rf /etc/rc.d/init.d/issabeldialer
+rm -f /etc/systemd/system/issabeldialer.service
+rm -f /etc/rc.d/init.d/issabeldialer
 rm -rf /etc/logrotate.d/issabeldialer
+rm -rf /etc/logrotate.d/callcenter-modules
+rm -rf /var/log/callcenter-module
 rm -rf /usr/bin/issabel-callcenter-local-dnc
 rm -rf /usr/share/issabel/module_installer/callcenter/
+
+#remove dashboard ProcessesStatus applet patches
+DASHBOARD_DIR="/var/www/html/modules/dashboard/applets/ProcessesStatus"
+DASHBOARD_INDEX="$DASHBOARD_DIR/index.php"
+
+if [ -f "$DASHBOARD_INDEX" ]; then
+    # Remove Dialer icon mapping
+    sed -i "/'Dialer'.*=>.*'icon_headphones.png'/d" "$DASHBOARD_INDEX"
+    # Remove Dialer service mapping
+    sed -i "/'Dialer'.*=>.*'issabeldialer'/d" "$DASHBOARD_INDEX"
+    # Remove Dialer status detection lines
+    sed -i '/\$arrSERVICES\["Dialer"\]/d' "$DASHBOARD_INDEX"
+    # Remove the icon file
+    rm -f "$DASHBOARD_DIR/images/icon_headphones.png"
+    echo "Removed dashboard ProcessesStatus patches"
+fi
 
 #remove menu
 issabel-menuremove call_center

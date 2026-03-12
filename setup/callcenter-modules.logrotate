@@ -1,0 +1,10 @@
+/var/log/callcenter-module/debug.log {
+    daily
+    maxsize 100M
+    missingok
+    notifempty
+    rotate 7
+    compress
+    delaycompress
+    create 640 asterisk asterisk
+}

@@ -135,7 +135,7 @@ class QueueShadow
         }
         $this->_queueflags = NULL;
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: '.__METHOD__.': estado de colas: '.print_r($this->_queues, TRUE));
+            $this->_log->output('DEBUG: '.__METHOD__.': estado de colas | EN: queue status: '.print_r($this->_queues, TRUE));
         }
         if (count($colasSinEventos) > 0) {
             sort($colasSinEventos);
@@ -284,7 +284,7 @@ class QueueShadow
             // The Status update should be done in a next QueueMemberStatus
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Member'].
-                ' en cola '.$params['Queue']);
+                ' en cola '.$params['Queue'].' | EN: member '.$params['Member'].' not found in queue '.$params['Queue']);
         }
     }
 
@@ -307,7 +307,7 @@ class QueueShadow
             // The Status update should be done in a next QueueMemberStatus
         } else {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra miembro '.$params['Member'].
-                ' en cola '.$params['Queue']);
+                ' en cola '.$params['Queue'].' | EN: member '.$params['Member'].' not found in queue '.$params['Queue']);
         }
     }
 
@@ -338,7 +338,11 @@ class QueueShadow
         return $t;
     }
 
-    function infoPrediccionCola($queue)
+    // TODO: Analyze whether AST_DEVICE_RINGING should be counted as free even in predictive mode.
+    // Ringing agents may be receiving a transferred call and should not receive new campaign calls.
+    // TODO: Analizar si AST_DEVICE_RINGING debería contarse como libre incluso en modo predictivo.
+    // Agentes en ringing podrían estar recibiendo una llamada transferida y no deberían recibir nuevas llamadas.
+    function infoPrediccionCola($queue, $predictive = true)
     {
         if (!isset($this->_queues[$queue])) {
             $this->_log->output('WARN: '.__METHOD__.': no se encuentra cola '.$queue.' | EN: queue '.$queue.' not found');
@@ -348,26 +352,48 @@ class QueueShadow
         if (!($this->_queues[$queue]['eventwhencalled'] && $this->_queues[$queue]['eventmemberstatus'])) {
             if ($this->DEBUG) {
                 $this->_log->output('DEBUG: '.__METHOD__.': cola '.$queue.' no ha recibido eventos que '.
-                    'indiquen activación de eventwhencalled y eventmemberstatus');
+                    'indiquen activación de eventwhencalled y eventmemberstatus | EN: queue '.$queue.' has not received events '.
+                    'indicating activation of eventwhencalled and eventmemberstatus');
             }
             return NULL;
         }
 
+        // === TIMESTAMP TRACKER: Queue Info Entry ===
+        $fQueueMicrotime = microtime(TRUE);
+        $fQueueTime = date('Y-m-d H:i:s.', (int)$fQueueMicrotime) . sprintf('%03d', ($fQueueMicrotime - (int)$fQueueMicrotime) * 1000);
+        $this->_log->output("TIMING: ".__METHOD__.": [QUEUE_CHECK] Queue=$queue, microtime=$fQueueMicrotime, time=$fQueueTime | ES: Verificando agentes libres en cola");
+
         $iNumLlamadasColocar = array(
             'AGENTES_LIBRES'        =>  0,
+            'AGENTES_LIBRES_LISTA'  =>  array(),  // List of free agent interfaces for conflict detection
             'AGENTES_POR_DESOCUPAR' =>  array(),
             'CLIENTES_ESPERA'       =>  $this->_queues[$queue]['callers'],
         );
-        foreach ($this->_queues[$queue]['members'] as $miembro) {
+
+        $arrAgentStatus = array();  // Track each agent's status for logging
+        foreach ($this->_queues[$queue]['members'] as $miembro_key => $miembro) {
 
             // Se ignora miembro en pausa
             // Paused member is ignored
             if ($miembro['Paused']) continue;
 
+            // Track status for debugging
+            $arrAgentStatus[$miembro_key] = array(
+                'Status' => $miembro['Status'],
+                'StatusName' => $this->_getStatusName($miembro['Status']),
+                'LinkStart' => $miembro['LinkStart']
+            );
+
             // Miembro definitivamente libre
             // Member definitely free
-            if (in_array($miembro['Status'], array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING)))
+            $freeStatuses = $predictive
+                ? array(AST_DEVICE_NOT_INUSE, AST_DEVICE_RINGING)
+                : array(AST_DEVICE_NOT_INUSE);
+            if (in_array($miembro['Status'], $freeStatuses)) {
                 $iNumLlamadasColocar['AGENTES_LIBRES']++;
+                $iNumLlamadasColocar['AGENTES_LIBRES_LISTA'][] = $miembro_key;
+                $this->_log->output("TIMING: ".__METHOD__.": [AGENT_FREE] Agent=$miembro_key, Status=".$miembro['Status']."(".$this->_getStatusName($miembro['Status'])."), Queue=$queue, predictive=".($predictive?'YES':'NO')." | ES: Agente marcado como libre (predictivo=".($predictive?'SI':'NO').")");
+            }
 
             // Miembro ocupado, se verifica si se desocupará
             // Busy member, verify if it will become free
@@ -376,9 +402,36 @@ class QueueShadow
                 $iNumLlamadasColocar['AGENTES_POR_DESOCUPAR'][] = microtime(TRUE) - $miembro['LinkStart'];
             }
         }
+
+        // === TIMESTAMP TRACKER: Queue Info Summary ===
+        $fAfterMicrotime = microtime(TRUE);
+        $fElapsed = ($fAfterMicrotime - $fQueueMicrotime) * 1000;
+        $this->_log->output("TIMING: ".__METHOD__.": [QUEUE_SUMMARY] Queue=$queue, free_count=".$iNumLlamadasColocar['AGENTES_LIBRES'].", free_list=[".implode(',',$iNumLlamadasColocar['AGENTES_LIBRES_LISTA'])."], elapsed_ms=".round($fElapsed,3)." | ES: Resumen de cola");
+
         if ($this->DEBUG) {
-            $this->_log->output('DEBUG: a punto de devolver '.print_r($iNumLlamadasColocar, true));
+            $this->_log->output('DEBUG: a punto de devolver | EN: about to return: '.print_r($iNumLlamadasColocar, true));
         }
         return $iNumLlamadasColocar;
+    }
+
+    /**
+     * Helper function to get status name for logging
+     * Helper para obtener nombre de estado para logging
+     */
+    private function _getStatusName($status)
+    {
+        $arrStatus = array(
+            AST_DEVICE_NOTINQUEUE => 'NOT_IN_QUEUE',
+            AST_DEVICE_UNKNOWN    => 'UNKNOWN',
+            AST_DEVICE_NOT_INUSE  => 'NOT_INUSE',
+            AST_DEVICE_INUSE      => 'INUSE',
+            AST_DEVICE_BUSY       => 'BUSY',
+            AST_DEVICE_INVALID    => 'INVALID',
+            AST_DEVICE_UNAVAILABLE=> 'UNAVAILABLE',
+            AST_DEVICE_RINGING    => 'RINGING',
+            AST_DEVICE_RINGINUSE  => 'RINGINUSE',
+            AST_DEVICE_ONHOLD     => 'ONHOLD',
+        );
+        return isset($arrStatus[$status]) ? $arrStatus[$status] : 'UNKNOWN_'.$status;
     }
 }

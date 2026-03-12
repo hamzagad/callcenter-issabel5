@@ -172,7 +172,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         // Verificar que el nombre de la clase que implementa el proceso es válido
         // Verify that the class name that implements the process is valid
         if (!class_exists($sNombreClase)) {
-            $this->_log->output("FATAL: (internal) Invalid process classname '$sNombreClase'");
+            $this->_log->output("FATAL: (interno) Nombre de clase de proceso inválido '$sNombreClase' | EN: (internal) Invalid process classname '$sNombreClase'");
             die("(internal) Invalid process classname '$sNombreClase'\n");
         }
 
@@ -187,7 +187,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         if ($iPidProceso != -1) {
             if ($iPidProceso == 0) {
                 $this->_log->prefijo($sNombreTarea);
-                $this->_log->output("iniciando proceso...");
+                $this->_log->output("iniciando proceso... | EN: starting process...");
 
                 // Instalar los manejadores de señal para el proceso hijo
                 // Install signal handlers for the child process
@@ -211,7 +211,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 // Perform additional initialization of the task
                 try {
                     $bContinuar = $oProceso->inicioPostDemonio($this->_config, $this->_log);
-                    if ($bContinuar) $this->_log->output("PID = ".posix_getpid().", proceso iniciado normalmente");
+                    if ($bContinuar) $this->_log->output("PID = ".posix_getpid().", proceso iniciado normalmente | EN: PID = ".posix_getpid().", process started normally");
                 } catch (Exception $ex) {
                     $bContinuar = FALSE;
                     $this->_log->output("ERR: al inicializar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when initializing $sNombreTarea - unhandled exception: ".$ex->getMessage());
@@ -262,7 +262,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         } else {
             // Avisar que no se puede iniciar la tarea requerida
             // Notify that the required task cannot be started
-            $this->_log->output("Unable to fork $sNombreTarea - $!");
+            $this->_log->output("No se pudo bifurcar $sNombreTarea - $! | EN: Unable to fork $sNombreTarea - $!");
         }
         return $iPidProceso;
     }
@@ -417,7 +417,7 @@ XML_CRASH_MSG;
 
         $this->_propagarSIG($signum);
 
-        $this->_log->output('INFO: esperando a que todas las tareas terminen...');
+        $this->_log->output('INFO: esperando a que todas las tareas terminen... | EN: waiting for all tasks to finish...');
         $bTodosTerminaron = FALSE;
         $t1 = time();
         do {

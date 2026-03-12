@@ -31,6 +31,77 @@ var timer = null;
 // Objeto EventSource, si está soportado por el navegador
 var evtSource = null;
 
+// Shift-based time tracking variables
+var shiftLoginTime = null;  // Date object for login timer
+var shiftBreakTime = null;  // Date object for break timer
+var shiftHoldTime = null;   // Date object for hold timer
+var origShiftLogin = 0;     // Original seconds from server
+var origShiftBreak = 0;
+var origShiftHold = 0;
+var isHoldPause = false;    // True if current pause is hold-type
+
+// Shift filter variables (default: full day 00:00-23:59)
+var shiftFromHour = 0;
+var shiftToHour = 23;
+var STORAGE_KEY_SHIFT_FROM = 'agent_console_shift_from';
+var STORAGE_KEY_SHIFT_TO = 'agent_console_shift_to';
+
+function loadShiftPreferences() {
+    var storedFrom = localStorage.getItem(STORAGE_KEY_SHIFT_FROM);
+    var storedTo = localStorage.getItem(STORAGE_KEY_SHIFT_TO);
+
+    if (storedFrom !== null) {
+        shiftFromHour = parseInt(storedFrom, 10);
+        if (isNaN(shiftFromHour) || shiftFromHour < 0 || shiftFromHour > 23) {
+            shiftFromHour = 0;
+        }
+    }
+
+    if (storedTo !== null) {
+        shiftToHour = parseInt(storedTo, 10);
+        if (isNaN(shiftToHour) || shiftToHour < 0 || shiftToHour > 23) {
+            shiftToHour = 23;
+        }
+    }
+}
+
+function saveShiftPreferences() {
+    localStorage.setItem(STORAGE_KEY_SHIFT_FROM, shiftFromHour);
+    localStorage.setItem(STORAGE_KEY_SHIFT_TO, shiftToHour);
+}
+
+function updateShiftRangeIndicator() {
+    var indicator = $('#shiftRangeIndicator');
+    var fromStr = (shiftFromHour < 10 ? '0' : '') + shiftFromHour + ':00';
+    var toStr = (shiftToHour < 10 ? '0' : '') + shiftToHour + ':59';
+
+    if (shiftFromHour > shiftToHour) {
+        indicator.text('Yesterday ' + fromStr + ' - Today ' + toStr);
+    } else {
+        indicator.text('Today ' + fromStr + ' - ' + toStr);
+    }
+}
+
+function applyShiftFilter() {
+    var rawFrom = $('#shiftFromHour').val();
+    var rawTo = $('#shiftToHour').val();
+
+    var newFrom = parseInt(rawFrom, 10);
+    var newTo = parseInt(rawTo, 10);
+
+    if (isNaN(newFrom) || newFrom < 0 || newFrom > 23) newFrom = 0;
+    if (isNaN(newTo) || newTo < 0 || newTo > 23) newTo = 23;
+
+    shiftFromHour = newFrom;
+    shiftToHour = newTo;
+
+    saveShiftPreferences();
+    updateShiftRangeIndicator();
+
+    // Request updated shift times from server
+    do_updateShiftTimes();
+}
+
 // Copia del URL a cargar al agregar la nueva cejilla
 var jqueryui_tabs_use_refresh = true;
 var externalurl = null;
@@ -76,6 +147,20 @@ $(document).ready(function() {
             e.preventDefault();
             do_transfer();
             $('#issabel-callcenter-seleccion-transfer').dialog('close');
+        }
+    });
+
+    // Handle transfer type radio button changes - show/hide appropriate fields
+    $('input[name="transfer_type"]').change(function() {
+        var transferType = $(this).val();
+        if (transferType == 'agent') {
+            // Show agent dropdown, hide extension input
+            $('#transfer_extension_row').hide();
+            $('#transfer_agent_row').show();
+        } else {
+            // Show extension input, hide agent dropdown
+            $('#transfer_extension_row').show();
+            $('#transfer_agent_row').hide();
         }
     });
 
@@ -254,6 +339,34 @@ function initialize_client_state(nuevoEstado)
 	estadoCliente.callid = nuevoEstado.callid;
 	estadoCliente.waitingcall = nuevoEstado.waitingcall;
 
+	// Disable Transfer button if currently on hold
+	if (estadoCliente.onhold) {
+		$('#btn_transfer').button('disable');
+	}
+
+	// Initialize shift stat timers
+	origShiftLogin = nuevoEstado.shift_login_time || 0;
+	origShiftBreak = nuevoEstado.shift_break_time || 0;
+	origShiftHold = nuevoEstado.shift_hold_time || 0;
+	isHoldPause = nuevoEstado.is_hold_pause || false;
+
+	var now = new Date();
+	shiftLoginTime = new Date(now.getTime() - origShiftLogin * 1000);
+	shiftBreakTime = new Date(now.getTime() - origShiftBreak * 1000);
+	shiftHoldTime = new Date(now.getTime() - origShiftHold * 1000);
+
+	// Initialize shift filter UI
+	loadShiftPreferences();
+	$('#shiftFromHour').val(('0' + shiftFromHour).slice(-2));
+	$('#shiftToHour').val(('0' + shiftToHour).slice(-2));
+	updateShiftRangeIndicator();
+	$('#applyShiftFilter').on('click', applyShiftFilter);
+
+	// If saved preferences differ from default (0-23), fetch correct shift data
+	if (shiftFromHour !== 0 || shiftToHour !== 23) {
+		setTimeout(do_updateShiftTimes, 100);
+	}
+
 	// Lanzar el callback que actualiza el estado de la llamada
     setTimeout(do_checkstatus, 1);
 
@@ -280,13 +393,50 @@ function iniciar_cronometro(timer_seconds)
 	if (timer_seconds != null) {
 		fechaInicio = new Date();
 		fechaInicio.setTime(fechaInicio.getTime() - timer_seconds * 1000);
-		timer = setTimeout(actualizar_cronometro, 1);
 	}
+	// Always start the timer loop for shift stats (even when idle)
+	timer = setTimeout(actualizar_cronometro, 1);
 }
 
 // Cada 500 ms se llama a esta función para actualizar el cronómetro
 function actualizar_cronometro()
 {
+	// Update main chronometer only if active (fechaInicio is set)
+	if (fechaInicio != null) {
+		var fechaDiff = new Date();
+		var msec = fechaDiff.getTime() - fechaInicio.getTime();
+		var tiempo = [0, 0, 0];
+		tiempo[0] = (msec - (msec % 1000)) / 1000;
+		tiempo[1] = (tiempo[0] - (tiempo[0] % 60)) / 60;
+		tiempo[0] %= 60;
+		tiempo[2] = (tiempo[1] - (tiempo[1] % 60)) / 60;
+		tiempo[1] %= 60;
+		var i = 0;
+		for (i = 0; i < 3; i++) { if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i]; }
+		$('#issabel-callcenter-cronometro').text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
+	}
+
+	// Update shift stat timers
+	// Login timer always ticks when logged in
+	if (shiftLoginTime != null) {
+		formatoShiftTimer('#shift-stat-login', shiftLoginTime);
+	}
+
+	// Break timer ticks only when on break (and not hold-type)
+	if (shiftBreakTime != null && estadoCliente.break_id != null && !isHoldPause) {
+		formatoShiftTimer('#shift-stat-break', shiftBreakTime);
+	}
+
+	// Hold timer ticks only when on hold
+	if (shiftHoldTime != null && (estadoCliente.onhold || isHoldPause)) {
+		formatoShiftTimer('#shift-stat-hold', shiftHoldTime);
+	}
+
+	timer = setTimeout(actualizar_cronometro, 500);
+}
+
+// Format shift timer display
+function formatoShiftTimer(selector, fechaInicio) {
 	var fechaDiff = new Date();
 	var msec = fechaDiff.getTime() - fechaInicio.getTime();
 	var tiempo = [0, 0, 0];
@@ -295,10 +445,10 @@ function actualizar_cronometro()
 	tiempo[0] %= 60;
 	tiempo[2] = (tiempo[1] - (tiempo[1] % 60)) / 60;
 	tiempo[1] %= 60;
-	var i = 0;
-	for (i = 0; i < 3; i++) { if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i]; }
-	$('#issabel-callcenter-cronometro').text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
-	timer = setTimeout(actualizar_cronometro, 500);
+	for (var i = 0; i < 3; i++) {
+		if (tiempo[i] <= 9) tiempo[i] = "0" + tiempo[i];
+	}
+	$(selector).text(tiempo[2] + ':' + tiempo[1] + ':' + tiempo[0]);
 }
 
 // El siguiente código aplica estilos de jQueryUI
@@ -341,8 +491,8 @@ function apply_ui_styles(uidata)
     });
     $('#issabel-callcenter-seleccion-transfer').dialog({
         autoOpen: false,
-        width: 400,
-        height: 200,
+        width: 600,
+        height: 320,
         modal: true,
         buttons: [
             {
@@ -592,17 +742,31 @@ function do_unbreak()
 
 function do_transfer()
 {
-	$.post('index.php?menu=' + module_name + '&rawmode=yes', {
+	// Determine transfer type
+	var transferType = $('input[name="transfer_type"]:checked').val();
+	var postData = {
 		menu:		module_name,
 		rawmode:	'yes',
 		action:		'transfer',
 		extension:	$('#transfer_extension').val(),
 		atxfer: 	$('#transfer_type_attended').is(':checked')
-	},
+	};
+
+	// If transferring to agent, change action and parameters
+	if (transferType == 'agent') {
+		postData.action = 'transferagent';
+		postData.target_agent = $('#transfer_agent').val();
+	}
+
+	$.post('index.php?menu=' + module_name + '&rawmode=yes', postData,
 	function (respuesta) {
 		verificar_error_session(respuesta);
         if (respuesta['action'] == 'error') {
         	mostrar_mensaje_error(respuesta['message']);
+        } else if (respuesta['consultation']) {
+        	// Attended transfer consultation started - disable Hold/Transfer buttons
+        	$('#btn_hold').button('disable');
+        	$('#btn_transfer').button('disable');
         }
 
         // El cambio de estado de la interfaz se delega a la revisión
@@ -711,6 +875,36 @@ function do_ping()
 	});
 }
 
+// Request updated shift times from server with current filter
+function do_updateShiftTimes()
+{
+    var params = {
+        menu:       module_name,
+        rawmode:    'yes',
+        action:     'updateShiftTimes',
+        shift_from: shiftFromHour,
+        shift_to:   shiftToHour
+    };
+    $.post('index.php?menu=' + module_name + '&rawmode=yes', params,
+    function (respuesta) {
+        verificar_error_session(respuesta);
+        if (respuesta.shift_login_time !== undefined) {
+            var now = new Date();
+            origShiftLogin = respuesta.shift_login_time;
+            origShiftBreak = respuesta.shift_break_time;
+            origShiftHold = respuesta.shift_hold_time;
+            shiftLoginTime = new Date(now.getTime() - origShiftLogin * 1000);
+            shiftBreakTime = new Date(now.getTime() - origShiftBreak * 1000);
+            shiftHoldTime = new Date(now.getTime() - origShiftHold * 1000);
+            isHoldPause = respuesta.is_hold_pause || false;
+            // Update display immediately
+            formatoShiftTimer('#shift-stat-login', shiftLoginTime);
+            formatoShiftTimer('#shift-stat-break', shiftBreakTime);
+            formatoShiftTimer('#shift-stat-hold', shiftHoldTime);
+        }
+    }, 'json');
+}
+
 function do_checkstatus()
 {
     params = {
@@ -749,7 +943,6 @@ function do_checkstatus()
 
 function manejarRespuestaStatus(respuesta)
 {
-    //console.log(respuesta);
 	for (var i in respuesta) {
 		if (respuesta[i].txt_estado_agente_inicial != null)
 			$('#issabel-callcenter-estado-agente-texto').text(respuesta[i].txt_estado_agente_inicial);
@@ -766,6 +959,24 @@ function manejarRespuestaStatus(respuesta)
 			} else {
 				iniciar_cronometro(null);
 			}
+		}
+
+		// Update shift times from server response
+		var fechaAhora = new Date();
+		if (respuesta[i].shift_login_time !== undefined) {
+			origShiftLogin = respuesta[i].shift_login_time;
+			shiftLoginTime = new Date(fechaAhora.getTime() - origShiftLogin * 1000);
+		}
+		if (respuesta[i].shift_break_time !== undefined) {
+			origShiftBreak = respuesta[i].shift_break_time;
+			shiftBreakTime = new Date(fechaAhora.getTime() - origShiftBreak * 1000);
+		}
+		if (respuesta[i].shift_hold_time !== undefined) {
+			origShiftHold = respuesta[i].shift_hold_time;
+			shiftHoldTime = new Date(fechaAhora.getTime() - origShiftHold * 1000);
+		}
+		if (respuesta[i].is_hold_pause !== undefined) {
+			isHoldPause = respuesta[i].is_hold_pause;
 		}
 
 		switch (respuesta[i].event) {
@@ -791,13 +1002,15 @@ function manejarRespuestaStatus(respuesta)
 			break;
 		case 'holdenter':
 			estadoCliente.onhold = true;
-			// Update button text to "End Hold"
+			// Update button text to "End Hold" and disable Transfer while on hold
 			$('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
+			$('#btn_transfer').button('disable');
 			break;
 		case 'holdexit':
 			estadoCliente.onhold = false;
-			// Update button text to "Hold"
+			// Update button text to "Hold" and re-enable Transfer
 			$('#btn_hold').button('option', 'label', respuesta[i].txt_btn_hold);
+			$('#btn_transfer').button('enable');
 			break;
 		case 'agentlinked':
 			// El agente ha recibido una llamada
@@ -806,7 +1019,9 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.callid = respuesta[i].callid;
 			$('#btn_hangup').button('enable');
 			$('#btn_hold').button('enable');
-			$('#btn_transfer').button('enable');
+			if (!estadoCliente.onhold) {
+				$('#btn_transfer').button('enable');
+			}
 			$('#issabel-callcenter-cronometro').text(respuesta[i].cronometro);
 			$('#issabel-callcenter-llamada-info')
 			    .css('color', '')
@@ -837,7 +1052,6 @@ function manejarRespuestaStatus(respuesta)
 
 			apply_form_styles();
 		    $('#btn_guardar_formularios').button('enable');
-            console.log(respuesta[i]);
             if (!respuesta[i].urlopentype3){
                 respuesta[i].urlopentype3 = "DELETE";
             }
@@ -878,6 +1092,24 @@ function manejarRespuestaStatus(respuesta)
 			break;
 		case 'waitingexit':
 			estadoCliente.waitingcall = false;
+			break;
+		case 'consultationstart':
+			// Attended transfer consultation started - disable Hold/Transfer
+			$('#btn_hold').button('disable');
+			$('#btn_transfer').button('disable');
+			break;
+		case 'consultationend':
+			// Consultation ended - re-enable all buttons only if the agent
+			// still has an active call. This covers both: agent cancelling
+			// consultation (reconnects to customer) and customer hanging up
+			// during consultation (buttons should stay disabled).
+			// Use callid (not campaign_id) because incoming queue calls
+			// without a campaign have callid set but campaign_id == null.
+			if (estadoCliente.callid != null) {
+				$('#btn_hangup').button('enable');
+				$('#btn_hold').button('enable');
+				$('#btn_transfer').button('enable');
+			}
 			break;
 		}
 	}

@@ -31,6 +31,7 @@ class ECCPConn
     private $_log;
     private $_ami;
     private $_astVersion;
+    private $_compat = NULL; // AsteriskCompat instance for version-aware behavior
     private $_db;
     private $_tuberia;
 
@@ -75,6 +76,11 @@ class ECCPConn
     {
         $this->_ami = $astConn;
         $this->_astVersion = $astVersion;
+        if (is_array($astVersion)) {
+            $this->_compat = new AsteriskCompat($astVersion);
+        } else {
+            $this->_compat = NULL;
+        }
     }
 
     function setDbConn($dbConn)
@@ -112,8 +118,8 @@ class ECCPConn
                 if ($this->DEBUG) {
                     $iTimestampRecibido = (double)$request['received'];
                     $proc_start = microtime(TRUE);
-                    $this->_log->output('DEBUG: '.__METHOD__.': retraso '.
-                        '(sec) hasta procesar: '.($proc_start - $iTimestampRecibido));
+                    $this->_log->output('DEBUG: '.__METHOD__.': retraso (sec) hasta procesar: '.($proc_start - $iTimestampRecibido).
+                        ' | EN: DEBUG: '.__METHOD__.': delay (sec) until processing: '.($proc_start - $iTimestampRecibido));
                 }
 
                 // Se procede normalmente...
@@ -129,8 +135,8 @@ class ECCPConn
                 $iTimestampInicio = microtime(TRUE);
                 $sRequerimiento = (string)$comando->getName();
                 if ($this->DEBUG) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': procesando requerimiento '.
-                        $sRequerimiento.' params: '.print_r($comando, TRUE));
+                    $this->_log->output('DEBUG: '.__METHOD__.': procesando requerimiento '.$sRequerimiento.' params: '.print_r($comando, TRUE).
+                        ' | EN: DEBUG: '.__METHOD__.': processing request '.$sRequerimiento.' params: '.print_r($comando, TRUE));
                 }
                 if (!isset($this->_peticionesAttr[$sRequerimiento])) {
                     $this->_log->output('ERR: (interno) no existe implementación para método: '.$sRequerimiento.' | EN: no implementation exists for method: '.$sRequerimiento);
@@ -202,9 +208,8 @@ class ECCPConn
 
                 $iTimestampFinal = microtime(TRUE);
                 if ($this->DEBUG || (($iTimestampFinal - $iTimestampInicio) >= 1.0)) {
-                    $this->_log->output('DEBUG: '.__METHOD__.': requerimiento '.
-                        $comando->getName().' procesado luego de (sec): '.
-                        ($iTimestampFinal - $iTimestampInicio));
+                    $this->_log->output('DEBUG: '.__METHOD__.': requerimiento '.$comando->getName().' procesado luego de (sec): '.($iTimestampFinal - $iTimestampInicio).
+                        ' | EN: DEBUG: '.__METHOD__.': request '.$comando->getName().' processed after (sec): '.($iTimestampFinal - $iTimestampInicio));
                 }
             }
             $response->addAttribute('id', (string)$request['id']);
@@ -217,13 +222,12 @@ class ECCPConn
 
     private function _stdManejoExcepcionDB($e, $s)
     {
-        $this->_log->output('ERR: '.__METHOD__.": $s: ".implode(' - ', $e->errorInfo));
-        $this->_log->output("ERR: traza de pila: \n".$e->getTraceAsString());
+        $this->_log->output('ERR: '.__METHOD__.": $s: ".implode(' - ', $e->errorInfo).' | EN: ERR: '.__METHOD__.": $s: ".implode(' - ', $e->errorInfo));
+        $this->_log->output("ERR: traza de pila | EN: stack trace: \n".$e->getTraceAsString());
         if ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 2006) {
             // Códigos correspondientes a pérdida de conexión de base de datos
             // Codes corresponding to database connection loss
-            $this->_log->output('WARN: '.__METHOD__.
-                ': conexión a DB parece ser inválida, se cierra...'.' DB connection appears to be invalid, closing...');
+            $this->_log->output('WARN: '.__METHOD__.': conexión a DB parece ser inválida, se cierra... | EN: WARN: '.__METHOD__.': DB connection appears to be invalid, closing...');
             $this->multiplexSrv->setDBConn(NULL);
         }
     }
@@ -1520,13 +1524,18 @@ class ECCPConn
         // Abrir la conexión a la base de datos, si se tienen todos los parámetros
         if (count($dbParams) < 4) {
             $this->_log->output('ERR: archivo '.$sNombreConfig.
-                ' de parámetros FreePBX no tiene todos los parámetros requeridos para conexión.');
+                ' de parámetros FreePBX no tiene todos los parámetros requeridos para conexión.'.
+                ' | EN: ERR: file '.$sNombreConfig.
+                ' of FreePBX parameters does not have all required parameters for connection.');
             return NULL;
         }
         if ($dbParams['AMPDBENGINE'] != 'mysql' && $dbParams['AMPDBENGINE'] != 'mysqli') {
             $this->_log->output('ERR: archivo '.$sNombreConfig.
                 ' de parámetros FreePBX especifica AMPDBENGINE='.$dbParams['AMPDBENGINE'].
-                ' que no ha sido probado.');
+                ' que no ha sido probado.'.
+                ' | EN: ERR: file '.$sNombreConfig.
+                ' of FreePBX parameters specifies AMPDBENGINE='.$dbParams['AMPDBENGINE'].
+                ' which has not been tested.');
             return NULL;
         }
         try {
@@ -1536,8 +1545,8 @@ class ECCPConn
             $dbConn->setAttribute(PDO::ATTR_EMULATE_PREPARES, FALSE);
             return $dbConn;
         } catch (PDOException $e) {
-            $this->_log->output("ERR: no se puede conectar a DB de FreePBX - ".
-                $e->getMessage());
+            $this->_log->output("ERR: no se puede conectar a DB de FreePBX - ".$e->getMessage().
+                " | EN: ERR: cannot connect to FreePBX DB - ".$e->getMessage());
         	return NULL;
         }
     }
@@ -1562,7 +1571,7 @@ class ECCPConn
                 $listaExtensiones[$tupla['extension']] = $tupla['dial'];
             }
         } catch (PDOException $e) {
-        	$this->_log->output('ERR: (internal) Cannot list extensions - '.$e->getMessage());
+        	$this->_log->output('ERR: (interno) No se pueden listar extensiones - '.$e->getMessage().' | EN: ERR: (internal) Cannot list extensions - '.$e->getMessage());
         }
         $oDB = NULL;
         return $listaExtensiones;
@@ -1610,22 +1619,38 @@ class ECCPConn
         $r = NULL;
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
-            // app_agent_pool (Asterisk 12+): Originate call to agent-login context
-            // The agent-login context runs AgentLogin() application
             $this->_tuberia->AMIEventProcess_agregarIntentoLoginAgente($sAgente, $sExtension, $iTimeout);
-            $r = $this->_ami->Originate(
-                $sExtension,                    // channel (SIP/1064)
-                $agentFields['number'],         // exten (agent number)
-                'agent-login',                  // context (runs AgentLogin app)
-                1,                              // priority
-                NULL,                           // application (use context instead)
-                NULL,                           // data
-                30000,                          // timeout in ms
-                $sAgente.' Login',              // CallerID
-                NULL, NULL,
-                TRUE,                           // async
-                'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente     // action-id
-                );
+            if (!is_null($this->_compat) && $this->_compat->hasChanAgent()) {
+                // chan_agent (Asterisk 11): Originate directly to AgentLogin application
+                // Asterisk prompts for the password configured in agents.conf
+                $r = $this->_ami->Originate(
+                    $sExtension,                    // channel (SIP/1064)
+                    NULL, NULL, NULL,               // exten, context, priority (not used)
+                    'AgentLogin',                   // application
+                    $agentFields['number'],         // data (agent number)
+                    30000,                          // timeout in ms
+                    $sAgente.' Login',              // CallerID
+                    NULL, NULL,
+                    TRUE,                           // async
+                    'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente
+                    );
+            } else {
+                // app_agent_pool (Asterisk 12+): Originate call to agent-login context
+                // The agent-login context runs AgentLogin() which does NOT prompt for password
+                $r = $this->_ami->Originate(
+                    $sExtension,                    // channel (SIP/1064)
+                    $agentFields['number'],         // exten (agent number)
+                    'agent-login',                  // context (runs AgentLogin app)
+                    1,                              // priority
+                    NULL,                           // application (use context instead)
+                    NULL,                           // data
+                    30000,                          // timeout in ms
+                    $sAgente.' Login',              // CallerID
+                    NULL, NULL,
+                    TRUE,                           // async
+                    'ECCP:1.0:'.posix_getpid().':AgentLogin:'.$sAgente
+                    );
+            }
             if ($r['Response'] != 'Success') {
                 $this->_tuberia->AMIEventProcess_cancelarIntentoLoginAgente($sAgente);
                 return FALSE;
@@ -1652,6 +1677,9 @@ class ECCPConn
                 if (count($listaColas[$sAgente][0]) > 0) {
                     $this->_log->output('WARN: '.__METHOD__.': agente '.$sAgente.
                         ' que intenta logonearse ya está en colas: ['.
+                        implode(' ', $listaColas[$sAgente][0]).']'.
+                        ' | EN: WARN: '.__METHOD__.': agent '.$sAgente.
+                        ' attempting to login is already in queues: ['.
                         implode(' ', $listaColas[$sAgente][0]).']');
                 }
                 foreach ($listaColas[$sAgente][0] as $cola) {
@@ -1659,7 +1687,9 @@ class ECCPConn
                     $r = $this->_ami->QueueRemove($cola, $sAgente);
                     if ($r['Response'] != 'Success') {
                         $this->_log->output('WARN: '.__METHOD__.': falla al quitar agente '.
-                            $sAgente.' de cola '.$cola.': '.print_r($r, TRUE));
+                            $sAgente.' de cola '.$cola.': '.print_r($r, TRUE).
+                            ' | EN: WARN: '.__METHOD__.': failure removing agent '.
+                            $sAgente.' from queue '.$cola.': '.print_r($r, TRUE));
                     }
                 }
                 foreach ($listaColas[$sAgente][2] as $cola => $penalty) {
@@ -1667,7 +1697,9 @@ class ECCPConn
                     $r = $this->_ami->QueueAdd($cola, $sAgente, $penalty, $name);
                     if ($r['Response'] != 'Success') {
                         $this->_log->output('WARN: '.__METHOD__.': falla al ingresar agente '.
-                            $sAgente.' a cola '.$cola.': '.print_r($r, TRUE));
+                            $sAgente.' a cola '.$cola.': '.print_r($r, TRUE).
+                            ' | EN: WARN: '.__METHOD__.': failure adding agent '.
+                            $sAgente.' to queue '.$cola.': '.print_r($r, TRUE));
                     } else $bIngresoCola = TRUE;
                 }
                 if (!$bIngresoCola) {
@@ -1732,19 +1764,30 @@ class ECCPConn
 
         $agentFields = $this->_parseAgent($sAgente);
         if ($agentFields['type'] == 'Agent') {
-            // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
-            // There is no Agentlogoff AMI command in app_agent_pool
-            $sCanalLogin = NULL;
-            if (!is_null($infoAgente)) {
-                $sCanalLogin = $infoAgente['login_channel'];
-                if (is_null($sCanalLogin)) {
-                    $sCanalLogin = $infoAgente['extension'];
+            if (!is_null($this->_compat) && $this->_compat->hasChanAgent()) {
+                // chan_agent (Asterisk 11): use Agentlogoff AMI command
+                $r = $this->_ami->Agentlogoff($agentFields['number']);
+                // If agent hasn't entered password yet, Agentlogoff has no effect
+                // so also hangup the channel directly
+                if (!is_null($infoAgente) && $infoAgente['estado_consola'] == 'logging') {
+                    $sCanalExt = $infoAgente['login_channel'];
+                    if (is_null($sCanalExt)) $sCanalExt = $infoAgente['extension'];
+                    if (!is_null($sCanalExt)) $this->_ami->Hangup($sCanalExt);
                 }
-            }
-            if (!is_null($sCanalLogin)) {
-                $this->_ami->Hangup($sCanalLogin);
             } else {
-                $this->_log->output('WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
+                // app_agent_pool (Asterisk 12+): Hangup the AgentLogin channel to logout
+                $sCanalLogin = NULL;
+                if (!is_null($infoAgente)) {
+                    $sCanalLogin = $infoAgente['login_channel'];
+                    if (is_null($sCanalLogin)) {
+                        $sCanalLogin = $infoAgente['extension'];
+                    }
+                }
+                if (!is_null($sCanalLogin)) {
+                    $this->_ami->Hangup($sCanalLogin);
+                } else {
+                    $this->_log->output('WARN: '.__METHOD__.': no se encontró canal de login para agente '.$sAgente.' | EN: WARN: '.__METHOD__.': no login channel found for agent '.$sAgente);
+                }
             }
         } else {
             // SIP/IAX2/PJSIP: Close client channel if connected
@@ -2057,7 +2100,7 @@ class ECCPConn
 
         if (!is_null($sAgentStatus)) {
             if ($sAgentStatus != 'offline' && is_null($sExtension)) {
-                $this->_log->output("ERR: (internal) estado inconsistente de agente (status=$sAgentStatus extension=null)\n".
+                $this->_log->output("ERR: (interno) estado inconsistente de agente (status=$sAgentStatus extension=null) | EN: ERR: (internal) inconsistent agent state (status=$sAgentStatus extension=null)\n".
                     "\tinfoSeguimiento => ".print_r($infoSeguimiento, TRUE).
                     "\tinfoLlamada => ".print_r($infoLlamada, TRUE));
             }
@@ -2123,6 +2166,8 @@ class ECCPConn
         $r = $this->_ami->MixMonitorMute($infoLlamada['channel'], true);
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: No se puede callar la grabacion para '.$sAgente.
+                ' ('.$infoLlamada['channel'].') - '.$r['Message'].
+                ' | EN: ERR: Cannot mute recording for '.$sAgente.
                 ' ('.$infoLlamada['channel'].') - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_mixmonitormuteResponse, 500, 'Cannot mute agent call');
             return $xml_response;
@@ -2164,6 +2209,8 @@ class ECCPConn
             $r = $this->_ami->MixMonitorMute($chan, false);
             if ($r['Response'] != 'Success') {
                 $this->_log->output('ERR: No se puede restaurar la grabacion para '.$sAgente.
+                    ' ('.$chan.') - '.$r['Message'].
+                    ' | EN: ERR: Cannot restore recording for '.$sAgente.
                     ' ('.$chan.') - '.$r['Message']);
             } else {
                 $c++;
@@ -2216,59 +2263,89 @@ class ECCPConn
                     $isAttendedTransfer = !empty($transferDest);
                 }
 
-                if ($isAttendedTransfer) {
-                    // ========================================================================
-                    // ATTENDED TRANSFER COMPLETION
-                    // Redirect agent's login_channel to atxfer-complete context.
-                    // This causes agent to leave consultation bridge (Atxfer completes),
-                    // then re-enter AgentLogin to stay logged in.
-                    // ========================================================================
-                    $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION START ==========');
-                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
-
+                if ($isAttendedTransfer && !is_null($this->_compat) && $this->_compat->hasAppAgentPool()) {
                     // Get agent's login_channel
                     $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
                     if (is_null($infoAgente) || empty($infoAgente['login_channel'])) {
-                        $this->_log->output('WARN: No login_channel found for agent, falling back to normal hangup');
+                        $this->_log->output('WARN: No se encontró login_channel para el agente, usando hangup normal | EN: No login_channel found for agent, falling back to normal hangup');
                         $hangchannel = $infoLlamada['actualchannel'];
-                        $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
                     } else {
                         $loginChannel = $infoAgente['login_channel'];
-                        // Extract agent number (e.g., "1001" from "Agent/1001")
                         $agentNumber = substr($sAgente, strpos($sAgente, '/') + 1);
 
-                        $this->_log->output('DEBUG: Agent login_channel: '.$loginChannel);
-                        $this->_log->output('DEBUG: Agent number: '.$agentNumber);
+                        // Check if agent is currently in active consultation (Dial in progress)
+                        $isInConsultation = $this->_tuberia->AMIEventProcess_esAgenteEnConsultation($sAgente);
 
-                        // Signal AMIEventProcess to suppress the upcoming Agentlogoff event
-                        // The agent will re-enter AgentLogin via the atxfer-complete context
-                        $this->_log->output('DEBUG: Signaling AMIEventProcess to suppress Agentlogoff for '.$sAgente);
-                        $this->_tuberia->msg_AMIEventProcess_prepararAtxferComplete($sAgente);
+                        if ($isInConsultation) {
+                            // ================================================================
+                            // CANCEL CONSULTATION: Agent is actively consulting (Dial in
+                            // progress). Redirect to atxfer-cancel-consult which terminates
+                            // the consulting call and Bridge()s the agent back to the
+                            // customer. Call tracking is preserved (no _finalizarTransferencia).
+                            // ================================================================
+                            $this->_log->output('DEBUG: ========== CANCELAR CONSULTA | EN: CANCEL CONSULTATION ==========');
+                            $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino/Target: '.$transferDest.', login_channel: '.$loginChannel);
 
-                        // Redirect agent's channel to atxfer-complete context
-                        // This causes agent to leave consultation bridge (Atxfer completes),
-                        // then the context runs AgentLogin to keep agent logged in
-                        $this->_log->output('DEBUG: Redirecting '.$loginChannel.' to atxfer-complete/'.$agentNumber);
-                        $r = $this->_ami->Redirect(
-                            $loginChannel,        // Channel: agent's login_channel
-                            '',                   // ExtraChannel: not used
-                            $agentNumber,         // Exten: agent number (e.g., 1001)
-                            'atxfer-complete',    // Context: atxfer-complete context
-                            1                     // Priority
-                        );
-                        $this->_log->output('DEBUG: Redirect result: '.print_r($r, true));
+                            $r = $this->_ami->Redirect(
+                                $loginChannel,              // Channel: agent's login_channel
+                                '',                         // ExtraChannel: not used
+                                's',                        // Exten
+                                'atxfer-cancel-consult',    // Context: cancel and reconnect
+                                1                           // Priority
+                            );
+                            $this->_log->output('DEBUG: Resultado de Redirect/Redirect result: '.print_r($r, true));
 
-                        if ($r['Response'] == 'Success') {
-                            $this->_log->output('INFO: Attended transfer completion initiated - agent redirected to atxfer-complete');
-                            // Release agent from call tracking
-                            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
-
-                            $xml_hangupResponse->addChild('success');
-                            return $xml_response;
+                            if ($r['Response'] == 'Success') {
+                                $this->_log->output('INFO: Consulta cancelada - agente será reconectado al cliente | EN: Consultation cancelled - agent will be reconnected to customer');
+                                // Clear the transfer record (transfer was cancelled)
+                                if (!is_null($infoLlamada['callid'])) {
+                                    $dbTable = ($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls';
+                                    $sth = $this->_db->prepare("UPDATE {$dbTable} SET transfer = '' WHERE id = ?");
+                                    $sth->execute(array($infoLlamada['callid']));
+                                    $sth->closeCursor();
+                                }
+                                $xml_hangupResponse->addChild('success');
+                                return $xml_response;
+                            } else {
+                                $this->_log->output('WARN: Redirect falló: '.$r['Message'].', usando hangup normal | EN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
+                                $hangchannel = $infoLlamada['actualchannel'];
+                            }
                         } else {
-                            $this->_log->output('WARN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
-                            $hangchannel = $infoLlamada['actualchannel'];
-                            $this->_log->output('DEBUG: ========== ATTENDED TRANSFER COMPLETION FAILED ==========');
+                            // ================================================================
+                            // COMPLETE TRANSFER: Consultation already ended (colleague
+                            // answered and agent returned, or colleague hung up). The
+                            // transfer record exists but agent is no longer in Dial().
+                            // Redirect to atxfer-complete to finalize and re-enter AgentLogin.
+                            // ================================================================
+                            $this->_log->output('DEBUG: ========== COMPLETAR TRANSFERENCIA | EN: COMPLETE TRANSFER ==========');
+                            $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino/Target: '.$transferDest.', login_channel: '.$loginChannel);
+
+                            // Hang up customer channel (in atxfer-hold with MusicOnHold)
+                            if (!empty($infoLlamada['actualchannel'])) {
+                                $this->_log->output('DEBUG: Hanging up customer channel '.$infoLlamada['actualchannel'].' | EN: Hanging up customer channel '.$infoLlamada['actualchannel']);
+                                $this->_ami->Hangup($infoLlamada['actualchannel']);
+                            }
+
+                            // Suppress Agentlogoff and redirect to atxfer-complete
+                            $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
+                            $r = $this->_ami->Redirect(
+                                $loginChannel,        // Channel: agent's login_channel
+                                '',                   // ExtraChannel: not used
+                                $agentNumber,         // Exten: agent number
+                                'atxfer-complete',    // Context: re-enter AgentLogin
+                                1                     // Priority
+                            );
+                            $this->_log->output('DEBUG: Resultado de Redirect/Redirect result: '.print_r($r, true));
+
+                            if ($r['Response'] == 'Success') {
+                                $this->_log->output('INFO: Transferencia completada - agente redirigido a atxfer-complete | EN: Transfer completed - agent redirected to atxfer-complete');
+                                $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+                                $xml_hangupResponse->addChild('success');
+                                return $xml_response;
+                            } else {
+                                $this->_log->output('WARN: Redirect falló: '.$r['Message'].', usando hangup normal | EN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
+                                $hangchannel = $infoLlamada['actualchannel'];
+                            }
                         }
                     }
                 } else {
@@ -2297,8 +2374,8 @@ class ECCPConn
                     // hang up the agent's channel (not the customer's) to complete
                     // the transfer and connect customer to colleague.
                     // ========================================================================
-                    $this->_log->output('DEBUG: ========== CALLBACK AGENT ATTENDED TRANSFER COMPLETION START ==========');
-                    $this->_log->output('DEBUG: Agent: '.$sAgente.', Transfer Target: '.$transferDest);
+                    $this->_log->output('DEBUG: ========== INICIO DE TRANSFERENCIA ATENDIDA AGENTE CALLBACK | EN: CALLBACK AGENT ATTENDED TRANSFER COMPLETION START ==========');
+                    $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino de transferencia/Transfer Target: '.$transferDest);
 
                     // Use agentchannel for callback agents to complete the transfer
                     // If agentchannel doesn't have unique ID (no hyphen), get the actual agent channel
@@ -2307,25 +2384,25 @@ class ECCPConn
                         // Try using actualAgentChannel if available
                         if (isset($infoLlamada['actualAgentChannel']) && !empty($infoLlamada['actualAgentChannel'])) {
                             $hangchannel = $infoLlamada['actualAgentChannel'];
-                            $this->_log->output('DEBUG: Using actualAgentChannel: '.$hangchannel);
+                            $this->_log->output('DEBUG: Usando actualAgentChannel | EN: Using actualAgentChannel: '.$hangchannel);
                         } else {
                             // Fallback: try to construct the channel from current agent info
                             $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
                             if (!is_null($infoAgente) && !empty($infoAgente['channel']) && strpos($infoAgente['channel'], '-') !== false) {
                                 $hangchannel = $infoAgente['channel'];
-                                $this->_log->output('DEBUG: Using agent channel from infoSeguimiento: '.$hangchannel);
+                                $this->_log->output('DEBUG: Usando canal del agente de infoSeguimiento | EN: Using agent channel from infoSeguimiento: '.$hangchannel);
                             } else {
                                 // Last resort: use the agentchannel as-is and hope Asterisk can match it
-                                $this->_log->output('DEBUG: Using agentchannel without unique ID: '.$hangchannel);
+                                $this->_log->output('DEBUG: Usando agentchannel sin ID único | EN: Using agentchannel without unique ID: '.$hangchannel);
                             }
                         }
                     }
-                    $this->_log->output('DEBUG: Callback agent attended transfer - hanging up channel: '.$hangchannel);
+                    $this->_log->output('DEBUG: Transferencia atendida agente callback - colgando canal: '.$hangchannel.' | EN: Callback agent attended transfer - hanging up channel: '.$hangchannel);
 
                     // Release agent from call tracking
                     $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
 
-                    $this->_log->output('INFO: Callback agent attended transfer completion - will hangup agent channel');
+                    $this->_log->output('INFO: Transferencia atendida de agente callback completada - se colgará canal del agente | EN: Callback agent attended transfer completion - will hangup agent channel');
                 } elseif (strpos($hangchannel, '-') === false) {
                     // No attended transfer - normal hangup, use actualchannel
                     $hangchannel = $infoLlamada['actualchannel'];
@@ -2352,6 +2429,8 @@ class ECCPConn
         $r = $this->_ami->Hangup($hangchannel);
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: No se puede colgar la llamada para '.$sAgente.
+                ' ('.$hangchannel.') - '.$r['Message'].
+                ' | EN: ERR: Cannot hang up call for '.$sAgente.
                 ' ('.$hangchannel.') - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_hangupResponse, 500, 'Cannot hangup agent call');
             return $xml_response;
@@ -2914,12 +2993,12 @@ LEER_STATS_CAMPANIA;
 
             // Fecha debe estar en el futuro
             if ($horario['date_init'] < date('Y-m-d')) {
-                $this->_log->output('ERR: al agendar llamada: fecha de inicio anterior a fecha actual');
+                $this->_log->output('ERR: al agendar llamada: fecha de inicio anterior a fecha actual | EN: ERR: when scheduling call: start date before current date');
                 $errcode = 400; $errdesc = 'Bad request: date_init before current date';
                 return FALSE;
             }
         } elseif (!is_null($horario)) {
-            $this->_log->output('ERR: (internal) al agendar llamada: horario no es un arreglo');
+            $this->_log->output('ERR: (internal) al agendar llamada: horario no es un arreglo | EN: ERR: (internal) when scheduling call: schedule is not an array');
             return FALSE;
         }
 
@@ -2938,7 +3017,9 @@ LEER_STATS_CAMPANIA;
             $recordset->closeCursor();
             if ($tuplaCheck['N'] <= 0) {
                 $this->_log->output('WARN: '.__METHOD__.': llamada '.$calltype.' con callid='.$callid.
-                    ' no se encuentra para agent='.$sAgente.', se ignoran valores...');
+                    ' no se encuentra para agent='.$sAgente.', se ignoran valores...'.
+                    ' | EN: WARN: '.__METHOD__.': call '.$calltype.' with callid='.$callid.
+                    ' not found for agent='.$sAgente.', ignoring values...');
                 $calltype = NULL;
                 $callid = NULL;
             }
@@ -3087,6 +3168,9 @@ SQL_INSERTAR_AGENDAMIENTO;
         } catch (PDOException $e) {
             $this->_log->output('ERR: '.__METHOD__.
                 ': no se puede realizar inserción de llamada agendada: '.
+                implode(' - ', $e->errorInfo).
+                ' | EN: ERR: '.__METHOD__.
+                ': cannot perform scheduled call insertion: '.
                 implode(' - ', $e->errorInfo));
             $errcode = 500; $errdesc = 'Failed to insert scheduled call';
         	$this->_db->rollBack();
@@ -3144,7 +3228,9 @@ SQL_INSERTAR_AGENDAMIENTO;
             1);                 // priority
         if ($r['Response'] != 'Success') {
             $this->_log->output('ERR: '.__METHOD__.': al transferir llamada: no se puede transferir '.
-                $sCanalRemoto.' a '.$sExtension.' - '.$r['Message']);
+                $sCanalRemoto.' a '.$sExtension.' - '.$r['Message'].
+                ' | EN: ERR: '.__METHOD__.': when transferring call: cannot transfer '.
+                $sCanalRemoto.' to '.$sExtension.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call');
             return $xml_response;
         } else {
@@ -3189,31 +3275,279 @@ SQL_INSERTAR_AGENDAMIENTO;
         $infoAgente = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
 
         // DEBUG: log agent info
-        $this->_log->output('DEBUG: '.__METHOD__.': infoAgente = '.print_r($infoAgente, true));
+        $this->_log->output('DEBUG: '.__METHOD__.': infoAgente/agentInfo = '.print_r($infoAgente, true));
 
-        // For Agent type (app_agent_pool), use login_channel which is the actual SIP/PJSIP phone
-        // login_channel exists for Agent type agents who are logged in via AgentLogin
+        // For Agent type (app_agent_pool), use Redirect with ExtraChannel instead of Atxfer.
+        // Atxfer uses DTMF emulation (*2 + extension + #) which requires bridge DTMF hooks.
+        // After Local channel optimization, the agent's SIP phone swaps into the queue bridge
+        // but loses the DTMF hooks that were on the original Local channel bridge_channel.
+        // Redirect bypasses this issue by explicitly moving both channels to new dialplan contexts.
         if (!is_null($infoAgente) && !empty($infoAgente['login_channel'])) {
             $transferChannel = $infoAgente['login_channel'];
             $this->_log->output('DEBUG: '.__METHOD__.': Using login_channel: '.$transferChannel);
+
+            // Get the external caller's channel (the party to be put on hold)
+            $clientChannel = $infoLlamada['actualchannel'];
+            if (empty($clientChannel)) {
+                $this->_log->output('ERR: '.__METHOD__.': No actualchannel found for the call');
+                $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'No caller channel found');
+                return $xml_response;
+            }
+            $this->_log->output('DEBUG: '.__METHOD__.': Client channel (held party): '.$clientChannel);
+
+            // Extract agent number (e.g., "1001" from "Agent/1001")
+            $agentNumber = substr($sAgente, strpos($sAgente, '/') + 1);
+
+            // Set channel variables for the dialplan before Redirect
+            $this->_ami->SetVar($transferChannel, 'ATXFER_HELD_CHAN', $clientChannel);
+            $this->_ami->SetVar($transferChannel, 'ATXFER_AGENT_NUM', $agentNumber);
+
+            // Suppress the Agentlogoff event that fires when SIP phone leaves the bridge.
+            // Uses synchronous RPC to ensure the flag is set before Redirect fires.
+            $this->_tuberia->AMIEventProcess_prepararAtxferComplete($sAgente);
+
+            // Mark agent as in consultation so ConsultationEnd can be detected
+            $this->_tuberia->msg_AMIEventProcess_marcarConsultationIniciada($sAgente);
+
+            // Redirect both channels simultaneously:
+            // - Agent's SIP phone -> atxfer-consult (dials the target)
+            // - External caller   -> atxfer-hold (music on hold)
+            $r = $this->_ami->Redirect(
+                $transferChannel,              // Channel: agent's SIP/PJSIP phone
+                $clientChannel,                // ExtraChannel: external caller
+                $sExtension,                   // Exten: target extension number
+                'atxfer-consult',      // Context: agent consultation context
+                1,                             // Priority
+                's',                           // ExtraExten: hold context uses 's'
+                'atxfer-hold',         // ExtraContext: caller MOH context
+                1                              // ExtraPriority
+            );
         } else {
+            // For non-Agent types (SIP/IAX2/PJSIP callback) or Asterisk 11/13,
+            // use Atxfer which works when DTMF hooks are available
             $transferChannel = isset($infoLlamada['actualAgentChannel'])
                 ? $infoLlamada['actualAgentChannel']
                 : $infoLlamada['agentchannel'];
-            $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel: '.$transferChannel);
+            $this->_log->output('DEBUG: '.__METHOD__.': Using fallback channel (Atxfer): '.$transferChannel);
+            $this->_log->output('DEBUG: '.__METHOD__.': infoLlamada = '.print_r($infoLlamada, true));
+
+            // Set TRANSFER_CONTEXT to use custom context that dials device directly
+            // This avoids the 20-second busy tone delay when target declines
+            $this->_ami->SetVar($transferChannel, 'TRANSFER_CONTEXT', 'cbext-atxfer');
+
+            // Mark agent as in consultation so msg_Link can detect return
+            $this->_tuberia->msg_AMIEventProcess_marcarConsultationIniciada($sAgente);
+
+            $this->_log->output('DEBUG: '.__METHOD__.': Sending Atxfer to ext='.$sExtension.' context=cbext-atxfer channel='.$transferChannel);
+            $r = $this->_ami->Atxfer(
+                $transferChannel,
+                $sExtension.'#',    // exten
+                'cbext-atxfer',     // context - use custom context to avoid busy tone delay
+                1);                 // priority
+            $this->_log->output('DEBUG: '.__METHOD__.': Atxfer result = '.print_r($r, true));
         }
-        $r = $this->_ami->Atxfer(
-            $transferChannel,
-            $sExtension.'#',    // exten
-            'from-internal',    // context
-            1);                 // priority
+
         if ($r['Response'] != 'Success') {
-            $this->_log->output('ERR: '.__METHOD__.': al transferir llamada: no se puede transferir '.
-                $transferChannel.' a '.$sExtension.' - '.$r['Message']);
+            $this->_log->output('ERR: '.__METHOD__.': Cannot transfer '.
+                $transferChannel.' to '.$sExtension.' - '.$r['Message']);
             $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call');
             return $xml_response;
         } else {
             $this->_registrarTransferencia($infoLlamada, $sExtension);
+        }
+
+        $xml_transferResponse->addChild('success');
+        // Flag attended transfer so front-end disables buttons during consultation
+        $xml_transferResponse->addChild('consultation', 'true');
+        return $xml_response;
+    }
+
+    /**
+     * Transfer agent's current call to another logged-in agent.
+     * Transfiere la llamada actual del agente a otro agente conectado.
+     */
+    private function Request_agentauth_transfercallagent($comando)
+    {
+        if (is_null($this->_ami))
+            return $this->_generarRespuestaFallo(500, 'No AMI connection');
+
+        $sAgente = (string)$comando->agent_number;
+
+        // Verificar que número de agente destino está presente
+        // Verify that target agent number is present
+        if (!isset($comando->target_agent_number))
+            return $this->_generarRespuestaFallo(400, 'Bad request');
+        $sTargetAgent = (string)$comando->target_agent_number;
+
+        $this->_log->output('INFO: '.__METHOD__.": Transferencia de agente solicitada | EN: INFO: ".__METHOD__.": Agent transfer requested - Source: $sAgente, Target: $sTargetAgent");
+
+        $xml_response = new SimpleXMLElement('<response />');
+        $xml_transferResponse = $xml_response->addChild('transfercallagent_response');
+
+        // Validate source agent format
+        // El siguiente código asume formato Agent/9000
+        if (is_null($this->_parseAgent($sAgente))) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no válido | EN: ERR: ".__METHOD__.": Invalid source agent - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Specified agent not found');
+            return $xml_response;
+        }
+
+        // Validate target agent format
+        if (is_null($this->_parseAgent($sTargetAgent))) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente destino no válido | EN: ERR: ".__METHOD__.": Invalid target agent - $sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Target agent not found');
+            return $xml_response;
+        }
+
+        // Check source agent is being monitored and has a call
+        // Verificar si el agente origen está siendo monitoreado
+        $infoSeguimiento = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sAgente);
+        if (is_null($infoSeguimiento)) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no encontrado | EN: ERR: ".__METHOD__.": Source agent not found - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 404, 'Specified agent not found');
+            return $xml_response;
+        }
+
+        $sCanalRemoto = $infoSeguimiento['clientchannel'];
+        if (is_null($sCanalRemoto)) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no está en llamada | EN: ERR: ".__METHOD__.": Source agent not in call - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417, 'Agent not in call');
+            return $xml_response;
+        }
+
+        // Get source agent's call info
+        // Obtener la información de la llamada atendida por el agente origen
+        $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
+        if (is_null($infoLlamada) || is_null($infoLlamada['callid'])) {
+            $this->_log->output('ERR: '.__METHOD__.": Agente origen no tiene llamada activa | EN: ERR: ".__METHOD__.": Source agent has no active call - $sAgente");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417, 'Agent not in call');
+            return $xml_response;
+        }
+
+        // === STEP 1: Atomic validation + reservation via AMIEventProcess RPC ===
+        // This single RPC call atomically: validates all dialer-side state + acquires transfer lock
+        // Esta única llamada RPC atómicamente: valida todo el estado del dialer + adquiere bloqueo de transferencia
+        $this->_log->output('INFO: '.__METHOD__.": Requesting transfer reservation: source=$sAgente, target=$sTargetAgent | ES: Solicitando reserva de transferencia: origen=$sAgente, destino=$sTargetAgent");
+
+        $reserveResult = $this->_tuberia->AMIEventProcess_reservarAgenteParaTransferencia($sAgente, $sTargetAgent);
+
+        if (is_null($reserveResult) || !$reserveResult['success']) {
+            $sErrorCode = is_null($reserveResult) ? 500 : $reserveResult['error_code'];
+            $sErrorMsg = is_null($reserveResult) ? 'Internal communication error | Error interno de comunicación' : $reserveResult['error_msg'];
+            $sStatus = is_null($reserveResult) ? 'error' : $reserveResult['status'];
+            $this->_log->output('ERR: '.__METHOD__.": Transfer reservation DENIED: status=$sStatus, target=$sTargetAgent | ES: Reserva de transferencia DENEGADA: estado=$sStatus, destino=$sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, $sErrorCode, $sErrorMsg);
+            return $xml_response;
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": Transfer reservation granted, checking Asterisk device state | ES: Reserva de transferencia concedida, verificando estado de dispositivo Asterisk");
+
+        // === STEP 2: Belt-and-suspenders - Direct Asterisk device state check ===
+        // This queries Asterisk directly via AMI ExtensionState for real-time device state
+        // Esto consulta Asterisk directamente vía AMI ExtensionState para estado de dispositivo en tiempo real
+        $bDeviceStateOk = $this->_checkExtensionState($sTargetAgent, $xml_transferResponse);
+        if (!$bDeviceStateOk) {
+            // Release the reservation since we're aborting the transfer
+            // Liberar la reserva ya que abortamos la transferencia
+            $this->_log->output('WARN: '.__METHOD__.": ExtensionState check FAILED, releasing reservation for $sTargetAgent | ES: Verificación ExtensionState FALLÓ, liberando reserva para $sTargetAgent");
+            $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
+            return $xml_response;
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": All checks passed for transfer to $sTargetAgent | ES: Todas las verificaciones pasaron para transferencia a $sTargetAgent");
+
+        // Get target agent info for extension extraction (validated as existing by reservation RPC)
+        // Obtener info del agente destino para extracción de extensión (ya validado como existente por RPC de reserva)
+        $infoTargetAgent = $this->_tuberia->AMIEventProcess_infoSeguimientoAgente($sTargetAgent);
+
+        // Get target agent's extension for the transfer
+        // Obtener extensión del agente destino para la transferencia
+        $sTargetExtension = NULL;
+        $sAgentNumber = NULL;  // Agent number for AgentRequest (e.g., 1002 for Agent/1002)
+        $sCanalExt = $infoTargetAgent['login_channel'];
+        if (is_null($sCanalExt)) $sCanalExt = $infoTargetAgent['extension'];
+        if (!is_null($sCanalExt)) {
+            // Extract extension from channel (e.g., SIP/1001-xxx -> 1001)
+            $sRegexp = "|^\w+/(\\d+)|";
+            $regs = NULL;
+            if (preg_match($sRegexp, $sCanalExt, $regs)) {
+                $sTargetExtension = $regs[1];
+            }
+        }
+
+        // For Agent type agents, extract agent number from agent string (Agent/1002 -> 1002)
+        // AgentRequest() needs the agent number, not the extension
+        if (strpos($sTargetAgent, 'Agent/') === 0) {
+            $sRegexp = "|^Agent/(\\d+)|";
+            $regs = NULL;
+            if (preg_match($sRegexp, $sTargetAgent, $regs)) {
+                $sAgentNumber = $regs[1];
+            }
+        }
+
+        if (is_null($sTargetExtension)) {
+            $this->_log->output('ERR: '.__METHOD__.": No se puede determinar extensión del agente destino | EN: ERR: ".__METHOD__.": Cannot determine target agent extension - $sTargetAgent");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine target agent extension');
+            $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
+            return $xml_response;
+        }
+
+        // Determine channel to use for target agent based on agent type
+        // Para agentes tipo Agent, usar AgentRequest con número de agente; para otros, usar extensión directa
+        $sTargetChannel = $sTargetExtension;
+        if (strpos($sTargetAgent, 'Agent/') === 0) {
+            // Agent type - use agents context with AgentRequest
+            // AgentRequest() needs agent NUMBER (e.g., 1002), not extension (e.g., 102)
+            if (is_null($sAgentNumber)) {
+                $this->_log->output('ERR: '.__METHOD__.": No se puede determinar número de agente | EN: ERR: ".__METHOD__.": Cannot determine agent number - $sTargetAgent");
+                $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Cannot determine agent number');
+                $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
+                return $xml_response;
+            }
+            $sTargetContext = 'agents';
+            $sRedirectTarget = $sAgentNumber;  // Use agent number for AgentRequest
+            $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo Agent via contexto [agents] con AgentRequest($sAgentNumber) | EN: INFO: ".__METHOD__.": Transferring to Agent type via [agents] context using AgentRequest($sAgentNumber)");
+        } else {
+            // SIP/PJSIP/IAX2 type - use direct context with extension
+            $sTargetContext = 'from-internal';
+            $sRedirectTarget = $sTargetExtension;
+            $this->_log->output('INFO: '.__METHOD__.": Transfiriendo a agente tipo callback | EN: INFO: ".__METHOD__.": Transferring to callback type agent - Target: $sTargetExtension");
+        }
+
+        // Perform the transfer using AMI Redirect
+        // Realizar la transferencia usando AMI Redirect
+        $this->_log->output('INFO: '.__METHOD__.": Iniciando transferencia: $sCanalRemoto -> $sRedirectTarget@$sTargetContext | EN: INFO: ".__METHOD__.": Initiating transfer: $sCanalRemoto -> $sRedirectTarget@$sTargetContext");
+
+        $r = $this->_ami->Redirect(
+            $sCanalRemoto,      // channel (caller to transfer)
+            '',                 // extrachannel
+            $sRedirectTarget,   // exten (agent number for Agent type, extension for callback types)
+            $sTargetContext,    // context (agents for Agent type, from-internal for others)
+            1);                 // priority
+
+        if ($r['Response'] != 'Success') {
+            $this->_log->output('ERR: '.__METHOD__.': Falló la transferencia de agente: no se puede transferir '.
+                $sCanalRemoto.' a '.$sRedirectTarget.' - '.$r['Message'].
+                ' | EN: ERR: '.__METHOD__.': Agent transfer failed: cannot transfer '.
+                $sCanalRemoto.' to '.$sRedirectTarget.' - '.$r['Message']);
+            // Release the transfer reservation on Redirect failure
+            // Liberar la reserva de transferencia por falla en Redirect
+            $this->_log->output('WARN: '.__METHOD__.": Redirect failed, releasing transfer reservation for $sTargetAgent | ES: Redirect falló, liberando reserva de transferencia para $sTargetAgent");
+            $this->_tuberia->msg_AMIEventProcess_liberarReservaTransferencia($sTargetAgent);
+            $this->_agregarRespuestaFallo($xml_transferResponse, 500, 'Unable to transfer call to agent');
+            return $xml_response;
+        } else {
+            // Register the transfer in database with agent number for Agent type, extension for callback types
+            // Registrar transferencia en base de datos con número de agente para tipo Agent, extensión para otros
+            $this->_registrarTransferencia($infoLlamada, $sRedirectTarget);
+
+            // === TIMESTAMP TRACKER: Agent Transfer Release Timing ===
+            $fTransferMicrotime = microtime(TRUE);
+            $fTransferTime = date('Y-m-d H:i:s.', (int)$fTransferMicrotime) . sprintf('%03d', ($fTransferMicrotime - (int)$fTransferMicrotime) * 1000);
+            $this->_log->output("TIMING: ".__METHOD__.": [TRANSFER_INIT] Source=$sAgente, Target=$sTargetAgent, microtime=$fTransferMicrotime, time=$fTransferTime | ES: Transferencia iniciada");
+            // Notify AMIEventProcess to release the source agent after transfer
+            $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+            $this->_log->output('INFO: '.__METHOD__.": Transferencia de agente completada con éxito | EN: INFO: ".__METHOD__.": Agent transfer completed successfully - Source: $sAgente, Target: $sTargetAgent");
         }
 
         $xml_transferResponse->addChild('success');
@@ -3226,6 +3560,75 @@ SQL_INSERTAR_AGENDAMIENTO;
             'UPDATE '.(($infoLlamada['calltype'] == 'incoming') ? 'call_entry' : 'calls').
             ' SET transfer = ? WHERE id = ?');
         $sth->execute(array($sExtension, $infoLlamada['callid']));
+    }
+
+    /**
+     * Check Asterisk device state for target agent via AMI ExtensionState command.
+     * Returns TRUE if the device is available, FALSE if busy (and populates error response).
+     * Fails open (returns TRUE) if AMI query fails — non-fatal, proceed with transfer.
+     *
+     * Verifica el estado del dispositivo Asterisk del agente destino vía AMI ExtensionState.
+     * Devuelve TRUE si disponible, FALSE si ocupado (y genera respuesta de error).
+     * Falla abierto (devuelve TRUE) si la consulta AMI falla — no fatal, proceder con transferencia.
+     */
+    private function _checkExtensionState($sTargetAgent, $xml_transferResponse)
+    {
+        // Determine extension and context based on agent type
+        // Determinar extensión y contexto según tipo de agente
+        if (strpos($sTargetAgent, 'Agent/') === 0) {
+            // Agent type: check agent number in 'agents' context
+            $regs = NULL;
+            if (preg_match('|^Agent/(\d+)|', $sTargetAgent, $regs)) {
+                $sExten = $regs[1];
+                $sContext = 'agents';
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.": Cannot parse Agent number from $sTargetAgent, skipping ExtensionState check | ES: No se puede parsear número de Agent de $sTargetAgent, omitiendo verificación ExtensionState");
+                return TRUE; // Cannot parse, fail-open
+            }
+        } else {
+            // Callback type (SIP/PJSIP/IAX2): extract extension number, check in from-internal
+            $regs = NULL;
+            if (preg_match('|^\w+/(\d+)|', $sTargetAgent, $regs)) {
+                $sExten = $regs[1];
+                $sContext = 'from-internal';
+            } else {
+                $this->_log->output('WARN: '.__METHOD__.": Cannot parse extension from $sTargetAgent, skipping ExtensionState check | ES: No se puede parsear extensión de $sTargetAgent, omitiendo verificación ExtensionState");
+                return TRUE; // Cannot parse, fail-open
+            }
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": Querying ExtensionState for $sExten@$sContext (agent=$sTargetAgent) | ES: Consultando ExtensionState para $sExten@$sContext (agente=$sTargetAgent)");
+
+        $r = $this->_ami->ExtensionState($sExten, $sContext);
+        if ($r['Response'] != 'Success') {
+            $sMsg = isset($r['Message']) ? $r['Message'] : 'unknown';
+            $this->_log->output('WARN: '.__METHOD__.": ExtensionState query failed for $sExten@$sContext: $sMsg — proceeding with transfer (fail-open) | ES: Consulta ExtensionState falló para $sExten@$sContext: $sMsg — procediendo con transferencia (falla abierta)");
+            return TRUE; // Fail-open: don't block transfer if AMI query fails
+        }
+
+        $iStatus = (int)$r['Status'];
+        $this->_log->output('INFO: '.__METHOD__.": ExtensionState result for $sExten@$sContext: Status=$iStatus | ES: Resultado ExtensionState para $sExten@$sContext: Status=$iStatus");
+
+        // ExtensionState uses bitmask values (different from AST_DEVICE_* queue constants):
+        // 0=Idle, 1=InUse, 2=Busy, 4=Unavailable, 8=Ringing, 16=OnHold, -1=Not found
+        // These are bitmask flags, so Status=9 means InUse+Ringing
+        $BUSY_MASK = 1 | 2 | 8 | 16; // InUse | Busy | Ringing | OnHold
+        if ($iStatus > 0 && ($iStatus & $BUSY_MASK)) {
+            $aFlags = array();
+            if ($iStatus & 1)  $aFlags[] = 'InUse';
+            if ($iStatus & 2)  $aFlags[] = 'Busy';
+            if ($iStatus & 8)  $aFlags[] = 'Ringing';
+            if ($iStatus & 16) $aFlags[] = 'OnHold';
+            $sFlagStr = implode('+', $aFlags);
+
+            $this->_log->output('ERR: '.__METHOD__.": Asterisk device state check FAILED for $sExten@$sContext: Status=$iStatus ($sFlagStr) | ES: Verificación de estado de dispositivo FALLÓ para $sExten@$sContext: Status=$iStatus ($sFlagStr)");
+            $this->_agregarRespuestaFallo($xml_transferResponse, 417,
+                "Target agent device is busy | Dispositivo del agente destino ocupado ");
+            return FALSE;
+        }
+
+        $this->_log->output('INFO: '.__METHOD__.": ExtensionState check PASSED for $sExten@$sContext: Status=$iStatus (Idle) | ES: Verificación ExtensionState PASÓ para $sExten@$sContext: Status=$iStatus (Disponible)");
+        return TRUE;
     }
 
     private function Request_agentauth_hold($comando)
@@ -3338,7 +3741,7 @@ SQL_INSERTAR_AGENDAMIENTO;
         // Obtener la información de la llamada atendida por el agente
         $infoLlamada = $this->_tuberia->AMIEventProcess_reportarInfoLlamadaAtendida($sAgente);
         if ($this->DEBUG) {
-            $this->_log->output("DEBUG: unhold - infoLlamada: ".print_r($infoLlamada, 1));
+            $this->_log->output("DEBUG: unhold - infoLlamada/callInfo: ".print_r($infoLlamada, 1));
         }
         if (is_null($infoLlamada) || is_null($infoLlamada['callid'])) {
             $this->_agregarRespuestaFallo($xml_unholdResponse, 417, 'Agent not in call');
@@ -3348,7 +3751,7 @@ SQL_INSERTAR_AGENDAMIENTO;
         // Si el agente no estaba en hold, se devuelve éxito sin hacer nada más
         if (is_null($infoSeguimiento['id_audit_hold'])) {
             if ($this->DEBUG) {
-                $this->_log->output("DEBUG: unhold - agent not on hold, id_audit_hold is NULL");
+                $this->_log->output("DEBUG: unhold - agente no en hold, id_audit_hold es NULL | EN: agent not on hold, id_audit_hold is NULL");
             }
             $xml_unholdResponse->addChild('success');
             return $xml_response;
@@ -3356,49 +3759,79 @@ SQL_INSERTAR_AGENDAMIENTO;
 
         // Check if call is on hold and park_exten is available
         if ($this->DEBUG) {
-            $this->_log->output("DEBUG: unhold - checking park_exten, isset: ".isset($infoLlamada['park_exten']));
+            $this->_log->output("DEBUG: unhold - verificando/checking park_exten, isset: ".isset($infoLlamada['park_exten']));
         }
         if (isset($infoLlamada['park_exten']) && !is_null($infoLlamada['park_exten'])) {
-            $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
 
-            // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
-            // because Agent/XXXX is not a valid channel for Originate
-            $sCanalOrigen = $sAgente;
+            // Check if agent is in atxfer hold-wait state (Agent type only)
+            $isAtxferHoldWait = FALSE;
             if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
-                $sCanalOrigen = 'Local/'.$regs[1].'@agents';
+                $isAtxferHoldWait = $this->_tuberia->AMIEventProcess_esAgenteEnAtxferComplete($sAgente);
             }
 
-            if ($this->DEBUG) {
-                $this->_log->output("DEBUG: intentando recuperar llamada:\n".
-                    "\tChannel      =>  $sCanalOrigen\n".
-                    "\tExten        =>  {$infoLlamada['park_exten']}\n".
-                    "\tContext      =>  from-internal\n".
-                    "\tActionID     =>  $sActionID");
-            }
+            if ($isAtxferHoldWait && !empty($infoSeguimiento['login_channel'])) {
+                // Agent is in Wait() in atxfer-consult holdwait - use Redirect + Bridge
+                $agentChannel = $infoSeguimiento['login_channel'];
+                $this->_log->output("DEBUG_HOLD: Using Redirect for atxfer hold recovery - "
+                    . "agent=$sAgente channel=$agentChannel parked_chan={$infoLlamada['actualchannel']}");
 
-            // Sacar la llamada del parqueo y redirigirla al agente pausado
-            // Set CallerID to show original caller info when retrieving from hold
-            $sCallerID = NULL;
-            if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
-                $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
-            }
+                // Set channel variables for atxfer-unhold context
+                $this->_ami->SetVar($agentChannel, 'ATXFER_PARKED_CHAN', $infoLlamada['actualchannel']);
 
-            $r = $this->_ami->Originate(
-                $sCanalOrigen,               // channel
-                $infoLlamada['park_exten'],  // extension
-                'from-internal',        // context
-                '1',                    // priority
-                NULL, NULL, NULL,       // Application, Data, Timeout
-                $sCallerID,             // CallerID
-                NULL, NULL,             // Variable, Account
-                TRUE,                   // async
-                $sActionID
-                );
-            if ($r['Response'] != 'Success') {
-                $this->_log->output('ERR: al terminar hold: no se puede retomar llamada - '.$r['Message']);
-            }
-            if ($this->DEBUG) {
-                $this->_log->output('DEBUG: Originate para recuperar llamada devuelve: '.print_r($r, 1));
+                // Redirect agent from Wait() to atxfer-unhold
+                // Redirect params: Channel, ExtraChannel, Exten, Context, Priority
+                $r = $this->_ami->Redirect($agentChannel, NULL, 's', 'atxfer-unhold', '1');
+                if ($r['Response'] != 'Success') {
+                    $this->_log->output('ERR: Redirect for atxfer unhold failed: '.$r['Message'].
+                        ' | EN: ERR: Redirect for atxfer unhold failed: '.$r['Message']);
+                }
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: Redirect for atxfer unhold returns: '.print_r($r, 1));
+                }
+            } else {
+                // Normal hold recovery - use Originate via AgentRequest
+                $sActionID = 'ECCP:1.0:'.posix_getpid().':RedirectFromHold';
+
+                // For Agent type agents, convert Agent/XXXX to Local/XXXX@agents
+                // because Agent/XXXX is not a valid channel for Originate
+                $sCanalOrigen = $sAgente;
+                if (preg_match('|^Agent/(\d+)$|', $sAgente, $regs)) {
+                    $sCanalOrigen = 'Local/'.$regs[1].'@agents';
+                }
+
+                if ($this->DEBUG) {
+                    $this->_log->output("DEBUG: intentando recuperar llamada | EN: attempting to retrieve call:\n".
+                        "\tChannel      =>  $sCanalOrigen\n".
+                        "\tExten        =>  {$infoLlamada['park_exten']}\n".
+                        "\tContext      =>  from-internal\n".
+                        "\tActionID     =>  $sActionID");
+                }
+
+                // Sacar la llamada del parqueo y redirigirla al agente pausado
+                // Set CallerID to show original caller info when retrieving from hold
+                $sCallerID = NULL;
+                if (isset($infoLlamada['callnumber']) && !empty($infoLlamada['callnumber'])) {
+                    $sCallerID = '"'.$infoLlamada['callnumber'].'" <'.$infoLlamada['callnumber'].'>';
+                }
+
+                $r = $this->_ami->Originate(
+                    $sCanalOrigen,               // channel
+                    $infoLlamada['park_exten'],  // extension
+                    'from-internal',        // context
+                    '1',                    // priority
+                    NULL, NULL, NULL,       // Application, Data, Timeout
+                    $sCallerID,             // CallerID
+                    NULL, NULL,             // Variable, Account
+                    TRUE,                   // async
+                    $sActionID
+                    );
+                if ($r['Response'] != 'Success') {
+                    $this->_log->output('ERR: al terminar hold: no se puede retomar llamada - '.$r['Message'].
+                        ' | EN: ERR: when ending hold: cannot resume call - '.$r['Message']);
+                }
+                if ($this->DEBUG) {
+                    $this->_log->output('DEBUG: Originate para recuperar llamada devuelve/Originate to retrieve call returns: '.print_r($r, 1));
+                }
             }
         }
 
@@ -3701,7 +4134,7 @@ LEER_ULTIMA_SESION;
                 }
             }
         } else {
-            $this->_log->output('ERR: lost synch with Asterisk AMI ("core show channel" response lacks "data").');
+            $this->_log->output('ERR: se perdió sincronización con Asterisk AMI (respuesta de "core show channel" carece de "data") | EN: ERR: lost synch with Asterisk AMI ("core show channel" response lacks "data").');
             return $this->_generarRespuestaFallo(500, 'No AMI connection');
         }
         return $xml_response;
@@ -3851,6 +4284,91 @@ LOG_CAMPANIA_SALIENTE;
         $xml_dumpstatusResponse = $xml_response->addChild('refreshagents_response');
         $this->_tuberia->msg_SQLWorkerProcess_requerir_nuevaListaAgentes();
         $xml_dumpstatusResponse->addChild('success');
+        return $xml_response;
+    }
+
+    /**
+     * ECCP request to check if an extension is registered in Asterisk
+     * EN: Petición ECCP para verificar si una extensión está registrada en Asterisk
+     */
+    private function Request_eccpauth_getextensionstatus($comando)
+    {
+        if (is_null($this->_ami))
+            return $this->_generarRespuestaFallo(500, 'No AMI connection');
+
+        // Get extension from request (format: SIP/101, PJSIP/101, IAX2/101)
+        if (!isset($comando->extension))
+            return $this->_generarRespuestaFallo(400, 'Bad request');
+
+        $sExtension = (string)$comando->extension;
+
+        // Parse extension to get technology and peer number
+        $regs = NULL;
+        if (!preg_match('|^(\w+)/(\d+)$|', $sExtension, $regs)) {
+            return $this->_generarRespuestaFallo(400, 'Invalid extension format');
+        }
+
+        $sTech = strtoupper($regs[1]);  // SIP, PJSIP, IAX2
+        $sPeer = $regs[2];              // Extension number
+
+        $xml_response = new SimpleXMLElement('<response />');
+        $xml_response_child = $xml_response->addChild('getextensionstatus_response');
+
+        $bRegistered = FALSE;
+
+        // Check registration based on technology
+        switch ($sTech) {
+            case 'SIP':
+                $result = $this->_ami->Command("sip show peer $sPeer");
+                if (isset($result['data']) && strpos($result['data'], 'Status') !== false) {
+                    $lines = explode("\n", $result['data']);
+                    foreach ($lines as $line) {
+                        if (stripos($line, 'Status') !== false &&
+                            (stripos($line, 'OK') !== false || stripos($line, 'Registered') !== false)) {
+                            $bRegistered = TRUE;
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            case 'PJSIP':
+                $result = $this->_ami->Command("pjsip show endpoint $sPeer");
+                if (isset($result['data']) && strpos($result['data'], 'Not Found') === false) {
+                    $lines = explode("\n", $result['data']);
+                    foreach ($lines as $line) {
+                        // Contact line with "Avail" means endpoint has a registered contact
+                        if (stripos($line, 'Contact:') !== false && stripos($line, 'Avail') !== false) {
+                            $bRegistered = TRUE;
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            case 'IAX2':
+                $result = $this->_ami->Command("iax2 show peer $sPeer");
+                if (isset($result['data']) && strpos($result['data'], 'Status') !== false) {
+                    $lines = explode("\n", $result['data']);
+                    foreach ($lines as $line) {
+                        if (stripos($line, 'Status') !== false &&
+                            (stripos($line, 'OK') !== false || stripos($line, 'Registered') !== false)) {
+                            $bRegistered = TRUE;
+                            break;
+                        }
+                    }
+                }
+                break;
+
+            default:
+                $xml_response_child->addChild('status', 'unknown');
+                $xml_response_child->addChild('message', 'Unknown technology: ' . $sTech);
+                return $xml_response;
+        }
+
+        $xml_response_child->addChild('extension', $sExtension);
+        $xml_response_child->addChild('registered', $bRegistered ? 'yes' : 'no');
+
         return $xml_response;
     }
 }

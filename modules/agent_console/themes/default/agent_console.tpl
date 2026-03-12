@@ -59,6 +59,22 @@
 	    <div id="issabel-callcenter-estado-agente-texto">{$TEXTO_ESTADO_AGENTE_INICIAL}</div>
         <div id="issabel-callcenter-cronometro">{$CRONOMETRO}</div>{* issabel-callcenter-cronometro *}
     </div>{* issabel-callcenter-estado-agente *}
+    {* Shift filter bar with counters *}
+    <div id="issabel-callcenter-shift-bar">
+        <div id="issabel-callcenter-shift-filter">
+            <label for="shiftFromHour">{$LBL_SHIFT_FROM}:</label>
+            <select id="shiftFromHour">{$SHIFT_HOURS_OPTIONS}</select>
+            <label for="shiftToHour">{$LBL_SHIFT_TO}:</label>
+            <select id="shiftToHour">{$SHIFT_HOURS_OPTIONS}</select>
+            <button id="applyShiftFilter" type="button">{$BTN_SHIFT_APPLY}</button>
+            <span id="shiftRangeIndicator"></span>
+        </div>
+        <div id="issabel-callcenter-shift-stats">
+            <span id="shift-stat-login" class="shift-stat-box shift-stat-login" title="Total Login Time">{$SHIFT_LOGIN_TIME}</span>
+            <span id="shift-stat-break" class="shift-stat-box shift-stat-break" title="Total Break Time">{$SHIFT_BREAK_TIME}</span>
+            <span id="shift-stat-hold" class="shift-stat-box shift-stat-hold" title="Total Hold Time">{$SHIFT_HOLD_TIME}</span>
+        </div>
+    </div>
     <div id="issabel-callcenter-wrap">
 	    {* Los controles que aparecen en la parte superior de la interfaz *}
 	    <div id="issabel-callcenter-controles">
@@ -131,18 +147,31 @@
     <form>
         <table border="0" cellpadding="0" style="width: 100%;">
             <tr>
+                <td>
+                    <div align="center" id="transfer_type_radio">
+                        <input type="radio" id="transfer_type_blind" name="transfer_type" value="blind" checked="checked"/><label for="transfer_type_blind">{$LBL_TRANSFER_BLIND}</label>
+                        {if !$IS_AGENT_TYPE}
+                        <input type="radio" id="transfer_type_attended" name="transfer_type" value="attended" /><label for="transfer_type_attended">{$LBL_TRANSFER_ATTENDED}</label>
+                        {/if}
+                        <input type="radio" id="transfer_type_agent" name="transfer_type" value="agent" /><label for="transfer_type_agent">{$LBL_TRANSFER_AGENT}</label>
+                    </div>
+                </td>
+            </tr>
+            <tr id="transfer_extension_row">
                 <td><input
                 name="transfer_extension"
                 id="transfer_extension"
                 class="ui-widget-content ui-corner-all"
                 style="width: 100%" /></td>
             </tr>
-            <tr>
-                <td>
-                    <div align="center" id="transfer_type_radio">
-                        <input type="radio" id="transfer_type_blind" name="transfer_type" value="blind" checked="checked"/><label for="transfer_type_blind">{$LBL_TRANSFER_BLIND}</label>
-                        <input type="radio" id="transfer_type_attended" name="transfer_type" value="attended" /><label for="transfer_type_attended">{$LBL_TRANSFER_ATTENDED}</label>
-                    </div>
+            <tr id="transfer_agent_row" style="display: none;">
+                <td><select
+                    name="transfer_agent"
+                    id="transfer_agent"
+                    class="ui-widget-content ui-corner-all"
+                    style="width: 100%">
+                    {html_options options=$LISTA_AGENTES selected=""}
+                    </select>
                 </td>
             </tr>
         </table>

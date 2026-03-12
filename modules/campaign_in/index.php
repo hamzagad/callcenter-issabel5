@@ -43,6 +43,7 @@ function _moduleContent(&$smarty, $module_name)
 
     checkDataBase();
     // Se fusiona la configuración del módulo con la configuración global
+    // EN: Module configuration is merged with global configuration
     $arrConf = array_merge($arrConf, $arrConfModule);
 
     //folder path for custom templates
@@ -716,7 +717,7 @@ function displayCampaignCSV($pDB, $smarty, $module_name, $local_templates_dir)
                 $lineaCSV = array_merge($lineaCSV, array_map('csv_replace', $datosCampania['FORMS'][$id_form]['LABEL']));
                 $lineaEspaciador = array_merge(
                     $lineaEspaciador,
-                    array_fill(0, count($datosCampania['FORMS'][$id_form]['LABEL']), '"FORMULARIO"')); // TODO: internacionalizar
+                    array_fill(0, count($datosCampania['FORMS'][$id_form]['LABEL']), '""'._tr('Form').'"'));
             }
             $sDatosCSV .= join(',', $lineaEspaciador)."\r\n";
             $sDatosCSV .= join(',', $lineaCSV)."\r\n";

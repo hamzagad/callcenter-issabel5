@@ -43,6 +43,7 @@ function _moduleContent(&$smarty, $module_name)
     load_language_module($module_name);
 
     // Abrir conexión a la base de datos
+    // EN: Open database connection
     $pDB = new paloDB($arrConf['dsn_conn_database']);
     if (!is_object($pDB->conn) || $pDB->errMsg!="") {
         $smarty->assign("mb_title", _tr("Error"));
@@ -51,6 +52,7 @@ function _moduleContent(&$smarty, $module_name)
     }
 
     // Cadenas estáticas a asignar
+    // EN: Static strings to assign
     $smarty->assign(array(
         "btn_consultar" =>  _tr('query'),
         "module_name"   =>  $module_name,
@@ -72,6 +74,7 @@ function _moduleContent(&$smarty, $module_name)
 function reportReportsBreak($smarty, $module_name, $local_templates_dir, &$pDB)
 {
     // Obtener rango de fechas de consulta. Si no existe, se asume día de hoy
+    // EN: Get query date range. If not exists, assume today
     $sFechaInicio = date('d M Y');
     if (isset($_GET['txt_fecha_init'])) $sFechaInicio = $_GET['txt_fecha_init'];
     if (isset($_POST['txt_fecha_init'])) $sFechaInicio = $_POST['txt_fecha_init'];
@@ -86,6 +89,7 @@ function reportReportsBreak($smarty, $module_name, $local_templates_dir, &$pDB)
     $oFilterForm = new paloForm($smarty, $arrFormElements);
     
     // Validación de las fechas recogidas
+    // EN: Validation of collected dates
     if (!$oFilterForm->validateForm($arrFilterExtraVars)) {
         $smarty->assign("mb_title", _tr("Validation Error"));
         $arrErrores=$oFilterForm->arrErroresValidacion;

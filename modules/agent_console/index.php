@@ -31,8 +31,6 @@ $webphonePassword = '';
 $webphoneName = '';
 $extension = '';
 
-define ('AGENT_CONSOLE_DEBUG_LOG', FALSE);
-
 function _moduleContent(&$smarty, $module_name)
 {
     global $arrConf;
@@ -130,14 +128,7 @@ function _moduleContent(&$smarty, $module_name)
 
 function _debug($s)
 {
-    if (! AGENT_CONSOLE_DEBUG_LOG) return;
-
-    $sAgent = '(unset)';
-    if (isset($_SESSION['callcenter']) && isset($_SESSION['callcenter']['agente']))
-        $sAgent = $_SESSION['callcenter']['agente'];
-    file_put_contents('/tmp/debug-callcenter-agentconsole.txt',
-        sprintf("%s %s agent=%s %s\n", $_SERVER['REMOTE_ADDR'], date('Y-m-d H:i:s'), $sAgent, $s),
-        FILE_APPEND);
+    _cc_debug($s, 'agent_console');
 }
 
 /* Procedimiento para generar el estado inicial de la información del agente en
@@ -183,6 +174,27 @@ function generarEstadoInicial()
     );
 }
 
+/**
+ * Get list of agents for transfer dialog, excluding current logged-in agent.
+ * Obtiene lista de agentes para diálogo de transferencia, excluyendo agente actual.
+ *
+ * @param PaloSantoConsola $oPaloConsola Console object
+ * @return array Array of agents with format ['Agent/9000' => 'Agent/9000 - John Doe']
+ */
+function _obtenerListaAgentesTransferencia($oPaloConsola)
+{
+    $listaAgentes = $oPaloConsola->listarAgentes();
+
+    // Filter out the current logged-in agent from the list
+    // Filtrar el agente actual conectado de la lista
+    $currentAgent = isset($_SESSION['callcenter']['agente']) ? $_SESSION['callcenter']['agente'] : '';
+    if (!empty($currentAgent) && isset($listaAgentes[$currentAgent])) {
+        unset($listaAgentes[$currentAgent]);
+    }
+
+    return $listaAgentes;
+}
+
 // Procedimiento para decidir qué acción tomar en el estado de login de agente
 function manejarLogin($module_name, &$smarty, $sDirLocalPlantillas)
 {
@@ -194,8 +206,8 @@ function manejarLogin($module_name, &$smarty, $sDirLocalPlantillas)
     /* Si el método está entre estos, pero el estado es de login, entonces se
      * ha perdido un estado de callcenter anterior. */
     if (in_array($sAction, array('checkStatus', 'agentLogout', 'hangup',
-        'break', 'unbreak', 'transfer', 'confirm_contact', 'schedule',
-        'saveforms'))) {
+        'break', 'unbreak', 'transfer', 'transferagent', 'confirm_contact', 'schedule',
+        'saveforms', 'updateShiftTimes'))) {
         $json = new Services_JSON();
         Header('Content-Type: application/json');
         return $json->encode(array(
@@ -304,7 +316,7 @@ function manejarLogin_HTML($module_name, &$smarty, $sDirLocalPlantillas)
         }
     }
     $sContenido = $smarty->fetch("$sDirLocalPlantillas/login_agent.tpl");
-    return $sContenido;
+    return $sContenido . _cc_debug_flush_html();
 }
 
 // Procesar requerimiento AJAX para iniciar el login del agente
@@ -357,6 +369,44 @@ function manejarLogin_doLogin()
             $respuesta['status'] = FALSE;
             $respuesta['message'] = _tr('Invalid agent password');
         }
+    }
+
+    // Check if Agent type extension is already used by callback extension session
+    if ($bContinuar && !$bCallback) {
+        $oPaloConsola->desconectarTodo();
+
+        // Check if extension is already used by callback type session
+        if ($oPaloConsola->extensionUsadaPorCallback($sExtension)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Extension is already in use by another agent');
+        }
+        // Reconnect for normal login flow
+        $oPaloConsola = new PaloSantoConsola($sAgente);
+    }
+
+    // Check if callback extension is already used by Agent type session
+    if ($bContinuar && $bCallback) {
+        $oPaloConsola->desconectarTodo();
+
+        // Extract extension number from callback format (e.g., SIP/101 -> 101)
+        $regs = NULL;
+        $sExtensionNum = (preg_match('|^(\w+)/(\d+)$|', $sAgente, $regs)) ? $regs[2] : $sAgente;
+
+        // NEW: Check if extension is registered in Asterisk
+        if (!$oPaloConsola->extensionEstaRegistrada($sAgente)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Extension is not registered');
+        }
+        // Check if extension is already used by Agent type session
+        elseif ($oPaloConsola->extensionUsadaPorAgente($sExtensionNum)) {
+            $bContinuar = FALSE;
+            $respuesta['status'] = FALSE;
+            $respuesta['message'] = _tr('Extension is already in use by another agent');
+        }
+        // Reconnect for normal login flow
+        $oPaloConsola = new PaloSantoConsola($sAgente);
     }
 
     // Verificar si el número de agente no está ya ocupado por otra extensión
@@ -628,7 +678,20 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
     // Acciones para mostrar la pantalla principal, fuera de cualquier acción AJAX
     for ($i = 0; $i < 24; $i++) { $ii = sprintf('%02d', $i); $comboHora[$ii] = $ii; }
     for ($i = 0; $i < 60; $i++) { $ii = sprintf('%02d', $i); $comboMinuto[$ii] = $ii; }
+
+    // Build shift hours options for the filter dropdown
+    $sShiftHoursOptions = '';
+    for ($h = 0; $h < 24; $h++) {
+        $sHourVal = sprintf('%02d', $h);
+        $sShiftHoursOptions .= '<option value="'.$sHourVal.'">'.$sHourVal.':00</option>';
+    }
+
     $smarty->assign(array(
+        // Shift filter labels
+        'LBL_SHIFT_FROM'                =>  _tr('From'),
+        'LBL_SHIFT_TO'                  =>  _tr('To'),
+        'BTN_SHIFT_APPLY'               =>  _tr('Apply'),
+        'SHIFT_HOURS_OPTIONS'           =>  $sShiftHoursOptions,
         'FRAMEWORK_TIENE_TITULO_MODULO' => existeSoporteTituloFramework(),
         'icon'                          => 'modules/'.$module_name.'/images/call_center.png',
         'title'                         =>  _tr('Agent Console').': '.$_SESSION['callcenter']['agente_nombre'],
@@ -645,6 +708,7 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'TITLE_TRANSFER_DIALOG'         =>  _tr('Select extension to transfer to'),
         'LBL_TRANSFER_BLIND'            =>  _tr('Blind transfer'),
         'LBL_TRANSFER_ATTENDED'         =>  _tr('Attended transfer'),
+        'LBL_TRANSFER_AGENT'            =>  _tr('Transfer to agent'),
         'TITLE_SCHEDULE_CALL'           =>  _tr('Schedule call'),
         'LBL_SCHEDULE_CAMPAIGN_END'     =>  _tr('Call at end of campaign'),
         'LBL_SCHEDULE_BYDATE'           =>  _tr('Schedule at date'),
@@ -661,12 +725,14 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'TAB_LLAMADA_FORM'              =>  _tr('Forms'),
         'CRONOMETRO'                    =>  '00:00:00',
         'LISTA_BREAKS'                  =>  $oPaloConsola->listarBreaks(),
+        'LISTA_AGENTES'                 =>  _obtenerListaAgentesTransferencia($oPaloConsola),
         'CONTENIDO_LLAMADA_INFORMACION' =>  '',
         'CONTENIDO_LLAMADA_SCRIPT'      =>  '',
         'CONTENIDO_LLAMADA_FORMULARIO'  =>  '',
         'CALLINFO_CALLTYPE'             =>  '',
         'BTN_HOLD'                      =>  $estado['onhold'] ? _tr('End Hold') : _tr('Hold'),
         'BTN_GUARDAR_FORMULARIOS'       =>  _tr('Save data'),
+        'IS_AGENT_TYPE'                 =>  (strpos($_SESSION['callcenter']['agente'], 'Agent/') === 0),
     ));
     $estadoInicial = array(
         'onhold'            =>  $estado['onhold'],
@@ -686,6 +752,39 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'urlopentype3'      =>  NULL,
         'waitingcall'       =>  FALSE,
     );
+
+    // Query shift-based times for this agent
+    // EN: Get agent channel from session (e.g., "SIP/101" or "Agent/8001")
+    $agentChannel = $_SESSION['callcenter']['agente'];
+    $shiftRange = agentConsole_calculateShiftDatetimeRange(0, 23);
+    $breakData = agentConsole_consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $holdData = agentConsole_consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
+    $loginData = agentConsole_consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+
+    $sec_shift_login = isset($loginData[$agentChannel]) ? $loginData[$agentChannel] : 0;
+    $sec_shift_break = isset($breakData['breakTimes'][$agentChannel]) ? $breakData['breakTimes'][$agentChannel] : 0;
+    $sec_shift_hold = isset($holdData[$agentChannel]) ? $holdData[$agentChannel] : 0;
+
+    // Add current active break/hold time if applicable
+    if (!is_null($estado['pauseinfo'])) {
+        $iCurrentPauseDur = time() - strtotime($estado['pauseinfo']['pausestart']);
+        $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+        if (in_array($estado['pauseinfo']['pausename'], $holdNames)) {
+            $sec_shift_hold += $iCurrentPauseDur;
+        } else {
+            $sec_shift_break += $iCurrentPauseDur;
+        }
+    }
+
+    $smarty->assign(array(
+        'SHIFT_LOGIN_TIME' => agentConsole_timestamp_format($sec_shift_login),
+        'SHIFT_BREAK_TIME' => agentConsole_timestamp_format($sec_shift_break),
+        'SHIFT_HOLD_TIME'  => agentConsole_timestamp_format($sec_shift_hold),
+    ));
+    $estadoInicial['shift_login_time'] = $sec_shift_login;
+    $estadoInicial['shift_break_time'] = $sec_shift_break;
+    $estadoInicial['shift_hold_time'] = $sec_shift_hold;
+    $estadoInicial['is_hold_pause'] = (!is_null($estado['pauseinfo']) && in_array($estado['pauseinfo']['pausename'], isset($breakData['holdNames']) ? $breakData['holdNames'] : array()));
 
     // Decidir estado del break a mostrar
     if (!is_null($estado['pauseinfo'])) {
@@ -870,10 +969,10 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
 
 
         echo "<script>";
-        echo "localStorage.setItem('mhrgl.com.identity.display_name', $extension);";
-        echo "localStorage.setItem('mhrgl.com.identity.impi', $extension);";
+        echo "localStorage.setItem('mhrgl.com.identity.display_name', '$extension');";
+        echo "localStorage.setItem('mhrgl.com.identity.impi', '$extension');";
         echo "localStorage.setItem('mhrgl.com.identity.name', '$webphoneName[0]');";
-        echo "localStorage.setItem('mhrgl.com.identity.impu', 'sip:'+ $extension+'@'+ window.location.hostname);";
+        echo "localStorage.setItem('mhrgl.com.identity.impu', 'sip:$extension@'+ window.location.hostname);";
         echo "localStorage.setItem('mhrgl.com.identity.password', '$webphonePassword[0]');";
         echo "localStorage.setItem('mhrgl.com.identity.realm', window.location.hostname);";
         echo "localStorage.setItem('mhrgl.com.identity.socket', '8089');";
@@ -884,7 +983,7 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         echo "localStorage.setItem('mhrgl.com.expert.ice_servers', '[{ url: \'stun:stun.a.google.com:19302\'}]');";
         echo "</script>";
 
-    return $smarty->fetch("$sDirLocalPlantillas/agent_console.tpl");
+    return $smarty->fetch("$sDirLocalPlantillas/agent_console.tpl") . _cc_debug_flush_html();
 }
 
 function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantillas, $infoLlamada, $infoCampania)
@@ -994,7 +1093,7 @@ function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantil
         'MSG_NO_ATTRIBUTES'         =>  _tr('No information available for this call'),
         'ATRIBUTOS_LLAMADA'         =>  $atributos,
     ));
-	return $smarty->fetch("$sDirLocalPlantillas/agent_console_atributos.tpl");
+	return $smarty->fetch("$sDirLocalPlantillas/agent_console_atributos.tpl") . _cc_debug_flush_html();
 }
 
 // Se usa $infoLlamada['call_survey'] , $infoCampania['forms']
@@ -1017,7 +1116,7 @@ function _manejarSesionActiva_HTML_generarFormulario($smarty, $sDirLocalPlantill
     }
 
     if ($nforms > 0) {
-        return $smarty->fetch("$sDirLocalPlantillas/agent_console_formulario.tpl");
+        return $smarty->fetch("$sDirLocalPlantillas/agent_console_formulario.tpl") . _cc_debug_flush_html();
     } else {
         return _tr('No forms available for this call');
     }
@@ -1154,14 +1253,45 @@ function manejarSesionActiva_transfer($module_name, $smarty, $sDirLocalPlantilla
         'message'   =>  '(no message)',
     );
     $sTransferExt = getParameter('extension');
-    if (is_null($sTransferExt) || !ctype_digit($sTransferExt)) {
+    if ($estado['onhold']) {
+        $respuesta['action'] = 'error';
+        $respuesta['message'] = _tr('Cannot transfer while call is on hold');
+    } elseif (is_null($sTransferExt) || !ctype_digit($sTransferExt)) {
         $respuesta['action'] = 'error';
         $respuesta['message'] = _tr('Invalid or missing extension to transfer');
     } else {
         $bExito = $oPaloConsola->transferirLlamada($sTransferExt, in_array(getParameter('atxfer'), array('true', 'checked')));
-        if (!$bExito) {
+        if ($bExito === FALSE) {
             $respuesta['action'] = 'error';
             $respuesta['message'] = _tr('Error while transferring call').' - '.$oPaloConsola->errMsg;
+        } elseif ($bExito === 'consultation') {
+            $respuesta['consultation'] = true;
+        }
+    }
+
+    $json = new Services_JSON();
+    Header('Content-Type: application/json');
+    return $json->encode($respuesta);
+}
+
+function manejarSesionActiva_transferagent($module_name, $smarty, $sDirLocalPlantillas, $oPaloConsola, $estado)
+{
+    $respuesta = array(
+        'action'    =>  'transferagent',
+        'message'   =>  '(no message)',
+    );
+    $sTargetAgent = getParameter('target_agent');
+    if ($estado['onhold']) {
+        $respuesta['action'] = 'error';
+        $respuesta['message'] = _tr('Cannot transfer while call is on hold');
+    } elseif (is_null($sTargetAgent) || empty($sTargetAgent)) {
+        $respuesta['action'] = 'error';
+        $respuesta['message'] = _tr('Invalid or missing target agent');
+    } else {
+        $bExito = $oPaloConsola->transferirLlamadaAgente($sTargetAgent);
+        if (!$bExito) {
+            $respuesta['action'] = 'error';
+            $respuesta['message'] = _tr('Error while transferring call to agent').' - '.$oPaloConsola->errMsg;
         }
     }
 
@@ -1293,6 +1423,54 @@ function manejarSesionActiva_saveforms($module_name, $smarty, $sDirLocalPlantill
             }
         }
     }
+    $json = new Services_JSON();
+    Header('Content-Type: application/json');
+    return $json->encode($respuesta);
+}
+
+// Handler for updating shift times when filter changes
+function manejarSesionActiva_updateShiftTimes($module_name, $smarty,
+    $sDirLocalPlantillas, $oPaloConsola, $estado)
+{
+    global $arrConf;
+
+    $shiftFrom = getParameter('shift_from');
+    $shiftTo = getParameter('shift_to');
+    $shiftFrom = is_numeric($shiftFrom) ? intval($shiftFrom) : 0;
+    $shiftTo = is_numeric($shiftTo) ? intval($shiftTo) : 23;
+
+    // Get current agent channel from session
+    $agentChannel = $_SESSION['callcenter']['agente'];
+
+    // Query shift-based times for this agent
+    $shiftRange = agentConsole_calculateShiftDatetimeRange($shiftFrom, $shiftTo);
+    $breakData = agentConsole_consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+    $holdData = agentConsole_consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
+    $loginData = agentConsole_consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+
+    $sec_shift_login = isset($loginData[$agentChannel]) ? $loginData[$agentChannel] : 0;
+    $sec_shift_break = isset($breakData['breakTimes'][$agentChannel]) ? $breakData['breakTimes'][$agentChannel] : 0;
+    $sec_shift_hold = isset($holdData[$agentChannel]) ? $holdData[$agentChannel] : 0;
+
+    // Add current pause time if agent is on a pause
+    $isHoldPause = false;
+    if (!is_null($estado['pauseinfo'])) {
+        $iCurrentPauseDur = time() - strtotime($estado['pauseinfo']['pausestart']);
+        $isHoldPause = in_array($estado['pauseinfo']['pausename'], isset($breakData['holdNames']) ? $breakData['holdNames'] : array());
+        if ($isHoldPause) {
+            $sec_shift_hold += $iCurrentPauseDur;
+        } else {
+            $sec_shift_break += $iCurrentPauseDur;
+        }
+    }
+
+    $respuesta = array(
+        'shift_login_time' => $sec_shift_login,
+        'shift_break_time' => $sec_shift_break,
+        'shift_hold_time'  => $sec_shift_hold,
+        'is_hold_pause'    => $isHoldPause,
+    );
+
     $json = new Services_JSON();
     Header('Content-Type: application/json');
     return $json->encode($respuesta);
@@ -1601,6 +1779,14 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
                     $respuestaEventos['waitingcall'] = construirRespuesta_waitingexit();
                 }
                 break;
+            case 'consultationstart':
+                if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
+                $respuestaEventos['consultation'] = array('event' => 'consultationstart');
+                break;
+            case 'consultationend':
+                if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
+                $respuestaEventos['consultation'] = array('event' => 'consultationend');
+                break;
             }
         } // while(...)
 
@@ -1609,6 +1795,7 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
         if (isset($respuestaEventos['hold'])) $respuesta[] = $respuestaEventos['hold'];
         if (isset($respuestaEventos['llamada'])) $respuesta[] = $respuestaEventos['llamada'];
         if (isset($respuestaEventos['waitingcall'])) $respuesta[] = $respuestaEventos['waitingcall'];
+        if (isset($respuestaEventos['consultation'])) $respuesta[] = $respuestaEventos['consultation'];
 
         // Acumular todos los eventos que no deben de ser únicos
         if (isset($respuestaEventos['other'])) $respuesta = array_merge($respuesta, $respuestaEventos['other']);
@@ -1672,6 +1859,39 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
             $respuesta[$iPosEvento]['class_estado_agente_inicial'] = 'issabel-callcenter-class-estado-ocioso';
             $respuesta[$iPosEvento]['timer_seconds'] = '';
             break;
+        }
+
+        // Add shift-based times to the response
+        // EN: Calculate shift times for the current agent
+        $agentChannel = $_SESSION['callcenter']['agente'];
+        $shiftRange = agentConsole_calculateShiftDatetimeRange(0, 23);
+        $breakData = agentConsole_consultarTiempoBreakAgentes($shiftRange['start'], $shiftRange['end']);
+        $holdData = agentConsole_consultarTiempoHoldAgentes($shiftRange['start'], $shiftRange['end']);
+        $loginData = agentConsole_consultarTiempoLoginAgentes($shiftRange['start'], $shiftRange['end']);
+
+        $sec_shift_login = isset($loginData[$agentChannel]) ? $loginData[$agentChannel] : 0;
+        $sec_shift_break = isset($breakData['breakTimes'][$agentChannel]) ? $breakData['breakTimes'][$agentChannel] : 0;
+        $sec_shift_hold = isset($holdData[$agentChannel]) ? $holdData[$agentChannel] : 0;
+        $holdNames = isset($breakData['holdNames']) ? $breakData['holdNames'] : array();
+
+        // Add current active break/hold time if applicable
+        $is_hold_pause = false;
+        if (!is_null($estado['pauseinfo'])) {
+            $iCurrentPauseDur = time() - strtotime($estado['pauseinfo']['pausestart']);
+            if (in_array($estado['pauseinfo']['pausename'], $holdNames)) {
+                $sec_shift_hold += $iCurrentPauseDur;
+                $is_hold_pause = true;
+            } else {
+                $sec_shift_break += $iCurrentPauseDur;
+            }
+        }
+
+        // Add shift times to each response event
+        foreach ($respuesta as $idx => $evt) {
+            $respuesta[$idx]['shift_login_time'] = $sec_shift_login;
+            $respuesta[$idx]['shift_break_time'] = $sec_shift_break;
+            $respuesta[$idx]['shift_hold_time'] = $sec_shift_hold;
+            $respuesta[$idx]['is_hold_pause'] = $is_hold_pause;
         }
 
         jsonflush($bSSE, $respuesta);
@@ -1906,6 +2126,174 @@ function construirUrlExterno($s, $infoLlamada, $chanvars)
         $s = str_replace($k, urlencode($v), $s);
     }
     return $s;
+}
+
+// Shift-based time calculation functions for Agent Console
+// EN: Calculate shift datetime range (default full day 00-23)
+function agentConsole_calculateShiftDatetimeRange($fromHour = 0, $toHour = 23)
+{
+    $today = date('Y-m-d');
+    $yesterday = date('Y-m-d', strtotime('-1 day'));
+    $fromHour = max(0, min(23, (int)$fromHour));
+    $toHour = max(0, min(23, (int)$toHour));
+
+    if ($fromHour > $toHour) {
+        $datetimeStart = $yesterday . ' ' . sprintf('%02d:00:00', $fromHour);
+        $datetimeEnd = $today . ' ' . sprintf('%02d:59:59', $toHour);
+    } else {
+        $datetimeStart = $today . ' ' . sprintf('%02d:00:00', $fromHour);
+        $datetimeEnd = $today . ' ' . sprintf('%02d:59:59', $toHour);
+    }
+    return array('start' => $datetimeStart, 'end' => $datetimeEnd);
+}
+
+// EN: Query cumulative break time per agent (Break-type pauses only)
+function agentConsole_consultarTiempoBreakAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array('breakTimes' => array(), 'holdNames' => array());
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(UNIX_TIMESTAMP(audit.datetime_end) - UNIX_TIMESTAMP(audit.datetime_init)) AS sec_breaks " .
+           "FROM audit " .
+           "INNER JOIN break ON break.id = audit.id_break " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE break.tipo = 'B' " .
+           "AND audit.datetime_end IS NOT NULL " .
+           "AND audit.datetime_init >= :start " .
+           "AND audit.datetime_init <= :end " .
+           "GROUP BY agent.id";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start' => $datetimeStart, ':end' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result['breakTimes'][$row['agentchannel']] = (int)$row['sec_breaks'];
+    }
+
+    $sql2 = "SELECT name FROM break WHERE tipo = 'H' AND status = 'A'";
+    $stmt2 = $pDB->query($sql2);
+    while ($row = $stmt2->fetch(PDO::FETCH_ASSOC)) {
+        $result['holdNames'][] = $row['name'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+// EN: Query cumulative hold time per agent (Hold-type pauses only)
+function agentConsole_consultarTiempoHoldAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(UNIX_TIMESTAMP(audit.datetime_end) - UNIX_TIMESTAMP(audit.datetime_init)) AS sec_holds " .
+           "FROM audit " .
+           "INNER JOIN break ON break.id = audit.id_break " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE break.tipo = 'H' " .
+           "AND audit.datetime_end IS NOT NULL " .
+           "AND audit.datetime_init >= :start " .
+           "AND audit.datetime_init <= :end " .
+           "GROUP BY agent.id";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(':start' => $datetimeStart, ':end' => $datetimeEnd));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result[$row['agentchannel']] = (int)$row['sec_holds'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+// EN: Query cumulative login time per agent
+function agentConsole_consultarTiempoLoginAgentes($datetimeStart = NULL, $datetimeEnd = NULL)
+{
+    $result = array();
+
+    try {
+        $pDB = new PDO(
+            'mysql:host=localhost;dbname=call_center;charset=utf8',
+            'asterisk', 'asterisk'
+        );
+        $pDB->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    } catch (PDOException $e) {
+        return $result;
+    }
+
+    if (is_null($datetimeStart) || is_null($datetimeEnd)) {
+        $sToday = date('Y-m-d');
+        $datetimeStart = "$sToday 00:00:00";
+        $datetimeEnd = "$sToday 23:59:59";
+    }
+
+    $sNow = date('Y-m-d H:i:s');
+    $sActiveEnd = ($sNow < $datetimeEnd) ? $sNow : $datetimeEnd;
+
+    $sql = "SELECT CONCAT(agent.type, '/', agent.number) AS agentchannel, " .
+           "SUM(" .
+           "  UNIX_TIMESTAMP(LEAST(COALESCE(audit.datetime_end, :active_end), :end1)) " .
+           "  - UNIX_TIMESTAMP(GREATEST(audit.datetime_init, :start1))" .
+           ") AS logintime " .
+           "FROM audit " .
+           "INNER JOIN agent ON agent.id = audit.id_agent " .
+           "WHERE audit.id_break IS NULL " .
+           "AND audit.datetime_init <= :end2 " .
+           "AND (audit.datetime_end IS NULL OR audit.datetime_end >= :start2) " .
+           "GROUP BY agent.id " .
+           "HAVING logintime > 0";
+    $stmt = $pDB->prepare($sql);
+    $stmt->execute(array(
+        ':active_end' => $sActiveEnd,
+        ':start1'     => $datetimeStart,
+        ':end1'       => $datetimeEnd,
+        ':start2'     => $datetimeStart,
+        ':end2'       => $datetimeEnd,
+    ));
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $result[$row['agentchannel']] = (int)$row['logintime'];
+    }
+
+    $pDB = null;
+    return $result;
+}
+
+// EN: Format seconds as HH:MM:SS
+function agentConsole_timestamp_format($i)
+{
+    return sprintf('%02d:%02d:%02d',
+        ($i - ($i % 3600)) / 3600,
+        (($i - ($i % 60)) / 60) % 60,
+        $i % 60);
 }
 
 ?>

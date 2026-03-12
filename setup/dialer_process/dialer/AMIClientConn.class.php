@@ -74,10 +74,9 @@ class AMIClientConn extends MultiplexConn
                 'AckCall' => array('required' => FALSE, 'default' => 'true')),
         'AgentLogin' =>
             array('Agent'=> TRUE, 'Channel' => TRUE),
-        // Deprecated: Agentlogoff not available in app_agent_pool (Asterisk 12+)
-        // Use Hangup on the AgentLogin channel instead
-        // 'Agentlogoff' =>
-        //     array('Agent' => TRUE),
+        // Agentlogoff: used by chan_agent (Asterisk 11), not available in app_agent_pool (12+)
+        'Agentlogoff' =>
+            array('Agent' => TRUE),
         'Agents' =>
             array('ActionID' => FALSE),
         'Atxfer' =>
@@ -170,8 +169,9 @@ class AMIClientConn extends MultiplexConn
         'QueueStatus' =>
             array('Queue' => FALSE, 'ActionID' => FALSE),
         'Redirect' =>
-            array('Channel' => TRUE, 'ExtraChannel' => TRUE, 'Exten' => TRUE,
-                'Context' => TRUE, 'Priority' => TRUE),
+            array('Channel' => TRUE, 'ExtraChannel' => FALSE, 'Exten' => TRUE,
+                'Context' => TRUE, 'Priority' => TRUE,
+                'ExtraExten' => FALSE, 'ExtraContext' => FALSE, 'ExtraPriority' => FALSE),
         'SetCDRUserField' =>
             array('UserField' => TRUE, 'Channel' => TRUE, 'Append' => FALSE),
         'SetVar' =>

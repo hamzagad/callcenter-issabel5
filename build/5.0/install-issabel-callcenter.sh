@@ -27,16 +27,20 @@ if [ -z "$VERSION" ]; then
 fi
 
 if [ "$VERSION" = "11" ]; then
-    echo -e "${RED}Error: Issabel CallCenter ${RELEASE} is NOT compatible with Asterisk 11.${NC}"
-    echo -e "${RED}Please upgrade to Asterisk 16 or 18.${NC}"
-    exit 1
-fi
-
-if [ "$VERSION" != "18" ] && [ "$VERSION" != "16" ]; then
-    echo -e "${YELLOW}Warning: Issabel CallCenter ${RELEASE} is tested with Asterisk 18. Detected version: $VERSION${NC}"
+    echo -e "${YELLOW}Info: Detected Asterisk 11. Using chan_agent compatibility mode.${NC}"
+    echo -e "${YELLOW}  - Agent authentication: via Asterisk (password in agents.conf)${NC}"
+    echo -e "${YELLOW}  - Agent interface: Agent/XXXX${NC}"
+    echo -e "${YELLOW}  - Agent logout: Agentlogoff AMI command${NC}"
+elif [ "$VERSION" = "13" ] || [ "$VERSION" = "16" ] || [ "$VERSION" = "18" ]; then
+    echo -e "${GREEN}Info: Detected Asterisk $VERSION. Using app_agent_pool mode.${NC}"
+    echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
+    echo -e "${GREEN}  - Agent interface: Local/XXXX@agents${NC}"
+    echo -e "${GREEN}  - Agent logout: Hangup login channel${NC}"
+else
+    echo -e "${YELLOW}Warning: Issabel CallCenter ${RELEASE} is tested with Asterisk 11/13/18. Detected version: $VERSION${NC}"
     echo -e "${YELLOW}Proceeding with installation, but some features may not work correctly.${NC}"
-    echo
 fi
+echo
 
 # Determine source directory
 if [ "$LOCAL_INSTALL" = true ]; then
@@ -78,6 +82,47 @@ echo "Installing modules..."
 chown asterisk.asterisk modules/* -R
 /bin/cp -prf modules/* /var/www/html/modules/
 
+echo "Patching dashboard ProcessesStatus applet..."
+DASHBOARD_DIR="/var/www/html/modules/dashboard/applets/ProcessesStatus"
+DASHBOARD_INDEX="$DASHBOARD_DIR/index.php"
+
+if [ -f "$DASHBOARD_INDEX" ]; then
+    # Copy the dialer icon
+    /bin/cp -f "$WORK_DIR/setup/icon_headphones.png" "$DASHBOARD_DIR/images/"
+
+    # 1. Add Dialer icon mapping (after 'Apache' => 'icon_www.png')
+    if ! grep -q "'Dialer'" "$DASHBOARD_INDEX"; then
+        sed -i "/'Apache'.*=>.*'icon_www.png'/a\\            'Dialer'    =>  'icon_headphones.png'," "$DASHBOARD_INDEX"
+    fi
+
+    # 2. Add Dialer service mapping in _controlServicio (after 'Apache' => 'httpd')
+    if ! grep -q "'Dialer'.*=>.*'issabeldialer'" "$DASHBOARD_INDEX"; then
+        sed -i "/'Apache'.*=>.*'httpd'/a\\            'Dialer'    =>  'issabeldialer'," "$DASHBOARD_INDEX"
+    fi
+
+    # 3. Add Dialer status detection (after Apache status line in getStatusServices)
+    if ! grep -q 'dialerd.pid' "$DASHBOARD_INDEX"; then
+        sed -i '/\$arrSERVICES\["Apache"\]\["name_service"\].*=.*"Web Server"/a\
+\
+        $arrSERVICES["Dialer"]["status_service"]   = $this->_existPID_ByFile("/opt/issabel/dialer/dialerd.pid","issabeldialer");\
+        $arrSERVICES["Dialer"]["activate"]     = $this->_isActivate("issabeldialer");\
+        $arrSERVICES["Dialer"]["name_service"]     = "Issabel Call Center Service";' "$DASHBOARD_INDEX"
+    fi
+
+    # 4. Fix _existService() to check /etc/systemd/system/ (for systemd services installed in /etc)
+    # Check if the fix is already applied by looking for the specific pattern
+    if ! grep -q 'file_exists("/etc/systemd/system/{$ns}.service")' "$DASHBOARD_INDEX"; then
+        sed -i 's|if (file_exists("/usr/lib/systemd/system/{$ns}.service"))|if (file_exists("/etc/systemd/system/{$ns}.service"))\n                return TRUE;\n            if (file_exists("/usr/lib/systemd/system/{$ns}.service"))|' "$DASHBOARD_INDEX"
+        echo "  - Added _existService() fix for /etc/systemd/system/ detection"
+    else
+        echo "  - _existService() fix already present, skipping"
+    fi
+
+    echo -e "${GREEN}Dashboard patched successfully${NC}"
+else
+    echo -e "${YELLOW}Warning: Dashboard applet not found at $DASHBOARD_INDEX - skipping patch${NC}"
+fi
+
 echo "Installing dialer..."
 # Install dialer
 mkdir -p /opt/issabel/dialer/
@@ -85,14 +130,21 @@ chmod 755 /opt/issabel/dialer/
 /bin/cp -rf setup/dialer_process/dialer/ /opt/issabel/
 chmod +x /opt/issabel/dialer/dialerd
 
-# Install init script
-mkdir -p /etc/rc.d/init.d/
-/bin/cp -f setup/dialer_process/issabeldialer /etc/rc.d/init.d/
-chmod +x /etc/rc.d/init.d/issabeldialer
+# Install systemd service file
+/bin/cp -f setup/dialer_process/issabeldialer.service /etc/systemd/system/
+systemctl daemon-reload
 
 # Install logrotate config
 mkdir -p /etc/logrotate.d/
 /bin/cp -f setup/issabeldialer.logrotate /etc/logrotate.d/issabeldialer
+
+# Create callcenter module log directory
+mkdir -p /var/log/callcenter-module/
+chown asterisk:asterisk /var/log/callcenter-module/
+chmod 750 /var/log/callcenter-module/
+
+# Install web modules logrotate config
+/bin/cp -f setup/callcenter-modules.logrotate /etc/logrotate.d/callcenter-modules
 
 # Install DNC script
 /bin/cp -f setup/usr/bin/issabel-callcenter-local-dnc /usr/bin/
@@ -112,9 +164,11 @@ mkdir -p /usr/share/issabel/module_installer/callcenter/
 echo "Merging menu..."
 issabel-menumerge /usr/share/issabel/module_installer/callcenter/menu.xml
 
-# Install SSE Apache config for PHP-FPM compatibility
-/bin/cp -f /usr/share/issabel/module_installer/callcenter/setup/issabel-sse.conf /etc/httpd/conf.d/
-systemctl reload httpd 2>/dev/null || true
+# Install SSE Apache config only on Rocky/PHP-FPM systems
+if [ -f /etc/rocky-release ]; then
+    /bin/cp -f /usr/share/issabel/module_installer/callcenter/setup/issabel-sse.conf /etc/httpd/conf.d/
+    systemctl reload httpd 2>/dev/null || true
+fi
 
 # Run database installer
 echo "Running database installer..."
@@ -136,22 +190,21 @@ if id asterisk &>/dev/null; then
     usermod -s /bin/bash asterisk 2>/dev/null || chsh -s /bin/bash asterisk </dev/null 2>/dev/null || true
 fi
 
-# Reload systemd to recognize the init script
-systemctl daemon-reload 2>/dev/null || true
-
-# Add dialer to startup scripts, and enable it by default
+# Enable and start the systemd service
 echo "Enabling issabeldialer service..."
-chkconfig --add issabeldialer 2>/dev/null || true
-chkconfig --level 2345 issabeldialer on 2>/dev/null || true
+systemctl enable issabeldialer
 
 # Restart dialer if already running, otherwise start it
-if systemctl is-active --quiet issabeldialer 2>/dev/null || service issabeldialer status >/dev/null 2>&1; then
+if systemctl is-active --quiet issabeldialer; then
     echo -e "${GREEN}Restarting issabeldialer service...${NC}"
-    service issabeldialer restart
+    systemctl restart issabeldialer
 else
     echo -e "${GREEN}Starting issabeldialer service...${NC}"
-    service issabeldialer start
+    systemctl start issabeldialer
 fi
+
+# Reload Asterisk
+asterisk -rx'core reload' 2>/dev/null || true
 
 # Clean up cloned repository if installed from GitHub
 if [ "$LOCAL_INSTALL" = false ]; then

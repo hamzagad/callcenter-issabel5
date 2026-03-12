@@ -366,24 +366,24 @@ function computeStateHash($combinedStatus)
     // Status counts
     if (isset($combinedStatus['statuscount'])) {
         $sc = $combinedStatus['statuscount'];
-        $fingerprint .= 't:' . ($sc['total'] ?? 0);
-        $fingerprint .= 'q:' . ($sc['onqueue'] ?? 0);
-        $fingerprint .= 's:' . ($sc['success'] ?? 0);
-        $fingerprint .= 'a:' . ($sc['abandoned'] ?? 0);
-        $fingerprint .= 'f:' . ($sc['finished'] ?? 0);
+        $fingerprint .= 't:' . (isset($sc['total']) ? $sc['total'] : 0);
+        $fingerprint .= 'q:' . (isset($sc['onqueue']) ? $sc['onqueue'] : 0);
+        $fingerprint .= 's:' . (isset($sc['success']) ? $sc['success'] : 0);
+        $fingerprint .= 'a:' . (isset($sc['abandoned']) ? $sc['abandoned'] : 0);
+        $fingerprint .= 'f:' . (isset($sc['finished']) ? $sc['finished'] : 0);
     }
 
     // Stats
     if (isset($combinedStatus['stats'])) {
-        $fingerprint .= 'm:' . ($combinedStatus['stats']['max_duration'] ?? 0);
-        $fingerprint .= 'ts:' . ($combinedStatus['stats']['total_sec'] ?? 0);
+        $fingerprint .= 'm:' . (isset($combinedStatus['stats']['max_duration']) ? $combinedStatus['stats']['max_duration'] : 0);
+        $fingerprint .= 'ts:' . (isset($combinedStatus['stats']['total_sec']) ? $combinedStatus['stats']['total_sec'] : 0);
     }
 
     // Active calls - count and IDs
     if (isset($combinedStatus['activecalls'])) {
         $fingerprint .= 'ac:' . count($combinedStatus['activecalls']);
         foreach ($combinedStatus['activecalls'] as $call) {
-            $fingerprint .= ',' . ($call['callid'] ?? '') . ':' . ($call['callstatus'] ?? '');
+            $fingerprint .= ',' . (isset($call['callid']) ? $call['callid'] : '') . ':' . (isset($call['callstatus']) ? $call['callstatus'] : '');
         }
     }
 
@@ -392,7 +392,7 @@ function computeStateHash($combinedStatus)
         $fingerprint .= 'ag:' . count($combinedStatus['agents']);
         foreach ($combinedStatus['agents'] as $agent) {
             $onholdFlag = (isset($agent['onhold']) && $agent['onhold']) ? 'H' : 'Nh';
-            $fingerprint .= ',' . ($agent['agentchannel'] ?? '') . ':' . ($agent['status'] ?? '') . ':' . $onholdFlag;
+            $fingerprint .= ',' . (isset($agent['agentchannel']) ? $agent['agentchannel'] : '') . ':' . (isset($agent['status']) ? $agent['status'] : '') . ':' . $onholdFlag;
         }
     }
 
