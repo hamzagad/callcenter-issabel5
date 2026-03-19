@@ -99,6 +99,7 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Always use English language for the added code, comments, variables, and functions, but logs should be added in En and Es
 - TODOs are always added to TODO.md file
 - Changes are always stored at CHANGES.md file
+- Date and time are always calculated in PHP, it should not used as query function
 - **IMPORTANT**: Always modify the live system, don't copy the modified files the repo unless I explicitly asked
 - **IMPORTANT**: Always check your modifications will not affect any other functionality
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
