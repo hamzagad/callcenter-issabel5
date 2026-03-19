@@ -156,15 +156,35 @@ class CampaignProcess extends TuberiaProcess
         try {
             $sCleanup = "UPDATE calls SET status = 'Failure', failure_cause = 0, "
                 . "failure_cause_txt = 'Orphaned call at startup' "
-                . "WHERE status = 'Placing'";
+                . "WHERE status IN ('Placing', 'Ringing', 'OnQueue')";
             $iCleaned = $this->_db->exec($sCleanup);
             if ($iCleaned > 0) {
-                $this->_log->output("INFO: cleaned $iCleaned orphaned Placing calls at startup | "
-                    . "limpiadas $iCleaned llamadas Placing huérfanas al inicio");
+                $this->_log->output("INFO: cleaned $iCleaned orphaned Placing/Ringing/OnQueue calls at startup | "
+                    . "limpiadas $iCleaned llamadas Placing/Ringing/OnQueue huérfanas al inicio");
             }
         } catch (PDOException $e) {
-            $this->_log->output("ERR: error cleaning orphaned Placing calls - ".$e->getMessage()
-                ." | error limpiando llamadas Placing huérfanas - ".$e->getMessage());
+            $this->_log->output("ERR: error cleaning orphaned Placing/Ringing/OnQueue calls - ".$e->getMessage()
+                ." | error limpiando llamadas Placing/Ringing/OnQueue huérfanas - ".$e->getMessage());
+        }
+
+        // Clean up orphaned connected calls (OnHold/Success) from previous abnormal termination
+        // Limpiar llamadas conectadas huérfanas (OnHold/Success) de una terminación anormal anterior
+        try {
+            $sStartupTime = date('Y-m-d H:i:s');
+            $sCleanup = "UPDATE calls SET status = 'Hangup', end_time = CASE "
+                . "WHEN start_time IS NOT NULL THEN start_time "
+                . "ELSE ? END "
+                . "WHERE (status = 'OnHold' OR (status = 'Success' AND end_time IS NULL))";
+            $sth = $this->_db->prepare($sCleanup);
+            $sth->execute(array($sStartupTime));
+            $iCleaned = $sth->rowCount();
+            if ($iCleaned > 0) {
+                $this->_log->output("INFO: cleaned $iCleaned orphaned OnHold/Success calls at startup | "
+                    . "limpiadas $iCleaned llamadas OnHold/Success huérfanas al inicio");
+            }
+        } catch (PDOException $e) {
+            $this->_log->output("ERR: error cleaning orphaned OnHold/Success calls - ".$e->getMessage()
+                ." | error limpiando llamadas OnHold/Success huérfanas - ".$e->getMessage());
         }
 
         // Detectar capacidades de FreePBX y de call_center
@@ -432,6 +452,10 @@ class CampaignProcess extends TuberiaProcess
             // Clean up orphaned Placing calls (timeout-based)
             // Limpiar llamadas Placing huérfanas (basado en timeout)
             $this->_cleanOrphanedPlacingCalls();
+
+            // Clean up orphaned connected calls (timeout-based)
+            // Limpiar llamadas conectadas huérfanas (basado en timeout)
+            $this->_cleanOrphanedConnectedCalls();
 
             $sFecha = date('Y-m-d', $iTimestamp);
             $sHora = date('H:i:s', $iTimestamp);
@@ -2393,17 +2417,48 @@ PETICION_LLAMADAS_AGENTE;
         $sThreshold = date('Y-m-d H:i:s', time() - $iPlacingTimeout);
 
         $sPeticion = "UPDATE calls SET status = 'Failure', failure_cause = 0, "
-            . "failure_cause_txt = 'Orphaned call at startup' "
-            . "WHERE status = 'Placing' AND datetime_originate < ?";
+            . "failure_cause_txt = 'Orphaned call - timeout' "
+            . "WHERE status IN ('Placing', 'Ringing') AND datetime_originate < ?";
         $sth = $this->_db->prepare($sPeticion);
         $sth->execute(array($sThreshold));
         $iCleaned = $sth->rowCount();
 
         if ($iCleaned > 0) {
-            $this->_log->output("WARN: cleaned $iCleaned orphaned Placing calls "
+            $this->_log->output("WARN: cleaned $iCleaned orphaned Placing/Ringing calls "
                 . "(older than $iPlacingTimeout seconds) | "
-                . "limpiadas $iCleaned llamadas Placing huérfanas "
+                . "limpiadas $iCleaned llamadas Placing/Ringing huérfanas "
                 . "(más antiguas de $iPlacingTimeout segundos)");
+        }
+    }
+
+    /**
+     * Clean up orphaned connected calls that never got end_time set.
+     * These are calls that were connected but the hangup event was missed.
+     *
+     * Limpiar llamadas conectadas huérfanas que nunca recibieron end_time.
+     * Son llamadas que fueron conectadas pero el evento Hangup se perdió.
+     */
+    private function _cleanOrphanedConnectedCalls()
+    {
+        // Connected calls older than 2 hours with no end_time are definitely orphaned
+        // Llamadas conectadas de más de 2 horas sin end_time son definitivamente huérfanas
+        $iConnectedTimeout = 7200; // 2 hours in seconds
+        $sThreshold = date('Y-m-d H:i:s', time() - $iConnectedTimeout);
+
+        $sPeticion = "UPDATE calls SET status = 'Hangup', end_time = start_time "
+            . "WHERE (status = 'Success' OR status = 'OnHold') "
+            . "AND end_time IS NULL "
+            . "AND start_time IS NOT NULL "
+            . "AND start_time < ?";
+        $sth = $this->_db->prepare($sPeticion);
+        $sth->execute(array($sThreshold));
+        $iCleaned = $sth->rowCount();
+
+        if ($iCleaned > 0) {
+            $this->_log->output("WARN: cleaned $iCleaned orphaned connected calls "
+                . "(older than " . ($iConnectedTimeout / 3600) . " hours) | "
+                . "limpiadas $iCleaned llamadas conectadas huérfanas "
+                . "(más antiguas de " . ($iConnectedTimeout / 3600) . " horas)");
         }
     }
 
