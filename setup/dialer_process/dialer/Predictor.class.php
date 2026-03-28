@@ -75,11 +75,25 @@ class Predictor
 
         try {
             $this->_astConn->CoreShowChannels($this->_tmp_actionid);
-            $this->_esperarEnumeracion();
+            if (!$this->_esperarEnumeracion()) {
+                // Timeout waiting for CoreShowChannelsComplete
+                // Timeout esperando CoreShowChannelsComplete
+                foreach ($evlist as $k)
+                    $this->_astConn->remove_event_handler($k);
+                $this->_tmp_actionid = NULL;
+                return FALSE;
+            }
 
             foreach ($colas as $queue) {
                 $this->_astConn->QueueStatus($queue, $this->_tmp_actionid);
-                $this->_esperarEnumeracion();
+                if (!$this->_esperarEnumeracion()) {
+                    // Timeout waiting for QueueStatusComplete
+                    // Timeout esperando QueueStatusComplete
+                    foreach ($evlist as $k)
+                        $this->_astConn->remove_event_handler($k);
+                    $this->_tmp_actionid = NULL;
+                    return FALSE;
+                }
             }
         } catch (Exception $e) {
             // Quitar manejadores de eventos antes de relanzar excepción
@@ -103,11 +117,19 @@ class Predictor
     private function _esperarEnumeracion()
     {
         $this->_enum_complete = FALSE;
+        $iTimeoutStart = time();
         do {
             if ($this->_astConn->multiplexSrv->procesarPaquetes())
                 $this->_astConn->multiplexSrv->procesarActividad(0);
             else $this->_astConn->multiplexSrv->procesarActividad(1);
+            if (time() - $iTimeoutStart > 10) {
+                $this->_astConn->oLogger->output(
+                    'WARN: Predictor::_esperarEnumeracion: timeout de 10s esperando respuesta AMI, se aborta enumeración | '.
+                    'EN: 10s timeout waiting for AMI enumeration response, aborting enumeration');
+                return FALSE;
+            }
         } while (!$this->_enum_complete);
+        return TRUE;
     }
 
     function msg_CoreShowChannel($sEvent, $params, $sServer, $iPort)

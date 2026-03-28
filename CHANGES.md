@@ -2,6 +2,37 @@
 
 ---
 
+## 50. Predictor AMI Enumeration Timeout (Startup Race Condition)
+**Date**: 2026-03-28
+
+**Problem**: Dialer stopped placing calls entirely after service restart. The CampaignProcess froze permanently on its first campaign review cycle, blocking all call placement. This occurred when the dialer service started before Asterisk AMI was fully ready.
+
+**Root Cause**: Race condition on first campaign cycle after dialer restart. The CampaignProcess connected to AMI and immediately asked AMIEventProcess for queue prediction info. But AMIEventProcess had just connected to AMI at the same second and hadn't populated its QueueShadow yet, returning "queue not found". The CampaignProcess then fell into a Predictor fallback path that sent `CoreShowChannels`/`QueueStatus` AMI commands and waited for response events in `_esperarEnumeracion()`. This wait loop had **no timeout** — if the AMI response events were not received or not matched, the process hung in `select()` indefinitely (observed 1.5+ hours). The HubProcess did not detect the hang because the process was still alive (just blocked).
+
+**Solution**: Added a 10-second timeout to `_esperarEnumeracion()` in `Predictor.class.php`. On timeout, the method logs a warning and returns `FALSE`. The callers in `examinarColas()` check the return value — on `FALSE`, they clean up event handlers and return `FALSE` to the caller. This causes `$queueInfo` to remain `NULL` in `_actualizarCampanias()`, gracefully skipping call placement for that cycle. On the next cycle (3 seconds later), the QueueShadow is populated and the Predictor fallback is not triggered.
+
+**Files**:
+- `setup/dialer_process/dialer/Predictor.class.php`
+
+**Changes**:
+- `_esperarEnumeracion()` (line 117): Added `$iTimeoutStart = time()` before the loop and a 10-second timeout check inside the loop. Returns `FALSE` on timeout with a WARN log, `TRUE` on success.
+- `examinarColas()` (lines 78-85): Check `_esperarEnumeracion()` return after `CoreShowChannels` — on `FALSE`, clean up handlers and return `FALSE`
+- `examinarColas()` (lines 89-96): Check `_esperarEnumeracion()` return after `QueueStatus` — on `FALSE`, clean up handlers and return `FALSE`
+
+**Log Collection**:
+```bash
+# Check if timeout was triggered (indicates Asterisk/AMI startup race)
+grep "timeout.*AMI enumeration" /opt/issabel/dialer/dialerd.log | tail -10
+
+# Verify CampaignProcess is running cycles normally after restart
+grep -E "CAMPAIGN_ALLOC|Pass 1 COMPLETE" /opt/issabel/dialer/dialerd.log | tail -10
+
+# Verify CampaignProcess is not frozen (should show recent timestamps)
+grep "CampaignProcess.*CAMPAIGN REVIEW CYCLE" /opt/issabel/dialer/dialerd.log | tail -5
+```
+
+---
+
 ## 49. Comprehensive Orphaned Call Cleanup (All Active Statuses)
 **Date**: 2026-03-19
 
