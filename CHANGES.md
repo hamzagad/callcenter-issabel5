@@ -2,6 +2,24 @@
 
 ---
 
+## 52. Remove Webphone from Agent Console
+**Date**: 2026-04-09
+
+**Problem**: Webphone integration was embedded in the agent console, tightly coupling it to a specific WebRTC client (mhrgl.com) and requiring the external webphone module.
+
+**Solution**: Removed all webphone-related code from agent console:
+- `modules/agent_console/index.php` — removed webRTC detection, `$webphonePassword`/`$webphoneName` globals, SIP transport query, localStorage credential injection
+- `modules/agent_console/themes/default/agent_console.tpl` — removed webPhone container, panel, and JS repositioning
+- `modules/agent_console/themes/default/css/issabel-callcenter.css` — removed webphone CSS classes and responsive media queries for `.right-container`
+
+**Test steps**:
+1. Login as agent in console
+2. Verify no JavaScript errors in browser console
+3. Verify layout renders full-width without right panel gap
+4. `grep -ri "webphone\|webRTC\|webPhone\|mhrgl" /var/log/httpd/ssl_error_log | tail -20`
+
+---
+
 ## 51. Pro Version Extension Points
 **Date**: 2026-04-07
 

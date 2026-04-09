@@ -27,16 +27,12 @@ require_once '/var/lib/asterisk/agi-bin/phpagi-asmanager.php';
 require_once "libs/paloSantoJSON.class.php";
 require_once "libs/paloSantoDB.class.php";
 
-$webphonePassword = '';
-$webphoneName = '';
 $extension = '';
 
 function _moduleContent(&$smarty, $module_name)
 {
     global $arrConf;
     global $arrLang;
-    global $webphonePassword;
-    global $webphoneName;
     global $extension;
 
     require_once "modules/$module_name/libs/issabel2.lib.php";
@@ -49,29 +45,6 @@ function _moduleContent(&$smarty, $module_name)
     $pACL = new paloACL($pDB);
     $user = $_SESSION['issabel_user'];
     $extension = $pACL->getUserExtension($user);
-    $dsn1 = generarDSNSistema('asteriskuser', 'asterisk');
-    $pdbACL1 = new paloDB($dsn1);
-    $base_dir = "/var/www/html";
-
-    $resultado = $pdbACL1->fetchTable("SELECT data from sip WHERE id = '$extension' AND keyword = 'transport'");
-    $isWebphone = !empty($resultado) && isset($resultado[0]) ? $resultado[0] : '';
-    $webPhoneFolder = "$base_dir/modules/webphone";
-    $existeWebPhoneFolder = is_dir($webPhoneFolder);
-    //print_r($webPhoneFolder);
-    //print_r($isWebphone[0]);
-        if ($existeWebPhoneFolder) {
-            //$smarty->assign('webRTCFolder', $webPhoneFolder);
-            if (strpos($isWebphone[0], "wss") !== false || strpos($isWebphone[0], "ws") !== false) {
-                $webRTC = true;
-                $smarty->assign('webRTC', $webRTC);
-                $webphonePassword = $pdbACL1->fetchTable("SELECT data from sip WHERE id = '$extension' AND keyword = 'secret'; ")[0];
-                $webphoneName = $pdbACL1->fetchTable("SELECT name from users WHERE extension = '$extension';")[0];
-
-
-        }
-    }
-
-
 
     $astman = new AGI_AsteriskManager();
     if (!$astman->connect("127.0.0.1", 'admin' , obtenerClaveAMIAdmin())) {
@@ -667,11 +640,9 @@ function manejarSesionActiva_unimplemented($module_name, &$smarty, $sDirLocalPla
 function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, $oPaloConsola, $estado, $listpanels)
 {
 
-    global $webphonePassword;
-    global $webphoneName;
     global $extension;
 
-    //var_dump($webphonePassword);
+
 
     // Incluir bibliotecas javascript de paneles
     $listaLibsJS_modulo = explode("\n", $smarty->get_template_vars('HEADER_MODULES'));
@@ -979,21 +950,6 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
     }
     $smarty->assign('CUSTOM_PANELS', $htmlpanels);
 
-
-        echo "<script>";
-        echo "localStorage.setItem('mhrgl.com.identity.display_name', '$extension');";
-        echo "localStorage.setItem('mhrgl.com.identity.impi', '$extension');";
-        echo "localStorage.setItem('mhrgl.com.identity.name', '$webphoneName[0]');";
-        echo "localStorage.setItem('mhrgl.com.identity.impu', 'sip:$extension@'+ window.location.hostname);";
-        echo "localStorage.setItem('mhrgl.com.identity.password', '$webphonePassword[0]');";
-        echo "localStorage.setItem('mhrgl.com.identity.realm', window.location.hostname);";
-        echo "localStorage.setItem('mhrgl.com.identity.socket', '8089');";
-        echo "localStorage.setItem('mhrgl.com.expert.disable_video', 'true');";
-        echo "localStorage.setItem('mhrgl.com.expert.disable_callbtn_options', 'true');";
-        echo "localStorage.setItem('mhrgl.com.expert.websocket_server_url', 'wss://' + window.location.hostname + ':8089/ws');";
-        //echo "localStorage.setItem('mhrgl.com.expert.ice_servers', '[]');";
-        echo "localStorage.setItem('mhrgl.com.expert.ice_servers', '[{ url: \'stun:stun.a.google.com:19302\'}]');";
-        echo "</script>";
 
     return $smarty->fetch("$sDirLocalPlantillas/agent_console.tpl") . _cc_debug_flush_html();
 }

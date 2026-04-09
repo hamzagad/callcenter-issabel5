@@ -117,20 +117,6 @@
                 </div>
     		</div>{* issabel-callcenter-contenido *}
             
-            {if $webRTC}
-                    <div class="webPhoneContainer" id="webPhoneContainer">    
-                        {include file="/var/www/html/modules/webphone/webRTC_CC/webRTC.php"}
-                    </div>
-                <div class="right-container">
-                    <li class="webPhonePanel">
-                        <div class="webPhonePosition" id="webPhonePosition">
-                            <dt>Web Phone</dt>
-                        </div>
-                    </li>
-                </div>
-            {/if}
-
-
 	</div>
 </div>{* issabel-callcenter-area-principal *}
 <div id="issabel-callcenter-seleccion-break" title="{$TITLE_BREAK_DIALOG}">
@@ -259,12 +245,5 @@ $(document).ready(function() {
     initialize_client_state({$INITIAL_CLIENT_STATE});
 {literal}
 });
-
-    var container = $('#webPhoneContainer');
-    var positionDiv = $('#webPhonePosition');
-
-    if (container.is(':hidden')) {
-        container.appendTo(positionDiv).show();
-    }
 </script>
 {/literal}
