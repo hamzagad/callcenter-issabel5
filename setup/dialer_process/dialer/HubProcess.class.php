@@ -64,6 +64,19 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
         $this->_tareas = array();
         $this->_hub = new HubServer($this->_log);
         $this->_hub->registrarInspectorMsg($this);
+
+        // Pro: load additional daemon tasks if Pro is installed
+        $proTasksFile = dirname(__FILE__) . '/pro/ProTasks.php';
+        if (file_exists($proTasksFile)) {
+            try {
+                require_once $proTasksFile;
+                $extraTasks = ProTasks::getAdditionalTasks();
+                $this->_tareasFijas = array_merge($this->_tareasFijas, $extraTasks);
+            } catch (Exception $e) {
+                $this->_log->output("Pro tasks not loaded: " . $e->getMessage());
+            }
+        }
+
         return TRUE;
     }
 

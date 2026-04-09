@@ -1092,6 +1092,15 @@ PETICION_CAMPANIAS_ENTRANTES;
         // Conteo final de llamadas = mínimo de ambos presupuestos
         $iNumLlamadasColocar = min($iAgentBudget, $iChannelBudget);
 
+        // Pro: enhanced prediction algorithm
+        $proPredictor = dirname(__FILE__) . '/pro/ProPredictor.class.php';
+        if (file_exists($proPredictor)) {
+            try {
+                require_once $proPredictor;
+                $iNumLlamadasColocar = ProPredictor::calculate($infoCampania, $numAllocatedAgents, $iNumLlamadasColocar);
+            } catch (Exception $e) { /* use community predictor */ }
+        }
+
         $this->_log->output("DEBUG: ".__METHOD__.
             " (campaign $campaignId queue {$infoCampania['queue']}) ".
             "TWO-BUDGET: allocated=$numAllocatedAgents [".implode(',', $allocatedAgents)."], ".

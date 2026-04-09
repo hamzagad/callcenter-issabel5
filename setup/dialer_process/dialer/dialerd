@@ -141,6 +141,13 @@ function main($paramConfig, $sDescDemonio, $sNombreDemonio /* , ... */)
     }
     if (!isset($infoConfig['basedir'])) $infoConfig['basedir'] = $sRutaTrabajo;
 
+    // Pro: add extensions directory to autoload path if Pro files exist
+    $proDir = dirname($argv[0]) . '/pro';
+    if (is_dir($proDir)) {
+        ini_set('include_path', $proDir . ':' . ini_get('include_path'));
+        $infoConfig['pro_dir'] = $proDir;
+    }
+
     // Esperar hasta que finalice la instancia previa
     // Wait until the previous instance finishes
     finalizarInstanciaPrevia($sArchivoPID);

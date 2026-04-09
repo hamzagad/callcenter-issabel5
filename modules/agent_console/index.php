@@ -119,11 +119,23 @@ function _moduleContent(&$smarty, $module_name)
     /* Al iniciar la sesión del agente, se asignan las variables elastix_agent_user y elastix_extension  */
     if ($_SESSION['callcenter']['estado_consola'] == 'logged-in') {
         // Manejo de la sesión activa del agente logoneado
-        return manejarSesionActiva($module_name, $smarty, $sDirLocalPlantillas);
+        $sContenido = manejarSesionActiva($module_name, $smarty, $sDirLocalPlantillas);
     } else {
         // Manejo del inicio de la sesión del agente
-        return manejarLogin($module_name, $smarty, $sDirLocalPlantillas);
+        $sContenido = manejarLogin($module_name, $smarty, $sDirLocalPlantillas);
     }
+
+    // Pro enhancement point
+    $proFile = "modules/$module_name/pro/ProConsole.class.php";
+    if (file_exists($proFile)) {
+        try {
+            require_once $proFile;
+            $pro = new ProConsole();
+            $sContenido = $pro->enhanceOutput($sContenido, $smarty);
+        } catch (Exception $e) { /* community continues */ }
+    }
+
+    return $sContenido;
 }
 
 function _debug($s)

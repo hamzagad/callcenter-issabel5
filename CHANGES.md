@@ -2,6 +2,29 @@
 
 ---
 
+## 51. Pro Version Extension Points
+**Date**: 2026-04-07
+
+**Problem**: Need to create a Pro (paid) version of the call center that extends community features without modifying community code at deploy time, and without exposing a bypassable boolean flag.
+
+**Solution**: Added `file_exists()` + `try/catch` extension points in 5 community files. When Pro ionCube-encrypted files exist, they are loaded and executed. All license validation lives inside encrypted code — no `$pro_version` flag in open-source code.
+
+**Files affected**:
+- `setup/dialer_process/dialer/dialerd` — adds `pro/` to include_path
+- `setup/dialer_process/dialer/HubProcess.class.php` — loads ProTasks.php for extra daemon processes
+- `setup/dialer_process/dialer/CampaignProcess.class.php` — loads ProPredictor for enhanced prediction
+- `modules/agent_console/index.php` — loads ProConsole for agent console enhancements
+- `modules/campaign_out/index.php` — loads ProCampaign for campaign enhancements
+
+**Pro repo**: `/usr/src/callcenter-pro` — separate private repo with ionCube-encoded files, license server, build scripts, and sync tool.
+
+**Log collection**:
+```bash
+grep -i "pro" /opt/issabel/dialer/dialerd.log | tail -20
+```
+
+---
+
 ## 50. Predictor AMI Enumeration Timeout (Startup Race Condition)
 **Date**: 2026-03-28
 
