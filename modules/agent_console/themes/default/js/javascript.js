@@ -1170,6 +1170,7 @@ function abrir_url_externo(urlopentype, url, title)
 				context:	document
 			});
 			break;
+		case 'popup':
 		case 'window':
             // Se quita la cejilla anterior. Se asume que se fue marcada con la clase .tab-externalurl
             $('#issabel-callcenter-cejillas-contenido').find('.ui-tabs-nav li.tab-externalurl').remove();
@@ -1189,6 +1190,12 @@ function abrir_url_externo(urlopentype, url, title)
                         window.open(url, '_blank');
                     }
                 });
+
+                // 'popup' opentype: auto-open on call connect (original v1 behavior).
+                // El botón permanece visible por si el navegador bloquea el popup.
+                if (urlopentype === 'popup') {
+                    window.open(url, '_blank');
+                }
             }
             break;
         default:
@@ -1232,6 +1239,7 @@ function abrir_url_externo2(urlopentype, url2, title)
                 context:    document
             });
             break;
+        case 'popup':
         case 'window':
         default:
             // Se quita la cejilla anterior. Se asume que se fue marcada con la clase .tab-externalurl
@@ -1253,6 +1261,12 @@ function abrir_url_externo2(urlopentype, url2, title)
                         window.open(url2, '_blank');
                     }
                 });
+
+                // 'popup' opentype: auto-open on call connect (original v1 behavior).
+                // El botón permanece visible por si el navegador bloquea el popup.
+                if (urlopentype === 'popup') {
+                    window.open(url2, '_blank');
+                }
             }
             break;
         }
@@ -1295,6 +1309,7 @@ function abrir_url_externo3(urlopentype, url3, title)
                 context:    document
             });
             break;
+        case 'popup':
         case 'window':
         default:
             // Se quita la cejilla anterior. Se asume que se fue marcada con la clase .tab-externalurl
@@ -1315,6 +1330,12 @@ function abrir_url_externo3(urlopentype, url3, title)
                         window.open(url3, '_blank');
                     }
                 });
+
+                // 'popup' opentype: auto-open on call connect (original v1 behavior).
+                // El botón permanece visible por si el navegador bloquea el popup.
+                if (urlopentype === 'popup') {
+                    window.open(url3, '_blank');
+                }
             }
             break;
         }

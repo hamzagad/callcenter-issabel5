@@ -76,6 +76,7 @@ function descOpenType()
 {
 	return array(
         'window'    =>  _tr('New window'),
+        'popup'     =>  _tr('Auto popup'),
         'iframe'    =>  _tr('Embedded frame'),
         'jsonp'     =>  _tr('JSONP'),
     );
