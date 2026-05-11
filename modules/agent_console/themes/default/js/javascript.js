@@ -1192,8 +1192,9 @@ function abrir_url_externo(urlopentype, url, title)
                 });
 
                 // 'popup' opentype: auto-open on call connect (original v1 behavior).
-                // El botón permanece visible por si el navegador bloquea el popup.
-                if (urlopentype === 'popup') {
+                // Skip when this window IS a popup (window.opener set) — prevents recursion when the
+                // external URL points at this same Issabel host and reloads the agent console.
+                if (urlopentype === 'popup' && !window.opener) {
                     window.open(url, '_blank');
                 }
             }
@@ -1262,9 +1263,9 @@ function abrir_url_externo2(urlopentype, url2, title)
                     }
                 });
 
-                // 'popup' opentype: auto-open on call connect (original v1 behavior).
-                // El botón permanece visible por si el navegador bloquea el popup.
-                if (urlopentype === 'popup') {
+                // 'popup' opentype: skip when running inside a popup window (window.opener set) to
+                // prevent recursive popup storms if the external URL targets this same host.
+                if (urlopentype === 'popup' && !window.opener) {
                     window.open(url2, '_blank');
                 }
             }
@@ -1331,9 +1332,9 @@ function abrir_url_externo3(urlopentype, url3, title)
                     }
                 });
 
-                // 'popup' opentype: auto-open on call connect (original v1 behavior).
-                // El botón permanece visible por si el navegador bloquea el popup.
-                if (urlopentype === 'popup') {
+                // 'popup' opentype: skip when running inside a popup window (window.opener set) to
+                // prevent recursive popup storms if the external URL targets this same host.
+                if (urlopentype === 'popup' && !window.opener) {
                     window.open(url3, '_blank');
                 }
             }

@@ -9,24 +9,32 @@
 
 **Solution**: Added a new `opentype` value `popup` ("Auto popup") alongside the existing `window` / `iframe` / `jsonp`. URLs configured with `opentype = popup` are auto-opened the moment the call connects, restoring v1 behavior. The click button is still rendered so the agent can re-open the URL if the browser blocked the popup or they closed the window.
 
+Two guards were added during testing:
+1. `'popup'` was added to the opentype whitelist in `externalUrl.class.php::createURL()` / `updateURL()` — without it the form saved failed with `Validation Error (internal) Invalid URL open type` because the dropdown was updated but the DB-write whitelist wasn't.
+2. The auto-popup `window.open()` is guarded with `!window.opener`. If the configured URL happens to point back at the Issabel host, the popup tab loads the agent console (logged-in session), polls the dialer, sees the active call, and would fire another `window.open()` — recursively, until call hangup. The guard means a child popup window (one with an opener) never auto-pops again. Click button still works for manual re-open.
+
 **Files affected**:
 - `modules/external_url/index.php` — `descOpenType()` now includes `'popup' => _tr('Auto popup')`. No DB schema change (the existing `campaign_external_url.opentype` column is `varchar(16)`).
-- `modules/agent_console/themes/default/js/javascript.js` — `abrir_url_externo()`, `abrir_url_externo2()`, `abrir_url_externo3()` now treat `'popup'` like `'window'` (build the button + click handler) and additionally fire `window.open(url, '_blank')` immediately for `'popup'`.
+- `modules/external_url/libs/externalUrl.class.php` — `'popup'` added to the `in_array()` whitelist in both `createURL()` and `updateURL()`.
+- `modules/agent_console/themes/default/js/javascript.js` — `abrir_url_externo()`, `abrir_url_externo2()`, `abrir_url_externo3()` now treat `'popup'` like `'window'` (build the button + click handler) and additionally fire `window.open(url, '_blank')` immediately for `'popup'`, but only when `!window.opener` (i.e. the current window is not itself a popup).
 
 **Test steps**:
 1. Go to **Call Center → External URLs → New URL**. Confirm the "Open URL in" dropdown shows four options including **"Auto popup"**.
-2. Create a URL `https://www.example.com/{__PHONE__}` with opentype = **Auto popup**, assign it to an outgoing campaign as URL 1.
-3. Log in as an agent, place/receive a call on that campaign. Expected: a new browser tab opens automatically AND the labeled button appears in the console tab bar.
-4. Set another URL on the same campaign to opentype = **New window**. Confirm it shows the button but does NOT auto-popup.
-5. Set a third URL to **Embedded frame**. Confirm iframe tab still renders correctly.
+2. Create a URL `https://www.example.com/{__PHONE__}` with opentype = **Auto popup**. Save succeeds (no validation error). Assign it to an outgoing campaign as URL 1.
+3. Log in as an agent, place/receive a call on that campaign. Expected: exactly one new browser tab opens automatically AND the labeled button appears in the console tab bar.
+4. Close the popup, then click the labeled button → popup reopens once. Closing it does not cascade.
+5. Set another URL on the same campaign to opentype = **New window**. Confirm it shows the button but does NOT auto-popup.
+6. Set a third URL to **Embedded frame**. Confirm iframe tab still renders correctly.
+7. Set two URLs on a campaign both as **Auto popup** → expect exactly two popups per call.
 
 **Log collection**:
 ```bash
 tail -f /var/log/httpd/ssl_error_log | grep -i 'external\|url\|opentype'
 tail -f /opt/issabel/dialer/dialerd.log | grep -i 'url\|opentype'
 ```
+In browser DevTools → Console, watch for any errors related to `abrir_url_externo`.
 
-**Notes**: Browser popup blockers may still block the auto-popup since it isn't tied to a user gesture. Agents may need to whitelist the agent-console origin. The button is intentionally kept visible to cover this case.
+**Notes**: Browser popup blockers may still block the auto-popup since it isn't tied to a user gesture. Agents may need to whitelist the agent-console origin. The button is intentionally kept visible to cover this case. The `window.opener` guard only kicks in for the misconfigured "URL points back at Issabel" case — legitimate external CRM URLs do not run the agent console JS, so the guard does not affect them.
 
 ---
 
