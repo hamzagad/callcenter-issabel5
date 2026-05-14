@@ -1086,6 +1086,19 @@ function manejarRespuestaStatus(respuesta)
 	        // Vaciar las áreas para la llamada
 			$('#issabel-callcenter-llamada-script').empty();
 			$('#issabel-callcenter-llamada-info').css("color", "#778899");
+
+	        // URLs marked with a "_hangup" opentype open here (the PHP backend
+	        // strips the suffix so the openers receive a plain iframe/window/
+	        // popup/jsonp). A null opentype is mapped to DELETE so any existing
+	        // startup tab/button for that slot is removed.
+	        if (!respuesta[i].urlopentype3) { respuesta[i].urlopentype3 = "DELETE"; }
+	        abrir_url_externo3(respuesta[i].urlopentype3, respuesta[i].url3, respuesta[i].urldescription3);
+
+	        if (!respuesta[i].urlopentype2) { respuesta[i].urlopentype2 = "DELETE"; }
+	        abrir_url_externo2(respuesta[i].urlopentype2, respuesta[i].url2, respuesta[i].urldescription2);
+
+	        if (!respuesta[i].urlopentype) { respuesta[i].urlopentype = "DELETE"; }
+	        abrir_url_externo(respuesta[i].urlopentype, respuesta[i].url, respuesta[i].urldescription);
 			break;
 		case 'waitingenter':
 			estadoCliente.waitingcall = true;

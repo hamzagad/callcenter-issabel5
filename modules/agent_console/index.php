@@ -1575,7 +1575,35 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
         _debug(__FUNCTION__.' initial: agent has received call');
     } elseif (!is_null($estadoCliente['calltype']) && is_null($estado['callinfo'])) {
         // La consola dejó de atender una llamada
-        $respuesta[] = construirRespuesta_agentunlinked();
+        $infoCampania = array();
+        if (!($estadoCliente['calltype'] == 'incoming' && is_null($estadoCliente['campaign_id']))) {
+            $infoCampania = $oPaloConsola->leerInfoCampania(
+                $estadoCliente['calltype'],
+                $estadoCliente['campaign_id']);
+        }
+        if (!is_array($infoCampania)) $infoCampania = array();
+        $infoCampania['forms'] = NULL;
+
+        $callinfoHangup = array(
+            'calltype'    => $estadoCliente['calltype'],
+            'campaign_id' => $estadoCliente['campaign_id'],
+            'callid'      => $estadoCliente['callid'],
+            'callnumber'  => NULL,
+            'linkstart'   => NULL,
+        );
+        $infoLlamadaHangup = $oPaloConsola->leerInfoLlamada(
+            $estadoCliente['calltype'],
+            $estadoCliente['campaign_id'],
+            $estadoCliente['callid']);
+        if (!is_array($infoLlamadaHangup)) $infoLlamadaHangup = array();
+        foreach (array('agent_number', 'remote_channel', 'uniqueid',
+            'campaign_id', 'callid', 'calltype', 'callnumber') as $k) {
+            if (!isset($infoLlamadaHangup[$k]))
+                $infoLlamadaHangup[$k] = isset($callinfoHangup[$k]) ? $callinfoHangup[$k] : NULL;
+        }
+
+        $respuesta[] = construirRespuesta_agentunlinked($smarty, $sDirLocalPlantillas,
+            $oPaloConsola, $callinfoHangup, $infoLlamadaHangup, $infoCampania);
         _debug(__FUNCTION__.' initial: agent has ended call');
     }
 
@@ -1727,7 +1755,23 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
                 if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
                 unset($respuestaEventos['llamada']);
                 if (!is_null($estadoCliente['calltype'])) {
-                    $respuestaEventos['llamada'] = construirRespuesta_agentunlinked();
+                    $nuevoEstado = array(
+                        'calltype'      =>  $evento['call_type'],
+                        'campaign_id'   =>  $evento['campaign_id'],
+                        'linkstart'     =>  isset($evento['datetime_linkstart']) ? $evento['datetime_linkstart'] : NULL,
+                        'callid'        =>  $evento['call_id'],
+                        'callnumber'    =>  isset($evento['phone']) ? $evento['phone'] : NULL,
+                    );
+                    if ($nuevoEstado['calltype'] == 'incoming' && is_null($nuevoEstado['campaign_id'])) {
+                        $infoCampania = array('forms' => NULL);
+                    } else {
+                        $infoCampania = $oPaloConsola->leerInfoCampania(
+                            $nuevoEstado['calltype'],
+                            $nuevoEstado['campaign_id']);
+                    }
+                    $respuestaEventos['llamada'] = construirRespuesta_agentunlinked(
+                        $smarty, $sDirLocalPlantillas, $oPaloConsola,
+                        $nuevoEstado, $evento, $infoCampania);
                 }
                 break;
             case 'schedulecallstart':
@@ -1980,6 +2024,16 @@ function construirRespuesta_agentlinked($smarty, $sDirLocalPlantillas,
         $registroCambio['url3'] = construirUrlExterno($infoCampania['urltemplate3'], $infoLlamada, $chanvars);
     }
 
+    // URLs marked with a "_hangup" opentype are reserved for the agentunlinked
+    // event and must not pop at call startup.
+    foreach (array('', '2', '3') as $sfx) {
+        if (_esOpentypeHangup($registroCambio["urlopentype$sfx"])) {
+            $registroCambio["urlopentype$sfx"]    = NULL;
+            $registroCambio["urldescription$sfx"] = NULL;
+            $registroCambio["url$sfx"]            = NULL;
+        }
+    }
+
     // Asignaciones específicas para llamadas entrantes
     if ($callinfo['calltype'] == 'incoming') {
         $comboContactos = array();
@@ -2033,11 +2087,42 @@ function construirRespuesta_agentlinked($smarty, $sDirLocalPlantillas,
     return $registroCambio;
 }
 
-function construirRespuesta_agentunlinked()
+function construirRespuesta_agentunlinked($smarty = NULL, $sDirLocalPlantillas = NULL,
+    $oPaloConsola = NULL, $callinfo = NULL, $infoLlamada = NULL, &$infoCampania = NULL)
 {
-    return array(
-        'event'     =>  'agentunlinked',
-    );
+    $registroCambio = array('event' => 'agentunlinked');
+    if (!is_array($infoCampania) || is_null($oPaloConsola) || !is_array($infoLlamada)) {
+        return $registroCambio;
+    }
+
+    // The agentunlinked event uses field names call_type/call_id/phone, but
+    // construirUrlExterno expects calltype/callid/callnumber. Merge the
+    // normalized $callinfo (built by the caller with the proper key names)
+    // into $infoLlamada so URL token substitution works.
+    if (is_array($callinfo)) {
+        foreach (array('calltype', 'campaign_id', 'callid', 'callnumber',
+            'agent_number', 'remote_channel', 'uniqueid', 'datetime_linkstart') as $k) {
+            if (!isset($infoLlamada[$k]) && isset($callinfo[$k]))
+                $infoLlamada[$k] = $callinfo[$k];
+        }
+    }
+
+    $chanvars = $oPaloConsola->leerVariablesCanalLlamadaActiva();
+    foreach (array('', '2', '3') as $sfx) {
+        $ot   = isset($infoCampania["urlopentype$sfx"])    ? $infoCampania["urlopentype$sfx"]    : NULL;
+        $tpl  = isset($infoCampania["urltemplate$sfx"])    ? $infoCampania["urltemplate$sfx"]    : NULL;
+        $desc = isset($infoCampania["urldescription$sfx"]) ? $infoCampania["urldescription$sfx"] : NULL;
+        if (_esOpentypeHangup($ot) && !is_null($tpl)) {
+            $registroCambio["urlopentype$sfx"]    = _opentypeBase($ot);
+            $registroCambio["urldescription$sfx"] = $desc;
+            $registroCambio["url$sfx"]            = construirUrlExterno($tpl, $infoLlamada, $chanvars);
+        } else {
+            $registroCambio["urlopentype$sfx"]    = NULL;
+            $registroCambio["urldescription$sfx"] = NULL;
+            $registroCambio["url$sfx"]            = NULL;
+        }
+    }
+    return $registroCambio;
 }
 
 function construirRespuesta_waitingenter($oPaloConsola, $waitedcallinfo)
@@ -2070,6 +2155,16 @@ function construirRespuesta_waitingexit()
     );
 }
 
+function _esOpentypeHangup($opentype)
+{
+    return is_string($opentype) && substr($opentype, -7) === '_hangup';
+}
+
+function _opentypeBase($opentype)
+{
+    return _esOpentypeHangup($opentype) ? substr($opentype, 0, -7) : $opentype;
+}
+
 function construirUrlExterno($s, $infoLlamada, $chanvars)
 {
     $reemplazos = array(
@@ -2077,12 +2172,17 @@ function construirUrlExterno($s, $infoLlamada, $chanvars)
                 ? $infoLlamada['agent_number'] : ''),
         '{__REMOTE_CHANNEL__}'  =>  (isset($infoLlamada['remote_channel'])
                 ? $infoLlamada['remote_channel'] : ''),
-        '{__CALL_TYPE__}'       =>  $infoLlamada['calltype'],
-        '{__CAMPAIGN_ID__}'     =>  $infoLlamada['campaign_id'],
-        '{__CALL_ID__}'         =>  $infoLlamada['callid'],
-        '{__PHONE__}'           =>  $infoLlamada['callnumber'],
-        '{__UNIQUEID__}'        =>  $infoLlamada['uniqueid'],
-        '{__AGENT__}'           =>  trim(substr($_SESSION['callcenter']['agente_nombre'], strpos($_SESSION['callcenter']['agente_nombre'], '-') +1)),
+        '{__CALL_TYPE__}'       =>  isset($infoLlamada['calltype']) ? $infoLlamada['calltype'] : '',
+        '{__CAMPAIGN_ID__}'     =>  isset($infoLlamada['campaign_id']) ? $infoLlamada['campaign_id'] : '',
+        '{__CALL_ID__}'         =>  isset($infoLlamada['callid']) ? $infoLlamada['callid'] : '',
+        '{__PHONE__}'           =>  isset($infoLlamada['callnumber']) ? $infoLlamada['callnumber'] : '',
+        '{__UNIQUEID__}'        =>  isset($infoLlamada['uniqueid']) ? $infoLlamada['uniqueid'] : '',
+        '{__ANSWER__}'          =>  isset($infoLlamada['datetime_linkstart']) ? $infoLlamada['datetime_linkstart'] : '',
+        '{__END__}'             =>  isset($infoLlamada['datetime_linkend']) ? $infoLlamada['datetime_linkend'] : '',
+        '{__DURATION__}'        =>  isset($infoLlamada['duration']) ? $infoLlamada['duration'] : '',
+        '{__AGENT__}'           =>  isset($_SESSION['callcenter']['agente_nombre'])
+                ? trim(substr($_SESSION['callcenter']['agente_nombre'], strpos($_SESSION['callcenter']['agente_nombre'], '-') + 1))
+                : '',
     );
     if (is_array($chanvars)) foreach ($chanvars as $k => $v) {
     	$reemplazos['{'.$k.'}'] = $v;

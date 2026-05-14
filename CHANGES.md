@@ -2,6 +2,45 @@
 
 ---
 
+## 54. Popup External URL on Call Hangup
+**Date**: 2026-05-14
+
+**Feature**: Allow a campaign External URL to open **after the call hangs up** (on the `agentunlinked` event), in addition to the existing on-connect behavior. The three v5 URL slots were previously wired exclusively to call startup (`agentlinked`); this adds hangup-time delivery as a per-URL option. Ported from a v4 customization.
+
+**Implementation**: Repurpose the `opentype` value instead of adding a 4th URL slot or changing the DB/ECCP schema. Four `_hangup` variants were added — `window_hangup`, `popup_hangup`, `iframe_hangup`, `jsonp_hangup` — that any of URL1/URL2/URL3 can use. They are parallel to the existing startup variants and preserve the v5 button-vs-auto-popup split:
+
+| Startup opentype | Hangup opentype | Behavior |
+| --- | --- | --- |
+| `window` | `window_hangup` | Clickable button (agent opens manually) |
+| `popup`  | `popup_hangup`  | Auto `window.open` on hangup |
+| `iframe` | `iframe_hangup` | Embedded iframe tab |
+| `jsonp`  | `jsonp_hangup`  | Background JSONP request |
+
+Routing happens in the agent_console PHP backend: a `_hangup` URL is nulled out of the `agentlinked` response and emitted in the `agentunlinked` response instead, with the `_hangup` suffix stripped so the existing JS opener functions (`abrir_url_externo{,2,3}`) need no per-type changes. Non-hangup opentypes are unaffected.
+
+This change also **increased three URL-template tokens** — `{__ANSWER__}` (`datetime_linkstart`), `{__END__}` (`datetime_linkend`), `{__DURATION__}` (`duration`) — and added `isset()` guards to every token in `construirUrlExterno()` so a missing field yields `''` instead of a PHP notice. The `agentunlinked` event delivers field names `call_type` / `call_id` / `phone`, while `construirUrlExterno()` expects `calltype` / `callid` / `callnumber`; `construirRespuesta_agentunlinked()` now merges the normalized `$callinfo` into `$infoLlamada` to bridge that naming gap.
+
+**Files affected**:
+- `modules/external_url/index.php` — `descOpenType()` now also returns the four `_hangup` entries so admins can pick them in the External URL form. No DB schema change (`campaign_external_url.opentype` is `varchar(16)`).
+- `modules/external_url/libs/externalUrl.class.php` — the four `_hangup` values added to the `in_array()` opentype whitelist in both `createURL()` and `updateURL()`; without this the form save fails with `Validation Error (internal) Invalid URL open type`.
+- `modules/agent_console/index.php` —
+  - new helpers `_esOpentypeHangup()` / `_opentypeBase()` near `construirUrlExterno()`;
+  - `construirRespuesta_agentlinked()` nulls out any slot whose opentype is a `_hangup` variant so it does not pop at startup;
+  - `construirRespuesta_agentunlinked()` rewritten (was near-empty) to take `$smarty, $sDirLocalPlantillas, $oPaloConsola, $callinfo, $infoLlamada, &$infoCampania`, build the `_hangup` slots, strip the suffix, and substitute tokens;
+  - both call sites updated — the initial-state path loads `$infoCampania` / `$infoLlamada` from the client's last-known state, the event-loop path builds `$nuevoEstado` from the `agentunlinked` event;
+  - `construirUrlExterno()` restored `{__ANSWER__}` / `{__END__}` / `{__DURATION__}` and added `isset()` guards to all tokens.
+- `modules/agent_console/themes/default/js/javascript.js` — the `case 'agentunlinked':` branch now calls `abrir_url_externo{,2,3}()` after the existing teardown; a null opentype is mapped to `"DELETE"` so a stale startup tab/button for that slot is removed.
+
+**Known limitation**: The `agentunlinked` event from the dialer (`SQLWorkerProcess.class.php::_AgentUnlinked()`) carries `datetime_linkend`, `duration`, `call_type`, `campaign_id`, `call_id`, `phone` — but **not** `datetime_linkstart`, `uniqueid`, or `remote_channel`. So `{__ANSWER__}`, `{__UNIQUEID__}`, `{__REMOTE_CHANNEL__}` resolve to `''` in a hangup URL unless the dialer is also extended to include them in the event payload.
+
+**Log collection**:
+```bash
+tail -f /var/log/httpd/ssl_error_log | grep -i 'agent_console\|external\|url\|opentype\|construirUrl'
+tail -f /opt/issabel/dialer/dialerd.log | grep -i 'agentunlinked\|url\|opentype'
+```
+
+---
+
 ## 53. Auto-Popup External URL Option
 **Date**: 2026-05-11
 
