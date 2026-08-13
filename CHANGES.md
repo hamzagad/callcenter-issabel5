@@ -2,6 +2,74 @@
 
 ---
 
+## 55. SQLWorkerProcess Pending-Action Queue Deadlock (Agent Console Freeze)
+**Date**: 2026-08-13
+
+**Problem**: A single database action that could never succeed permanently blocked the dialer's pending-action queue, freezing every agent console. Observed symptoms: after accepting the login call the console stayed on the login page instead of switching to the session page, and incoming call data never appeared — both only recovered with a manual page refresh, and fully only after a dialer restart.
+
+`SQLWorkerProcess::_procesarUnaAccion()` removed an action from `$_accionesPendientes` with `array_shift()` **only on the success path**. The `catch (PDOException $e)` block logged and rolled back but never removed the failing action, so a permanently-failing action was retried forever at the head of a strict FIFO queue (`_encolarAccionPendiente()` uses `array_push`). Because `_lanzarEventos()` is only reached after a successful `commit()`, no ECCP event was ever emitted — and `_AgentLogin`, `_AgentLinked`, `_agentStateChange` and `_notificarProgresoLlamada` all share that one queue, which is why agent state and call data both stopped updating.
+
+The trigger was `campaign_out`'s `delete_campaign()`, which deletes `call_progress_log`, `calls` and `campaign` rows in one transaction with no coordination with the dialer. Campaign 3 was deleted while a call-progress action for `id_call_outgoing=60029` was still queued in memory, so the resulting `INSERT INTO call_progress_log` failed the `call_progress_log_ibfk_6` foreign key (`23000 - 1452`) on every retry. The queue stayed jammed for roughly 48 hours (action dated 2026-08-11 13:56:32, still retrying at 2026-08-13 13:43:11).
+
+Two aggravating factors: `procedimientoDemonio()` passes `0` (no wait) to `procesarActividad()` whenever actions are pending, so the retry ran as a busy loop (~27,000 log lines/second); and `$e->getTraceAsString()` was interpolated **twice** into a single line (ES and EN). The log reached **50 GB in 9.5 hours** — 41% stack traces, 36% `_volcarAccion` dumps, 16% error text, 7% `LOGDATA`.
+
+**Implementation**: The existing `esReiniciable()` predicate was only ever used to decide *whether to log* — never to gate the retry, which was universal by omission. Note that retaining a failed action is deliberate and load-bearing (it is what prevents losing call and audit records across a MySQL restart), so the fix preserves retention and adds the missing notion of a *permanently impossible* error rather than dropping on any failure.
+
+Errors are now classified three ways, with a bounded backstop:
+
+| Class | Detection | Queue action |
+| --- | --- | --- |
+| 1. Connection loss | driver codes 2002, 2003, 2006, 2013, 1053, 1040 | **Retain**, close handle, reconnect |
+| 2. Transient contention | `esReiniciable()` — 1213, 1205 | **Retain**, retry immediately, no logging |
+| 3. Permanent logical | SQLSTATE 23000, 42S22, 42S02, 42000 | **Discard**, log once with the payload |
+| 4. Unclassified | anything else | Retry with exponential backoff, discard after `MAX_ACTION_RETRIES` |
+
+Class 4 is deliberate: an unanticipated error is still retried (preserving "wait for it to succeed later" semantics) but can no longer wedge the queue permanently. Previously only code 2006 was recognised as connection loss, so a naive "drop when not retriable" fix would have **discarded queued call records whenever MySQL returned 2013/2003/1053 instead** — class 1 now covers all of them.
+
+Two latent crash paths in the same catch block were fixed in passing:
+- `$this->_db->rollBack()` was called unconditionally, but `_verificarCambioConfiguracion()` and `_verificarActualizacionAgentes()` run DB reads inside the same `try` and **outside any transaction**. `rollBack()` with no active transaction throws, and that second exception escaped the catch and would abort the process. Now guarded by `inTransaction()` inside its own `try`.
+- `implode(' - ', $e->errorInfo)` and `$e->errorInfo[0]` assumed an array, but PDO leaves `errorInfo` as `NULL` for exceptions it raises itself. New `infoErrorPDO()` normalizes it.
+
+A `$bEjecutandoAccion` flag now distinguishes a failure inside the queued action from one raised by the periodic config/agent refresh that shares the `try`, so an innocent action that was never attempted is never discarded.
+
+**Files affected**:
+- `setup/dialer_process/dialer/ECCPHelper.lib.php` — new `infoErrorPDO()`, `esErrorConexion()`, `esErrorPermanente()`; `esDeadlockTransaccion()` and `esLockTimeout()` now read `errorInfo` through the NULL-safe accessor.
+- `setup/dialer_process/dialer/SQLWorkerProcess.class.php` —
+  - new constants `MAX_ACTION_RETRIES` (50), `BACKOFF_CAP_SECONDS` (30), `LOG_REPEAT_WINDOW_SECONDS` (60), `FAST_RETRIES_ON_CONTENTION` (5) and retry/log-suppression state. Class 2 retries immediately only for the first `FAST_RETRIES_ON_CONTENTION` attempts and then adopts the same backoff, so sustained contention cannot exhaust the retry cap in microseconds and discard a merely-contended action;
+  - `catch` body extracted into `_manejarErrorAccion()` implementing the four-way dispatch;
+  - `_hayAccionEjecutable()` gates both `procedimientoDemonio()`'s idle decision and action execution, so a backing-off queue idles at `procesarActividad(1)` instead of spinning;
+  - `_debeRegistrarError()` suppresses identical repeats within the window and reports the suppressed count;
+  - `_reiniciarEstadoReintento()` clears retry state on every successful commit;
+  - `_volcarAccion()` gained a `$bForzar` argument so a discarded action's payload is logged even with debugging off, plus an `is_array()` guard;
+  - stack trace emitted once instead of twice (bilingual label retained);
+  - `limpiezaDemonio()` calls `_procesarUnaAccion(TRUE)` to bypass backoff so shutdown still drains within its 10 s budget and no longer hangs on a poison action;
+  - the unconditional `LOGDATA: var_export($prop)` trace (marked `CUSTOMIZATIONS WC 05/08/2025`), which fired once per call state transition regardless of `dialer.debug`, is now gated behind `$this->DEBUG`.
+
+**Not included**: `delete_campaign()` still deletes a campaign with no coordination with the dialer, so the poison action can still be generated — this change makes the consequence survivable, not impossible. Tracked in `TODO.md`.
+
+**Log collection**:
+```bash
+# Queue jammed? (repeated identical FK errors) - should now be absent
+grep -E "ERR:.*_procesarUnaAccion.*foreign key" /opt/issabel/dialer/dialerd.log | tail -20
+
+# Classification outcomes
+grep -E "acción descartada permanentemente|permanently discarded" /opt/issabel/dialer/dialerd.log
+grep -E "acción descartada tras|action discarded after"           /opt/issabel/dialer/dialerd.log
+grep -E "conexión a DB perdida|DB connection lost"                /opt/issabel/dialer/dialerd.log
+grep -E "se suprimieron|suppressed"                               /opt/issabel/dialer/dialerd.log
+
+# Runaway log growth (was ~1.5 MB/s during the jam)
+watch -n5 'ls -l /opt/issabel/dialer/dialerd.log'
+
+# Console updates arriving without a manual refresh
+grep -E "AgentLogin|AgentLinked" /opt/issabel/dialer/dialerd.log | tail -20
+
+# Shutdown must no longer need repeated SIGTERM
+grep "no todas las tareas han terminado" /opt/issabel/dialer/dialerd.log
+```
+
+---
+
 ## 54. Popup External URL on Call Hangup
 **Date**: 2026-05-14
 

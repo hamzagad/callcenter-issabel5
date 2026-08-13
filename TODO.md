@@ -30,6 +30,15 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## High
 
+### Campaign Deletion Not Coordinated With Dialer
+
+* **Type**: Bug
+* **Urgency**: High
+* **Date Added**: 2026-08-13
+* **Location**: `modules/campaign_out/libs/paloSantoCampaignCC.class.php:486` (`delete_campaign()`)
+* **Description**: `delete_campaign()` deletes `call_progress_log`, `calls` and `campaign` rows in a single transaction with no notification to the dialer. If a call-progress action for that campaign is still queued in the dialer's in-memory `$_accionesPendientes`, its `INSERT INTO call_progress_log` fails the `call_progress_log_ibfk_6` foreign key permanently. This caused the 48-hour queue deadlock fixed in CHANGES.md #55, which froze every agent console. The `SQLWorkerProcess` fix now discards such an action instead of retrying forever, so the consequence is survivable — but the poison action is still generated on every deletion of a campaign with in-flight calls, and the affected call's final progress record is lost. Proper fix: refuse deletion while calls are in flight, or send the dialer a message to purge queued actions for the campaign before deleting. The same gap applies to `campaign_in`'s `paloSantoIncomingCampaign.class.php:476`.
+* **Status**: Untouched
+
 ### ECCP Client Authorization
 
 * **Type**: Feature

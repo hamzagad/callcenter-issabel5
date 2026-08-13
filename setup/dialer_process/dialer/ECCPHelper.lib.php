@@ -324,20 +324,78 @@ function cargarInfoPausa($db, &$infoAgente, &$recordset)
     }
 }
 
+/* Normaliza el errorInfo de una PDOException. PDO deja errorInfo en NULL para las
+ * excepciones generadas por el propio PDO y no por el driver (por ejemplo,
+ * rollBack() sin transacción activa), por lo que el acceso directo al arreglo no
+ * es seguro.
+ *
+ * Normalizes the errorInfo of a PDOException. PDO leaves errorInfo as NULL for
+ * exceptions raised by PDO itself rather than by the driver (for example,
+ * rollBack() with no active transaction), so direct array access is not safe. */
+function infoErrorPDO(PDOException $e)
+{
+    if (is_array($e->errorInfo) && count($e->errorInfo) >= 3) return $e->errorInfo;
+    return array('HY000', 0, $e->getMessage());
+}
+
 function esDeadlockTransaccion(PDOException $e)
 {
+    $info = infoErrorPDO($e);
     // 40001 - 1213 - Deadlock found when trying to get lock; try restarting transaction
-    return ($e->errorInfo[0] == '40001' && $e->errorInfo[1] == 1213);
+    return ($info[0] == '40001' && $info[1] == 1213);
 }
 
 function esLockTimeout(PDOException $e)
 {
+    $info = infoErrorPDO($e);
     // HY000 - 1205 - Lock wait timeout exceeded; try restarting transaction
-    return ($e->errorInfo[0] == 'HY000' && $e->errorInfo[1] == 1205);
+    return ($info[0] == 'HY000' && $info[1] == 1205);
 }
 
 function esReiniciable(PDOException $e)
 {
     return (esDeadlockTransaccion($e) || esLockTimeout($e));
+}
+
+/* Indica si la excepción corresponde a una pérdida de conexión con el servidor de
+ * base de datos. La acción pendiente DEBE conservarse: se reintentará una vez
+ * restablecida la conexión, para no perder registros de llamadas ni de auditoría
+ * durante un reinicio del servidor de base de datos.
+ *
+ * Indicates whether the exception corresponds to a lost connection with the
+ * database server. The pending action MUST be retained: it will be retried once
+ * the connection is restored, so that call and audit records are not lost during a
+ * restart of the database server. */
+function esErrorConexion(PDOException $e)
+{
+    $info = infoErrorPDO($e);
+    /* 2002 - no se puede conectar por socket local | cannot connect through local socket
+     * 2003 - no se puede conectar al servidor      | cannot connect to server
+     * 2006 - el servidor cerró la conexión         | server has gone away
+     * 2013 - conexión perdida durante la consulta  | lost connection during query
+     * 1053 - el servidor se está apagando          | server shutdown in progress
+     * 1040 - demasiadas conexiones                 | too many connections */
+    return in_array((int)$info[1], array(2002, 2003, 2006, 2013, 1053, 1040), TRUE);
+}
+
+/* Indica si la excepción corresponde a un fallo lógico permanente, que jamás podrá
+ * completarse por más que se reintente. La acción pendiente debe descartarse para
+ * que la cola pueda avanzar; de lo contrario bloquea indefinidamente a todas las
+ * acciones encoladas detrás de ella.
+ *
+ * Indicates whether the exception corresponds to a permanent logical failure that
+ * can never complete no matter how many times it is retried. The pending action
+ * must be discarded so that the queue can move forward; otherwise it indefinitely
+ * blocks every action queued behind it. */
+function esErrorPermanente(PDOException $e)
+{
+    $info = infoErrorPDO($e);
+    /* 23000 - violación de integridad referencial | integrity constraint violation
+     *         (1452 clave foránea | foreign key, 1062 clave duplicada | duplicate key,
+     *          1048 columna no nula | not null column)
+     * 42S22 - columna inexistente                 | unknown column
+     * 42S02 - tabla inexistente                   | unknown table
+     * 42000 - error de sintaxis o de permisos     | syntax error or access violation */
+    return in_array((string)$info[0], array('23000', '42S22', '42S02', '42000'), TRUE);
 }
 ?>
