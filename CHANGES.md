@@ -2,6 +2,24 @@
 
 ---
 
+## 56. Fix Stuck Call When Parked Caller Hangs Up On Hold
+**Date**: 2026-06-03
+
+**Bug**: A call could remain stuck on an agent indefinitely (agent locked to a dead call; `current_call_entry` row never cleared, `call_entry.status` left as `activa` with `datetime_end=NULL`).
+
+**Root cause**: When an agent puts a call on hold, the dialer parks the customer's channel. If the parked caller hangs up via a plain `Hangup` event rather than `ParkedCallGiveUp`, `AMIEventProcess::_procesarLlamadaColgada()` hit the `status == 'OnHold'` branch and unconditionally **ignored every Hangup**, so the call was never finalized. The dedicated `msg_ParkedCallGiveUp()` finalization path was bypassed entirely.
+
+The trigger in the field: FreePBX parking `parkingtime` (45s, default lot, `comebacktoorigin=no`) expires and tries to return the parked call via `[park-dial]` → `Dial(${PARK_TARGET})`. Because the dialer parks the customer trunk leg directly, `PARK_TARGET` flattens to the trunk peer name (e.g. `SIP/WE`), so the return dial fails with `Cause 28 "Invalid number format"` and Asterisk hangs up the parked channel with a regular `Hangup`. The same leak also applies to a trunk BYE or network drop of a parked channel.
+
+**Fix**: In the `OnHold` branch of `_procesarLlamadaColgada()`, if the Hangup is for the parked caller's own channel (`$params['Channel'] == $llamada->actualchannel`) and the call is not in an attended-transfer unhold (`!$llamada->atxfer_hold`), finalize the call exactly as `msg_ParkedCallGiveUp()` does — `llamadaRegresaHold()` then `llamadaFinalizaSeguimiento()`. Hangups for any other channel during HOLD (the agent leg, the failed `park-dial` auxiliary channel) are still ignored, and attended-transfer unhold behavior is unchanged.
+
+**Files affected**:
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` — `_procesarLlamadaColgada()` OnHold branch now finalizes a genuine parked-caller hangup instead of swallowing it.
+
+**Related (not part of this code change)**: parking `parkingtime` was raised 45s → 300s on the live system as an interim mitigation; this only widens the window before the broken park-return drops the caller — the code fix above is what actually prevents the orphaned row. A cleaner follow-up is to give dialer holds a dedicated parking lot with no timeout (retrieval is dialer-driven), since FreePBX park-return cannot return the call to the agent here.
+
+---
+
 ## 55. SQLWorkerProcess Pending-Action Queue Deadlock (Agent Console Freeze)
 **Date**: 2026-08-13
 

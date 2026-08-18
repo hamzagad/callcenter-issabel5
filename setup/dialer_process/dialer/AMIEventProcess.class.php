@@ -3156,7 +3156,39 @@ Uniqueid: 1429642067.241008
                 $this->_config['dialer']['llamada_corta']);
         } else {
             if ($llamada->status == 'OnHold') {
-                if ($this->DEBUG) {
+                /* Un Hangup del canal del cliente estacionado mientras la llamada
+                 * está OnHold significa que el cliente colgó realmente, aunque no
+                 * haya llegado el evento ParkedCallGiveUp (p.ej. el retorno por
+                 * timeout del parking marcó un destino inválido y Asterisk colgó
+                 * el canal estacionado directamente, o el troncal envió BYE / cayó
+                 * la red). Se finaliza la llamada igual que en msg_ParkedCallGiveUp;
+                 * de lo contrario el registro queda atascado en current_call_entry /
+                 * call_entry para siempre. Los Hangup de otros canales durante HOLD
+                 * (pata del agente, canal auxiliar de park-dial fallido) se siguen
+                 * ignorando. */
+                /* A Hangup for the parked caller's own channel while the call is
+                 * OnHold means the caller genuinely disconnected even though no
+                 * ParkedCallGiveUp event arrived (e.g. the park timeout return
+                 * dialed an invalid target and Asterisk hung up the parked channel
+                 * directly, or the trunk sent BYE / the network dropped). Finalize
+                 * the call as msg_ParkedCallGiveUp() does; otherwise the record
+                 * stays stuck in current_call_entry / call_entry forever. Hangups
+                 * for other channels during HOLD (agent leg, failed park-dial
+                 * auxiliary channel) are still ignored. */
+                if ($params['Channel'] == $llamada->actualchannel && !$llamada->atxfer_hold) {
+                    $this->_log->output('INFO: '.__METHOD__.': cliente colgó mientras '.
+                        'estaba en HOLD sin ParkedCallGiveUp, finalizando llamada | '.
+                        'EN: caller hung up while OnHold with no ParkedCallGiveUp, '.
+                        'finalizing call. channel='.$params['Channel'].
+                        ' uniqueid='.$params['Uniqueid'].' call_uid='.$llamada->uniqueid);
+                    /* Limpiar estado de hold (cierra el registro de auditoría de
+                     * hold) y luego finalizar el seguimiento. | EN: clear hold state
+                     * (closes the hold audit record) then finalize tracking. */
+                    $llamada->llamadaRegresaHold($this->_ami, $params['local_timestamp_received']);
+                    $llamada->llamadaFinalizaSeguimiento(
+                        $params['local_timestamp_received'],
+                        $this->_config['dialer']['llamada_corta']);
+                } else if ($this->DEBUG) {
                     $this->_log->output('DEBUG: '.__METHOD__.': se ignora Hangup para llamada que se envía a HOLD. | EN: ignoring Hangup for call that is being sent to HOLD.');
                 }
             } else {
