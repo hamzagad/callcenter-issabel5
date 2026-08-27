@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Issabel Call Center module for Issabel PBX - a predictive dialer and call center solution built on Asterisk PBX. Runs on Centos 7 Rocky 8 with PHP 5.4 - 7.4, Asterisk 11/13/18, and MariaDB.
+Issabel Call Center module for Issabel PBX - a predictive dialer and call center solution built on Asterisk PBX. Runs on Rocky 8 with PHP 7.4, Asterisk 18, and MariaDB.
 
 ## Installation Commands
 
@@ -85,6 +85,8 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 
 ## Development Notes
 
+- This is a test machine and you can take any test action you want
+- Outbound calls dialer logic explained in DIALER_LOGIC.md if needed. 
 - Dialer runs as `asterisk` user (refuses to run as root)
 - Dialer logs: `/opt/issabel/dialer/dialerd.log`
 - WebServer logs: `/var/log/httpd/ssl_error_log`
@@ -97,10 +99,10 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Asterisk conf files: `/etc/asterisk/`
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
 - Always use English language for the added code, comments, variables, and functions, but logs should be added in En and Es
-- TODOs are always added to TODO.md file
 - Changes are always stored at CHANGES.md file
+- TODOs are always added to TODO.md file
 - Date and time are always calculated in PHP, it should not used as query function
-- **IMPORTANT**: Always modify the live system, don't copy the modified files the repo unless I explicitly asked
+- **IMPORTANT**: Always modify the live system, don't copy the modified files the repo unless the user explicitly ask
 - **IMPORTANT**: Always check your modifications will not affect any other functionality
 - **IMPORTANT**: Always use `/bin/cp` instead of `cp` for file operations to avoid shell alias issues
 - **IMPORTANT**: Always provide the test steps, and provide the grep command to collect the required logs
