@@ -2,7 +2,7 @@
 
 ---
 
-## 56. Fix Stuck Call When Parked Caller Hangs Up On Hold
+## 55. Fix Stuck Call When Parked Caller Hangs Up On Hold
 **Date**: 2026-06-03
 
 **Bug**: A call could remain stuck on an agent indefinitely (agent locked to a dead call; `current_call_entry` row never cleared, `call_entry.status` left as `activa` with `datetime_end=NULL`).
@@ -20,7 +20,7 @@ The trigger in the field: FreePBX parking `parkingtime` (45s, default lot, `come
 
 ---
 
-## 55. SQLWorkerProcess Pending-Action Queue Deadlock (Agent Console Freeze)
+## 54. SQLWorkerProcess Pending-Action Queue Deadlock (Agent Console Freeze)
 **Date**: 2026-08-13
 
 **Problem**: A single database action that could never succeed permanently blocked the dialer's pending-action queue, freezing every agent console. Observed symptoms: after accepting the login call the console stayed on the login page instead of switching to the session page, and incoming call data never appeared — both only recovered with a manual page refresh, and fully only after a dialer restart.
@@ -88,7 +88,7 @@ grep "no todas las tareas han terminado" /opt/issabel/dialer/dialerd.log
 
 ---
 
-## 54. Popup External URL on Call Hangup
+## 53. Popup External URL on Call Hangup
 **Date**: 2026-05-14
 
 **Feature**: Allow a campaign External URL to open **after the call hangs up** (on the `agentunlinked` event), in addition to the existing on-connect behavior. The three v5 URL slots were previously wired exclusively to call startup (`agentlinked`); this adds hangup-time delivery as a per-URL option. Ported from a v4 customization.
@@ -127,7 +127,7 @@ tail -f /opt/issabel/dialer/dialerd.log | grep -i 'agentunlinked\|url\|opentype'
 
 ---
 
-## 53. Auto-Popup External URL Option
+## 52. Auto-Popup External URL Option
 **Date**: 2026-05-11
 
 **Problem**: The original (v1) call center auto-opened the campaign External URL on call connect via `window.open(url, '_blank')`. v5 added support for up to three URLs per campaign and replaced auto-popup with a click button to avoid popup-blocker storms — but this removed the auto-popup behavior some deployments still need.
@@ -158,7 +158,7 @@ tail -f /opt/issabel/dialer/dialerd.log | grep -i 'url\|opentype'
 
 ---
 
-## 52. Remove Webphone from Agent Console
+## 51. Remove Webphone from Agent Console
 **Date**: 2026-04-09
 
 **Problem**: Webphone integration was embedded in the agent console, tightly coupling it to a specific WebRTC client (mhrgl.com) and requiring the external webphone module.
