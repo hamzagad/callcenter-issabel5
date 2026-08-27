@@ -84,16 +84,6 @@ function _moduleContent(&$smarty, $module_name)
         break;
     }
 
-    // Pro enhancement point
-    $proFile = "modules/$module_name/pro/ProCampaign.class.php";
-    if (file_exists($proFile)) {
-        try {
-            require_once $proFile;
-            $pro = new ProCampaign();
-            $contenidoModulo = $pro->enhanceOutput($contenidoModulo, $smarty);
-        } catch (Exception $e) { /* community continues */ }
-    }
-
     return $contenidoModulo;
 }
 
