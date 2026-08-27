@@ -39,15 +39,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: Implement `eccp_authorized_clients` table for agent authorization. The table exists and is used for authorization lookup, but could be expanded for IP/client-based authorization.
 * **Status**: Partially Solved
 
-### XSS in Debug Function
-
-* **Type**: Bug
-* **Urgency**: High
-* **Date Added**: 2026-03-07 (Change #39)
-* **Location**: `issabel2.lib.php:411-413`
-* **Description**: Fix XSS vulnerability - use `htmlspecialchars` instead of manual escaping in `_cc_debug_flush_html()`. Only exploitable when debug mode is enabled.
-* **Status**: Untouched
-
 ### Attended Transfer for Agent Type Login
 
 * **Type**: Feature

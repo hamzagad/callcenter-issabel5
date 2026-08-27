@@ -2,6 +2,57 @@
 
 ---
 
+## 57. Fix XSS in Agent Console Debug Function
+**Date**: 2026-08-28
+
+**Bug**: Resolves the "XSS in Debug Function" TODO (High, added 2026-03-07 /
+Change #39). `_cc_debug_flush_html()` (in `issabel2.lib.php`, included by 31
+web modules) collects debug messages — which can contain raw, attacker-
+controlled `$_GET`/`$_POST` data (e.g. `agent_console/index.php`'s module-entry
+logging: `_debug("module entry: $_GET = ...\n$_POST = ...")`) — and inlines
+them as JS string literals into an inline `<script>...</script>` block
+appended to the agent-console HTML page whenever `$GLOBALS['CALLCENTER_DEBUG']`
+is enabled. The escaping was a hand-rolled `str_replace()` over 5 characters
+(`\`, `'`, `\n`, `\r`, `</`) — fragile, non-standard, and only correct by
+careful (undocumented) ordering rather than any verifiable guarantee.
+
+**Verification performed** (live box, `CALLCENTER_DEBUG` enabled, real logged-
+in agent-console session):
+- Confirmed end-to-end reachability with a real HTTP request carrying an XSS
+  payload in `$_GET` — it was reflected into the debug `console.log()` output
+  as expected.
+- Manually traced the old 5-item `str_replace` (incl. PHP's documented
+  array-replace cascading-substitution pitfall) and tested a payload matrix
+  (script-tag breakout, quote/backslash mixes, mixed-case `</SCRIPT>`, a
+  `U+2028` line separator, and a benign message) against both the old and new
+  code. Found no working bypass of the *old* code with this deployment's
+  config (page is confirmed UTF-8 via `AddDefaultCharset UTF-8` + the page's
+  own `<meta charset=utf-8>`, which rules out the classic multi-byte-charset
+  trailing-byte bypass class this style of manual escaping is normally
+  vulnerable to) — so this is hardening of a real anti-pattern rather than a
+  fix for an actively pop-alert-today exploit; still correctly filed as a
+  security bug given how easily this class of hand-rolled escaping breaks.
+- Confirmed only 4 call sites exist, all in `agent_console/index.php` (lines
+  292, 942, 1052, 1075), always `... . _cc_debug_flush_html()`; nothing
+  parses the console output client-side, so the return contract (string,
+  `<script>...console.log(...);...</script>`) is unchanged and all call
+  sites keep working — the benign-message case logs identically before/after.
+- `php -l` clean on both the live and repo copies after the edit.
+
+**Fix**: Replaced the manual escaping with `json_encode()` (flags
+`JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT |
+JSON_UNESCAPED_UNICODE`), with a safe placeholder fallback if encoding fails
+(e.g. invalid UTF-8 in a message). This is strictly stronger than the old
+code: `<`/`>` are hex-escaped outright (old code left raw `<` characters,
+relying only on `/`-escaping) and the `U+2028`/`U+2029` gap is closed.
+
+**Files affected**:
+- `modules/agent_console/libs/issabel2.lib.php` — `_cc_debug_flush_html()`
+  (also applied to the live served copy at
+  `/var/www/html/modules/agent_console/libs/issabel2.lib.php`)
+
+---
+
 ## 56. Asterisk Restart Detection in CampaignProcess
 **Date**: 2026-08-28
 
