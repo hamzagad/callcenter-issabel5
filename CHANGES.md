@@ -2,6 +2,33 @@
 
 ---
 
+## 56. Asterisk Restart Detection in CampaignProcess
+**Date**: 2026-08-28
+
+**Feature**: Resolves the "Asterisk Restart Detection" TODO (Critical, pre-2011). When Asterisk restarts while the dialer keeps running, it forgets every in-progress call and logged-in agent, but `CampaignProcess` had no way to know that had happened — the reconnect-succeeded branch of `procedimientoDemonio()` was a stub `TODO` comment. In practice this meant `calls` rows left in `Placing`/`Ringing`/`Success`(connected)/`OnHold` from before the restart kept counting against `max_canales` for up to 5 minutes (`_cleanOrphanedPlacingCalls()`) or 2 hours (`_cleanOrphanedConnectedCalls()`) — their normal timeout-based sweep — and stale agent-login state in the DB was never re-verified.
+
+`AMIEventProcess.class.php` already solves the equivalent problem for the calls/agents *it* tracks, by polling `CoreStatus` for `CoreStartupDate`/`CoreStartupTime` on every AMI reconnect and comparing against the previously seen value. `CampaignProcess` holds an independent AMI socket and reconnects on its own, so it needed the same detection.
+
+**Fix**: Ported the `CoreStatus`-based restart-detection technique into `CampaignProcess::_iniciarConexionAMI()` (new `_asteriskStartTime`/`_bReinicioAsterisk` fields, mirroring `AMIEventProcess`). When a restart is detected on reconnect, `procedimientoDemonio()` now:
+- Calls `_cleanOrphanedPlacingCalls(0)` and `_cleanOrphanedConnectedCalls(0)` — both helpers gained an optional timeout-override parameter (default unchanged: 300s / 7200s for the normal periodic sweep) so a confirmed restart flushes every such call immediately instead of waiting for the timeout, since none of them can possibly still be in progress.
+- Sends `msg_SQLWorkerProcess_requerir_nuevaListaAgentes()` (the same async message `AMIEventProcess` already sends after its own reconnect/`Reload`) to force a fresh, authoritative check of which agents are actually still logged in.
+
+No new inter-process message type was needed — `CampaignProcess` and `AMIEventProcess` already reconnect to AMI independently, so each detects the same physical restart on its own.
+
+**Files affected**:
+- `setup/dialer_process/dialer/CampaignProcess.class.php` — `_iniciarConexionAMI()` restart detection; `procedimientoDemonio()` reconnect-succeeded branch; `_cleanOrphanedPlacingCalls()`/`_cleanOrphanedConnectedCalls()` gained an optional timeout parameter.
+
+**Log collection**:
+```bash
+# Restart detected and handled
+grep -E "Asterisk fue reiniciado|Asterisk was restarted|esta instancia de Asterisk ha sido reiniciada" /opt/issabel/dialer/dialerd.log | tail -20
+
+# Immediate cleanup right after a restart (not after 5min/2h)
+grep -E "cleaned .* orphaned (Placing/Ringing|connected) calls" /opt/issabel/dialer/dialerd.log | tail -20
+```
+
+---
+
 ## 55. Fix Stuck Call When Parked Caller Hangs Up On Hold
 **Date**: 2026-06-03
 

@@ -74,6 +74,18 @@ class CampaignProcess extends TuberiaProcess
     private $_asteriskVersion = array(1, 4, 0, 0);
     private $_compat = NULL; // AsteriskCompat instance for version-aware behavior
 
+    /* Fecha/hora de arranque de esta instancia de Asterisk, según CoreStatus.
+     * Se usa para detectar reinicios de Asterisk entre reconexiones AMI.
+     * Startup date/time of this Asterisk instance, per CoreStatus. Used to
+     * detect Asterisk restarts across AMI reconnections. */
+    private $_asteriskStartTime = NULL;
+
+    /* VERDADERO si se detectó que Asterisk fue reiniciado y todavía no se ha
+     * procesado la resincronización correspondiente.
+     * TRUE if an Asterisk restart was detected and the corresponding
+     * resynchronization has not been processed yet. */
+    private $_bReinicioAsterisk = FALSE;
+
     /* VERDADERO si al momento de verificar actividad en tubería, no habían
      * mensajes pendientes. Sólo cuando se esté ocioso se intentarán verificar
      * nuevas llamadas de la campaña.
@@ -308,17 +320,32 @@ class CampaignProcess extends TuberiaProcess
             } else {
                 $this->_log->output('INFO: conexión a Asterisk restaurada, se reinicia operación normal. | EN: Asterisk connection restored, resuming normal operation.');
 
-                /* TODO: si el Asterisk ha sido reiniciado, probablemente ha
-                 * olvidado la totalidad de las llamadas en curso, así como los
-                 * agentes que estaban logoneados. Es necesario implementar una
-                 * verificación de si los agentes están logoneados, y resetear
-                 * todo el estado del marcador si la información interna del
-                 * marcador está desactualizada.
-                 * TODO: if Asterisk has been restarted, it has probably forgotten
-                 * all ongoing calls as well as agents that were logged in. It is
-                 * necessary to implement a check for whether agents are logged in,
-                 * and reset all dialer state if the dialer's internal information
-                 * is outdated. */
+                if ($this->_bReinicioAsterisk) {
+                    $this->_bReinicioAsterisk = FALSE;
+
+                    $this->_log->output('WARN: Asterisk fue reiniciado, se fuerza limpieza inmediata de '.
+                        'llamadas huérfanas y se solicita verificación de agentes logoneados. | '.
+                        'EN: Asterisk was restarted, forcing immediate orphaned-call cleanup and '.
+                        'requesting a login verification for logged-in agents.');
+
+                    // Todas las llamadas Placing/Ringing/Success(sin end_time)/OnHold son
+                    // huérfanas con certeza: Asterisk acaba de reiniciarse y no puede tener
+                    // memoria de ellas, así que se limpian de inmediato sin esperar los
+                    // timeouts normales (5 minutos / 2 horas).
+                    // All Placing/Ringing/Success(no end_time)/OnHold calls are certainly
+                    // orphaned: Asterisk just restarted and cannot have any memory of them,
+                    // so they are cleaned immediately instead of waiting for the normal
+                    // timeouts (5 minutes / 2 hours).
+                    $this->_cleanOrphanedPlacingCalls(0);
+                    $this->_cleanOrphanedConnectedCalls(0);
+
+                    // Forzar una verificación fresca de qué agentes siguen realmente
+                    // logoneados; el estado en DB puede seguir marcándolos como
+                    // logoneados de antes del reinicio.
+                    // Force a fresh check of which agents are actually still logged in;
+                    // DB state may still show them logged in from before the restart.
+                    $this->_tuberia->msg_SQLWorkerProcess_requerir_nuevaListaAgentes();
+                }
             }
         }
 
@@ -403,6 +430,45 @@ class CampaignProcess extends TuberiaProcess
                 $this->_log->output("INFO: no hay soporte CoreSettings en Asterisk Manager, se asume Asterisk 1.4.x. | EN: no CoreSettings support in Asterisk Manager, assuming Asterisk 1.4.x.");
             }
             $this->_compat = new AsteriskCompat($this->_asteriskVersion);
+
+            /* Ejecutar el comando CoreStatus para obtener la fecha de arranque de
+             * Asterisk. Si se tiene una fecha previa distinta a la obtenida aquí,
+             * se concluye que Asterisk ha sido reiniciado. Durante el inicio
+             * temprano de Asterisk, la fecha de inicio todavía no está lista y
+             * se reportará como 1969-12-31 o similar. Se debe de repetir la llamada
+             * hasta que reporte una fecha válida.
+             * Execute CoreStatus command to get Asterisk startup date.
+             * If a previous different date is obtained than what we have here,
+             * it is concluded that Asterisk has been restarted. During early
+             * Asterisk startup, the start date is not yet ready and
+             * will be reported as 1969-12-31 or similar. The call must be repeated
+             * until it reports a valid date. */
+            $sFechaInicio = ''; $bFechaValida = FALSE;
+            do {
+                $r = $astman->CoreStatus();
+                if (isset($r['Response']) && $r['Response'] == 'Success') {
+                    $sFechaInicio = $r['CoreStartupDate'].' '.$r['CoreStartupTime'];
+                    $this->_log->output('INFO: esta instancia de Asterisk arrancó en: '.$sFechaInicio.' | EN: this Asterisk instance started at: '.$sFechaInicio);
+                } else {
+                    $this->_log->output('INFO: esta versión de Asterisk no soporta CoreStatus | EN: this Asterisk version does not support CoreStatus');
+                    break;
+                }
+                $regs = NULL;
+                if (preg_match('/^(\d+)/', $sFechaInicio, $regs) && (int)$regs[1] <= 1970) {
+                    $this->_log->output('INFO: fecha de inicio de Asterisk no está lista, se espera | EN: Asterisk start date not ready yet, waiting');
+                    usleep(1 * 1000000);
+                } else {
+                    $bFechaValida = TRUE;
+                }
+            } while (!$bFechaValida);
+
+            if (is_null($this->_asteriskStartTime)) {
+                $this->_asteriskStartTime = $sFechaInicio;
+            } elseif ($this->_asteriskStartTime != $sFechaInicio) {
+                $this->_log->output('INFO: esta instancia de Asterisk ha sido reiniciada, se eliminará información obsoleta... | EN: this Asterisk instance has been restarted, removing obsolete information...');
+                $this->_asteriskStartTime = $sFechaInicio;
+                $this->_bReinicioAsterisk = TRUE;
+            }
 
             /* CampaignProcess no tiene manejadores de eventos AMI. Aunque el
              * objeto Predictor hace uso de eventos para recoger el resultado
@@ -2407,13 +2473,18 @@ PETICION_LLAMADAS_AGENTE;
      * @param int $campaignId The campaign ID
      * @return int Number of active calls
      */
-    private function _cleanOrphanedPlacingCalls()
+    /**
+     * @param int $iPlacingTimeout Seconds a Placing/Ringing call may be idle
+     *   before being considered orphaned. Pass 0 (e.g. right after a detected
+     *   Asterisk restart) to flush every such call immediately, since none of
+     *   them can possibly still be in progress.
+     */
+    private function _cleanOrphanedPlacingCalls($iPlacingTimeout = 300)
     {
-        // Timeout for Placing calls: 5 minutes (300 seconds)
+        // Timeout for Placing calls: 5 minutes (300 seconds) by default.
         // Calls stuck in Placing for longer are considered orphaned
-        // Timeout para llamadas Placing: 5 minutos (300 segundos)
+        // Timeout para llamadas Placing: 5 minutos (300 segundos) por omisión.
         // Las llamadas en Placing por más tiempo se consideran huérfanas
-        $iPlacingTimeout = 300;
         $sThreshold = date('Y-m-d H:i:s', time() - $iPlacingTimeout);
 
         $sPeticion = "UPDATE calls SET status = 'Failure', failure_cause = 0, "
@@ -2438,11 +2509,16 @@ PETICION_LLAMADAS_AGENTE;
      * Limpiar llamadas conectadas huérfanas que nunca recibieron end_time.
      * Son llamadas que fueron conectadas pero el evento Hangup se perdió.
      */
-    private function _cleanOrphanedConnectedCalls()
+    /**
+     * @param int $iConnectedTimeout Seconds a connected call may be idle
+     *   before being considered orphaned. Pass 0 (e.g. right after a detected
+     *   Asterisk restart) to flush every such call immediately, since none of
+     *   them can possibly still be connected.
+     */
+    private function _cleanOrphanedConnectedCalls($iConnectedTimeout = 7200)
     {
-        // Connected calls older than 2 hours with no end_time are definitely orphaned
-        // Llamadas conectadas de más de 2 horas sin end_time son definitivamente huérfanas
-        $iConnectedTimeout = 7200; // 2 hours in seconds
+        // Connected calls older than 2 hours (default) with no end_time are definitely orphaned
+        // Llamadas conectadas de más de 2 horas (por omisión) sin end_time son definitivamente huérfanas
         $sThreshold = date('Y-m-d H:i:s', time() - $iConnectedTimeout);
 
         $sPeticion = "UPDATE calls SET status = 'Hangup', end_time = start_time "

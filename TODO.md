@@ -17,15 +17,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: Password sent over unencrypted connection (plaintext or hash). The FIXME comment notes that sending a hash vs plaintext on an unencrypted connection is equally insecure since both can be captured with a sniffer.
 * **Status**: Untouched
 
-### Asterisk Restart Detection
-
-* **Type**: Feature
-* **Urgency**: Critical
-* **Date Added**: Original (pre-2011)
-* **Location**: `CampaignProcess.class.php:271-281`
-* **Description**: Detect Asterisk restart and re-synchronize dialer state. When Asterisk is restarted, it forgets all in-progress calls and logged-in agents. A detection and resynchronization mechanism is needed.
-* **Status**: Untouched
-
 ---
 
 ## High
