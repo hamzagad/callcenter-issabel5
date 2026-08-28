@@ -2,6 +2,145 @@
 
 ---
 
+## 59. Attended Transfer for Agent Type Login
+**Date**: 2026-08-28
+
+Resolves the "Attended Transfer for Agent Type Login" TODO (High, added
+2026-03-09). Change #16 had hidden the "Attended transfer" radio button from
+Agent-type (`app_agent_pool`) logins over "known edge cases"; those edge
+cases are fixed below and the option is re-enabled.
+
+### Bugs fixed
+
+- **Stranded customer / lost call tracking.** The consultation never went
+  through `llamadaEnviadaHold()`, so `uniqueidlink` still pointed at the
+  agent's `login_channel` for the whole consultation. Any real hangup of the
+  agent's phone — including the intended "hang up to complete" path — was
+  matched as a customer hangup, finalizing the call in the DB while the
+  customer was still live in `[atxfer-hold]`'s infinite MOH loop. No watchdog
+  existed, so the customer stayed there indefinitely, holding a trunk slot.
+  New `msg_Hangup()` branch (`_manejarHangupLoginChannelEnConsulta()`) now
+  handles this, releasing without finalizing when the colleague had already
+  answered so the ongoing colleague↔customer call still finalizes with its
+  real duration.
+- **Stale `transfer` column.** `_registrarTransferencia()` stamps
+  `transfer=<exten>` when the consultation *starts*, and nothing cleared it
+  when the consultation failed (busy/no-answer/declined/colleague hung up
+  first — no code branched on `${DIALSTATUS}` anywhere). The agent's next,
+  entirely normal hangup was then misdetected as "transfer completed": the
+  customer was hung up and the call recorded as transferred to a colleague
+  who never took it. New `_limpiarTransferPendiente()` clears it on every
+  natural consultation end.
+- **No "colleague answered" signal.** Nothing detected the consult leg
+  answering, so `isInConsultation` stayed true for the entire consultation
+  and clicking Hangup mid-conversation always cancelled. Completing a
+  transfer from the console was impossible — only a literal phone hangup did
+  it. New `U(atxfer-consult-answered^...)` gosub emits a
+  `ConsultationAnswered` UserEvent at answer time, carrying the colleague's
+  channel, which feeds a new dual-`Redirect()` "complete transfer" path.
+- **Forced agent logoff mid-transfer.** The periodic `Agents` reconciliation
+  saw `AGENT_LOGGEDOFF` (legitimate but temporary — the login channel is
+  deliberately redirected out of the `AgentLogin()` bridge) and force-logged
+  the agent off, leaving them stuck "oncall" and unable to log back in until
+  the transferred call ended. Now skipped while a transfer is in progress,
+  and `_ejecutarLogoffAgente()` finalizes the call if its `Hangup` is
+  rejected, so the agent can never be left wedged.
+- **Attended-transfer hold ignored the queue MOH.** `[atxfer-hold]` hardcoded
+  `MusicOnHold(default)`, overriding the `CHANNEL(musicclass)` the queue had
+  set. Now `MusicOnHold()`, which inherits it.
+
+### UI
+
+- Re-enabled the "Attended transfer" option for Agent-type logins
+  (`{if !$IS_AGENT_TYPE}` guard removed).
+- The Hangup button reflects what it will do: amber **Cancel transfer**
+  while the colleague rings, green **Complete transfer** once they answer,
+  reverting afterwards. Suppressed for callback-type logins, where that path
+  makes no ringing/answered distinction and hanging up mid-consultation
+  disconnects the customer (see the "Attended Transfer for Callback Type
+  Login" TODO).
+- A transient notice reports why a consultation ended by itself — busy, no
+  answer, or unavailable — from the consult `Dial()`'s `${DIALSTATUS}`.
+
+### Event-loss resync (the reason the UI cues are reliable)
+
+`ConsultationStart/Answered/End` reach only the ECCP clients connected at
+that instant, and a consultation ending usually coincides with a burst of
+other events that leaves the console's long poll mid-reconnect — so the
+event was frequently dropped, most reliably with a busy colleague, leaving
+the button stuck until a page reload. The dialer now reports the
+consultation state (`none`/`ringing`/`answered`) and the last failure
+`DIALSTATUS` in the agent status the console already polls, and
+`manejarSesionActiva_checkStatus()` reconciles and synthesizes the missing
+event — the same pattern already used for the break and hold states. A
+consultation flag is reported only while the agent still has an active call,
+so a leaked flag (possible on the callback path) can never wedge the button.
+
+### Also
+
+- Removed dead debug code in `Llamada::llamadaFinalizaSeguimiento()` that
+  rewrote `/var/www/html/modules/agent_console/archivo.txt` on every hangup
+  in the system and re-sent a duplicate `sqlupdatecalls`. Nothing read it.
+
+### Files affected
+
+- `setup/installer.php` → `/etc/asterisk/extensions_custom.conf`:
+  `[atxfer-consult]` gains `/n` + `U(atxfer-consult-answered^...)` and
+  `Status: ${DIALSTATUS}` on its `ConsultationEnd`; new
+  `[atxfer-consult-answered]`; `[atxfer-hold]` MOH fix.
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` →
+  `/opt/issabel/dialer/`: consultation-answered tracking + RPC,
+  `_manejarHangupLoginChannelEnConsulta()`, `_limpiarTransferPendiente()`,
+  `_estadoConsultaAgente()`, `AgentsComplete` guard, `_ejecutarLogoffAgente()`
+  hardening.
+- `setup/dialer_process/dialer/ECCPConn.class.php` → `/opt/issabel/dialer/`:
+  dual-`Redirect()` complete-transfer branch; consultation state/reason in
+  `getagentstatus`.
+- `setup/dialer_process/dialer/ECCPProxyConn.class.php` →
+  `/opt/issabel/dialer/`: `notificarEvento_ConsultationAnswered()`,
+  reason on `ConsultationEnd`.
+- `setup/dialer_process/dialer/Llamada.class.php` → `/opt/issabel/dialer/`:
+  dead-code removal.
+- `modules/agent_console/{index.php,libs/paloSantoConsola.class.php}` and
+  `themes/default/{agent_console.tpl,js/javascript.js,css/issabel-callcenter.css}`
+  → `/var/www/html/modules/agent_console/`: event plumbing, state resync,
+  button cues, notices.
+
+### Test steps
+
+Agent-type agent on a live call, "Attended transfer" → colleague extension:
+
+1. Colleague answers → click **Complete transfer** → colleague and customer
+   bridged, agent back to Ready with its session preserved.
+2. Click **Cancel transfer** while ringing → agent reconnected to customer.
+3. Colleague busy / no answer / unavailable → agent auto-reconnected, notice
+   shown, button reverts; the *next* hangup ends a normal call and is not
+   recorded as a transfer.
+4. Customer hangs up mid-consultation → consultation torn down, no orphaned
+   channel.
+5. Two concurrent customers → completing the first leaves it running between
+   colleague and customer while the agent takes the next call.
+6. Confirm the held customer hears the queue's MOH class, not `default`.
+
+Verified live end-to-end against a real external customer, agent `Agent/1001`
+and colleagues `102`/`103`, including a ~2.5-minute conversation before
+completing; `call_entry` rows confirmed `transfer`, `id_agent`, `status` and
+`duration` correct.
+
+```bash
+grep -E "ConsultationAnswered|ConsultationEnd UserEvent received|CANCELAR CONSULTA|COMPLETAR TRANSFERENCIA|login_channel hangup during atxfer-consult|reporta AGENT_LOGGEDOFF pero esta en transferencia|Forced agent logoff" /opt/issabel/dialer/dialerd.log
+grep "consultation state resynced" /var/log/callcenter-module/debug.log
+```
+
+### Known limitation
+
+Completing a transfer to a plain extension finalizes call tracking at the
+hand-off moment, so the recorded duration excludes the colleague↔customer
+conversation. This is the pre-existing behaviour described by the "Transfer
+Agent Attribution" TODO and is unchanged here.
+
+---
+
 ## 58. Outgoing Campaigns List Improvements
 **Date**: 2026-08-28
 

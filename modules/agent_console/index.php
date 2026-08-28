@@ -680,6 +680,11 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'LBL_TRANSFER_BLIND'            =>  _tr('Blind transfer'),
         'LBL_TRANSFER_ATTENDED'         =>  _tr('Attended transfer'),
         'LBL_TRANSFER_AGENT'            =>  _tr('Transfer to agent'),
+        'LBL_COMPLETE_TRANSFER'         =>  _tr('Complete transfer'),
+        'LBL_CANCEL_TRANSFER'           =>  _tr('Cancel transfer'),
+        'MSG_TRANSFER_BUSY'             =>  _tr('Cannot transfer: colleague is busy'),
+        'MSG_TRANSFER_NOANSWER'         =>  _tr('Cannot transfer: colleague did not answer'),
+        'MSG_TRANSFER_UNAVAILABLE'      =>  _tr('Cannot transfer: colleague is unavailable'),
         'TITLE_SCHEDULE_CALL'           =>  _tr('Schedule call'),
         'LBL_SCHEDULE_CAMPAIGN_END'     =>  _tr('Call at end of campaign'),
         'LBL_SCHEDULE_BYDATE'           =>  _tr('Schedule at date'),
@@ -706,6 +711,14 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
         'IS_AGENT_TYPE'                 =>  (strpos($_SESSION['callcenter']['agente'], 'Agent/') === 0),
     ));
     $estadoInicial = array(
+        /* 'consultation' se omite deliberadamente: la consola arranca en
+         * 'none' y, si el agente ya estaba en una consulta al cargar la
+         * página, el primer poll detecta la discrepancia y sintetiza el
+         * evento, dejando el botón Hangup con la etiqueta correcta. */
+        /* EN: 'consultation' is deliberately omitted: the console starts at
+         * 'none' and, if the agent was already in a consultation when the page
+         * loaded, the first poll spots the mismatch and synthesizes the event,
+         * leaving the Hangup button with the right label. */
         'onhold'            =>  $estado['onhold'],
         'break_id'          =>  is_null($estado['pauseinfo']) ? NULL : $estado['pauseinfo']['pauseid'],
         'calltype'          =>  NULL,
@@ -1466,6 +1479,10 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     $estadoCliente['waitingcall'] = isset($estadoCliente['waitingcall'])
         ? ($estadoCliente['waitingcall'] == 'true')
         : false;
+    if (!isset($estadoCliente['consultation']) ||
+            !in_array($estadoCliente['consultation'], array('none', 'ringing', 'answered'))) {
+        $estadoCliente['consultation'] = 'none';
+    }
 
     _debug(__FUNCTION__.' after sanitizing clientstate='.print_r($estadoCliente, TRUE));
 
@@ -1593,6 +1610,48 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
         $respuesta[] = construirRespuesta_agentunlinked($smarty, $sDirLocalPlantillas,
             $oPaloConsola, $callinfoHangup, $infoLlamadaHangup, $infoCampania);
         _debug(__FUNCTION__.' initial: agent has ended call');
+    }
+
+    /* Verificación de la consistencia del estado de consulta de transferencia
+     * atendida. Los eventos ConsultationStart/Answered/End sólo llegan a los
+     * clientes ECCP conectados en ese instante, así que la consola puede
+     * perder uno mientras su long-poll se está reconectando y quedarse con el
+     * botón Hangup mostrando "Cancel transfer" hasta recargar la página. Aquí
+     * se compara contra el estado real y se sintetiza el evento faltante, tal
+     * como ya se hace arriba con break y hold. */
+    /* EN: Attended-transfer consultation state consistency check. The
+     * ConsultationStart/Answered/End events only reach ECCP clients connected
+     * at that very instant, so the console can miss one while its long poll is
+     * reconnecting and be left with the Hangup button stuck showing "Cancel
+     * transfer" until the page is reloaded. Compare against the real state and
+     * synthesize the missing event, exactly as break and hold do above. */
+    $sConsultaReal = isset($estado['consultation']) ? $estado['consultation'] : 'none';
+    if ($sConsultaReal != $estadoCliente['consultation']) {
+        switch ($sConsultaReal) {
+        case 'ringing':
+            $respuesta[] = array('event' => 'consultationstart');
+            break;
+        case 'answered':
+            $respuesta[] = array('event' => 'consultationanswered');
+            break;
+        default:
+            /* Se adjunta el motivo guardado por el dialer (BUSY/NOANSWER/...)
+             * para que el aviso al agente aparezca también cuando el evento
+             * ConsultationEnd original se perdió, que es justo lo que ocurre
+             * casi siempre con el colega ocupado. */
+            /* EN: Attach the reason the dialer stored (BUSY/NOANSWER/...) so
+             * the agent still gets the notice when the original ConsultationEnd
+             * event was lost, which is exactly what almost always happens with
+             * a busy colleague. */
+            $respuesta[] = array(
+                'event'  => 'consultationend',
+                'reason' => (isset($estado['consultation_reason']) && $estado['consultation_reason'] !== '')
+                    ? $estado['consultation_reason'] : NULL,
+            );
+            break;
+        }
+        _debug(__FUNCTION__.' initial: consultation state resynced to '.$sConsultaReal.
+            ' reason='.(isset($estado['consultation_reason']) ? $estado['consultation_reason'] : '(none)'));
     }
 
     // Verificación de espera de llamada
@@ -1785,7 +1844,14 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
                 break;
             case 'consultationend':
                 if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
-                $respuestaEventos['consultation'] = array('event' => 'consultationend');
+                $respuestaEventos['consultation'] = array(
+                    'event'  => 'consultationend',
+                    'reason' => isset($evento['reason']) ? $evento['reason'] : NULL,
+                );
+                break;
+            case 'consultationanswered':
+                if (!(isset($evento['agent_number']) && $evento['agent_number'] == $sAgente)) break;
+                $respuestaEventos['consultation'] = array('event' => 'consultationanswered');
                 break;
             }
         } // while(...)

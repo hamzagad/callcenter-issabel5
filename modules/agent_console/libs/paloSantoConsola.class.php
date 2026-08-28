@@ -599,6 +599,10 @@ class PaloSantoConsola
             'channel'           =>  isset($connStatus->channel) ? (string)$connStatus->channel : NULL,
             'extension'         =>  isset($connStatus->extension) ? (string)$connStatus->extension : NULL,
             'onhold'            =>  isset($connStatus->onhold) ? ($connStatus->onhold == 1) : FALSE,
+            // Attended-transfer consultation state: none/ringing/answered.
+            'consultation'      =>  isset($connStatus->consultation) ? (string)$connStatus->consultation : 'none',
+            // DIALSTATUS of the last failed consultation (BUSY/NOANSWER/...).
+            'consultation_reason' => isset($connStatus->consultation_reason) ? (string)$connStatus->consultation_reason : NULL,
             'callchannel'       =>  isset($connStatus->callchannel) ? (string)$connStatus->callchannel : NULL, // <-- duplicado en remote_channel // EN: duplicated in remote_channel
             'pauseinfo'         =>  isset($connStatus->pauseinfo) ? array(
                 'pauseid'       =>  (int)$connStatus->pauseinfo->pauseid,
@@ -1210,7 +1214,12 @@ class PaloSantoConsola
                         $evento[$k] = isset($evt->$k) ? (int) $evt->$k : NULL;
                     break;
                 case 'consultationstart':
+                case 'consultationanswered':
+                    break;
                 case 'consultationend':
+                    // DIALSTATUS of the failed consult (BUSY/NOANSWER/...) if
+                    // the dialer supplied one, NULL otherwise.
+                    $evento['reason'] = isset($evt->reason) ? (string)$evt->reason : NULL;
                     break;
                 }
                 $listaEventos[] = $evento;

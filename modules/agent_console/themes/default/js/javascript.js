@@ -11,6 +11,13 @@ var schedule_call_error_msg_missing_date = '';
 var estadoCliente =
 {
 	onhold:		false,	// VERDADERO si el sistema está en hold
+	// Estado de la consulta de transferencia atendida: none/ringing/answered.
+	// Se reenvía al servidor en cada poll para poder resincronizar el botón
+	// Hangup si se perdió un evento Consultation*.
+	// EN: attended-transfer consultation state: none/ringing/answered. Echoed
+	// back to the server on every poll so the Hangup button can be resynced if
+	// a Consultation* event was missed.
+	consultation: 'none',
 	break_id:	null,	// Si != null, el ID del break en que está el agente
 	calltype:	null,	// Si != null, tipo de llamada incoming/outgoing
 	campaign_id:null,	// ID de la campaña a que pertenece la llamada atendida
@@ -39,6 +46,28 @@ var origShiftLogin = 0;     // Original seconds from server
 var origShiftBreak = 0;
 var origShiftHold = 0;
 var isHoldPause = false;    // True if current pause is hold-type
+var lblHangupDefault = null;      // #btn_hangup's normal label, captured at init
+var lblCompleteTransfer = null;   // Set from server-side translation in agent_console.tpl
+var lblCancelTransfer = null;     // Set from server-side translation in agent_console.tpl
+var msgTransferBusy = null;        // Set from server-side translation in agent_console.tpl
+var msgTransferNoAnswer = null;    // Set from server-side translation in agent_console.tpl
+var msgTransferUnavailable = null; // Set from server-side translation in agent_console.tpl
+/* TRUE sólo para logins tipo Agent (app_agent_pool). Las etiquetas
+ * "Cancel transfer"/"Complete transfer" del botón Hangup describen el
+ * comportamiento del flujo tipo Agent. Para agentes callback ese botón sigue
+ * otra ruta (ECCPConn::Request_agentauth_hangup) que no distingue "sonando" de
+ * "contestada": colgar durante la consulta desconecta al cliente en vez de
+ * cancelar, así que mostrar "Cancel transfer" invitaría al agente a perder la
+ * llamada. Hasta que esa ruta distinga ambos casos, el botón conserva su
+ * etiqueta normal para agentes callback. */
+/* EN: TRUE only for Agent-type (app_agent_pool) logins. The Hangup button's
+ * "Cancel transfer"/"Complete transfer" labels describe the Agent-type flow.
+ * Callback agents take a different path (ECCPConn::Request_agentauth_hangup)
+ * that draws no ringing/answered distinction: hanging up mid-consultation
+ * disconnects the customer instead of cancelling, so showing "Cancel transfer"
+ * would invite the agent to drop the call. Until that path distinguishes the
+ * two cases, the button keeps its normal label for callback agents. */
+var isAgentPoolType = false;
 
 // Shift filter variables (default: full day 00:00-23:59)
 var shiftFromHour = 0;
@@ -165,6 +194,7 @@ $(document).ready(function() {
     });
 
     $('#btn_hangup').button();
+    lblHangupDefault = $('#btn_hangup').button('option', 'label');
     $('#btn_hold').button();
     $('#btn_togglebreak').button();
     $('#btn_transfer').button();
@@ -333,6 +363,7 @@ function apply_form_styles()
 function initialize_client_state(nuevoEstado)
 {
 	estadoCliente.onhold = nuevoEstado.onhold;
+	estadoCliente.consultation = nuevoEstado.consultation || 'none';
 	estadoCliente.break_id = nuevoEstado.break_id;
 	estadoCliente.calltype = nuevoEstado.calltype;
 	estadoCliente.campaign_id = nuevoEstado.campaign_id;
@@ -1107,9 +1138,34 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.waitingcall = false;
 			break;
 		case 'consultationstart':
-			// Attended transfer consultation started - disable Hold/Transfer
+			// Attended transfer consultation started (colleague still
+			// ringing) - disable Hold/Transfer, and make clear that
+			// clicking Hangup now cancels the consultation.
+			estadoCliente.consultation = 'ringing';
 			$('#btn_hold').button('disable');
 			$('#btn_transfer').button('disable');
+			if (isAgentPoolType) {
+				if (lblCancelTransfer) {
+					$('#btn_hangup').button('option', 'label', lblCancelTransfer);
+				}
+				$('#btn_hangup').removeClass('issabel-callcenter-boton-completar-transferencia')
+					.addClass('issabel-callcenter-boton-cancelar-transferencia');
+			}
+			break;
+		case 'consultationanswered':
+			// Colleague picked up - clicking Hangup now completes the
+			// transfer (bridges colleague+customer) instead of cancelling
+			// it. Make that visible on the button itself.
+			estadoCliente.consultation = 'answered';
+			$('#btn_hold').button('disable');
+			$('#btn_transfer').button('disable');
+			if (isAgentPoolType) {
+				if (lblCompleteTransfer) {
+					$('#btn_hangup').button('option', 'label', lblCompleteTransfer);
+				}
+				$('#btn_hangup').removeClass('issabel-callcenter-boton-cancelar-transferencia')
+					.addClass('issabel-callcenter-boton-completar-transferencia');
+			}
 			break;
 		case 'consultationend':
 			// Consultation ended - re-enable all buttons only if the agent
@@ -1118,10 +1174,31 @@ function manejarRespuestaStatus(respuesta)
 			// during consultation (buttons should stay disabled).
 			// Use callid (not campaign_id) because incoming queue calls
 			// without a campaign have callid set but campaign_id == null.
+			estadoCliente.consultation = 'none';
+			$('#btn_hangup').button('option', 'label',
+				lblHangupDefault ? lblHangupDefault : $('#btn_hangup').text());
+			$('#btn_hangup').removeClass('issabel-callcenter-boton-cancelar-transferencia')
+				.removeClass('issabel-callcenter-boton-completar-transferencia');
 			if (estadoCliente.callid != null) {
 				$('#btn_hangup').button('enable');
 				$('#btn_hold').button('enable');
 				$('#btn_transfer').button('enable');
+			}
+			// If the consultation ended on its own (rather than the agent
+			// cancelling it, or completing it, or the customer hanging up),
+			// the dialer supplies the colleague Dial()'s DIALSTATUS - let the
+			// agent know why they are back with the customer.
+			switch (respuesta[i].reason) {
+			case 'BUSY':
+				if (msgTransferBusy) mostrar_mensaje_info(msgTransferBusy);
+				break;
+			case 'NOANSWER':
+				if (msgTransferNoAnswer) mostrar_mensaje_info(msgTransferNoAnswer);
+				break;
+			case 'CONGESTION':
+			case 'CHANUNAVAIL':
+				if (msgTransferUnavailable) mostrar_mensaje_info(msgTransferUnavailable);
+				break;
 			}
 			break;
 		}

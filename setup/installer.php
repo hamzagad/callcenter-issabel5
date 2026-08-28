@@ -368,15 +368,15 @@ exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
 [atxfer-hold]
 exten => s,1,NoOp(Issabel CallCenter: Attended Transfer - Caller on hold)
  same => n,Answer()
- same => n,MusicOnHold(default)
+ same => n,MusicOnHold()
 
 [atxfer-consult]
 exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,Set(__ATXFER_HELD_CHAN=${ATXFER_HELD_CHAN})
  same => n,Set(AGENT_NUM=${ATXFER_AGENT_NUM})
- same => n,Dial(Local/${EXTEN}@from-internal,120,gF(atxfer-bridge^s^1))
+ same => n,Dial(Local/${EXTEN}@from-internal/n,120,gF(atxfer-bridge^s^1)U(atxfer-consult-answered^${AGENT_NUM}))
  same => n,NoOp(Issabel CallCenter: Consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
- same => n,UserEvent(ConsultationEnd,Agent: Agent/${AGENT_NUM})
+ same => n,UserEvent(ConsultationEnd,Agent: Agent/${AGENT_NUM},Status: ${DIALSTATUS})
  same => n,Bridge(${ATXFER_HELD_CHAN})
  same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
  same => n,Goto(atxfer-complete,${AGENT_NUM},1)
@@ -384,6 +384,11 @@ exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,UserEvent(AtxferHoldWait,Agent: Agent/${AGENT_NUM})
  same => n,Wait(300)
  same => n,Goto(atxfer-complete,${AGENT_NUM},1)
+
+[atxfer-consult-answered]
+exten => s,1,NoOp(Issabel CallCenter: Attended transfer consult answered by colleague for Agent/${ARG1})
+ same => n,UserEvent(ConsultationAnswered,Agent: Agent/${ARG1},Channel: ${CHANNEL})
+ same => n,Return()
 
 [atxfer-unhold]
 exten => s,1,NoOp(Issabel CallCenter: Agent retrieving call from hold via Bridge)

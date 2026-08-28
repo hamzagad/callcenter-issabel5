@@ -127,6 +127,24 @@ td.issabel-callcenter-class-estado-activo {
 */
 }
 
+/* Applied to #btn_hangup while an attended-transfer consultation is still
+   ringing (colleague has not answered yet) - clicking Hangup cancels the
+   consultation and reconnects the agent to the customer. */
+.issabel-callcenter-boton-cancelar-transferencia {
+    background-color: #F57C00 !important;
+    color: #000000 !important;
+    border-color: #F57C00 !important;
+}
+
+/* Applied to #btn_hangup while an attended-transfer consultation has been
+   answered by the colleague - clicking Hangup now completes the transfer
+   instead of cancelling it. */
+.issabel-callcenter-boton-completar-transferencia {
+    background-color: #2E7D32 !important;
+    color: #000000 !important;
+    border-color: #2E7D32 !important;
+}
+
 #issabel-callcenter-llamada-paneles {
     position: relative;
     height: 32em;

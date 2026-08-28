@@ -2095,6 +2095,16 @@ class ECCPConn
     private function _agregarAgentStatusInfo($xml_agent, &$infoSeguimiento,
         &$infoLlamada)
     {
+        // Attended-transfer consultation state (none/ringing/answered) so the
+        // console can reconcile a missed Consultation* event on its next poll.
+        $xml_agent->addChild('consultation', isset($infoSeguimiento['consultation'])
+            ? $infoSeguimiento['consultation'] : 'none');
+        // DIALSTATUS of the last consultation that failed, so the console can
+        // still tell the agent why even if the ConsultationEnd event was lost.
+        if (!empty($infoSeguimiento['consultation_reason'])) {
+            $xml_agent->addChild('consultation_reason', $infoSeguimiento['consultation_reason']);
+        }
+
         list($sAgentStatus, $sExtension) = self::getcampaignstatus_setagent(
             $xml_agent, $infoSeguimiento, FALSE, $infoLlamada);
 
@@ -2277,11 +2287,53 @@ class ECCPConn
                         $isInConsultation = $this->_tuberia->AMIEventProcess_esAgenteEnConsultation($sAgente);
 
                         if ($isInConsultation) {
+                            // Consultation is still active (Dial() to the colleague hasn't
+                            // ended). Distinguish "still ringing / never engaged" (Hangup
+                            // means cancel) from "colleague has answered" (Hangup now
+                            // means complete, per the ConsultationAnswered UserEvent).
+                            $consultaContestada = $this->_tuberia->AMIEventProcess_infoConsultaContestada($sAgente);
+
+                            if (!is_null($consultaContestada) && !empty($consultaContestada['channel'])) {
+                                // ================================================================
+                                // COMPLETE TRANSFER (colleague answered, agent hangs up while
+                                // talking to them): dual-Redirect, mirroring the technique that
+                                // started the consultation - move the colleague's channel into
+                                // atxfer-bridge (to bridge with the held customer) and the
+                                // agent's login_channel into atxfer-complete (to re-enter
+                                // AgentLogin), simultaneously. The customer is NOT hung up here -
+                                // they end up bridged with the colleague instead.
+                                // ================================================================
+                                $this->_log->output('DEBUG: ========== COMPLETAR TRANSFERENCIA (consulta contestada) | EN: COMPLETE TRANSFER (consultation answered) ==========');
+                                $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino/Target: '.$transferDest.', login_channel: '.$loginChannel.', colleague_channel: '.$consultaContestada['channel']);
+
+                                $r = $this->_ami->Redirect(
+                                    $loginChannel,                  // Channel: agent's login_channel
+                                    $consultaContestada['channel'], // ExtraChannel: the colleague's real channel
+                                    $agentNumber,                   // Exten: agent number
+                                    'atxfer-complete',              // Context: re-enter AgentLogin
+                                    1,                              // Priority
+                                    's',                            // ExtraExten
+                                    'atxfer-bridge',                // ExtraContext: bridge colleague with held customer
+                                    1                               // ExtraPriority
+                                );
+                                $this->_log->output('DEBUG: Resultado de Redirect/Redirect result: '.print_r($r, true));
+
+                                if ($r['Response'] == 'Success') {
+                                    $this->_log->output('INFO: Transferencia completada (consulta contestada) - agente redirigido a atxfer-complete, colega a atxfer-bridge | EN: Transfer completed (consultation answered) - agent redirected to atxfer-complete, colleague to atxfer-bridge');
+                                    $this->_tuberia->msg_AMIEventProcess_finalizarTransferencia($sAgente);
+                                    $xml_hangupResponse->addChild('success');
+                                    return $xml_response;
+                                } else {
+                                    $this->_log->output('WARN: Redirect falló: '.$r['Message'].', usando hangup normal | EN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
+                                    $hangchannel = $infoLlamada['actualchannel'];
+                                }
+                            } else {
                             // ================================================================
-                            // CANCEL CONSULTATION: Agent is actively consulting (Dial in
-                            // progress). Redirect to atxfer-cancel-consult which terminates
-                            // the consulting call and Bridge()s the agent back to the
-                            // customer. Call tracking is preserved (no _finalizarTransferencia).
+                            // CANCEL CONSULTATION: Agent is actively consulting but the
+                            // colleague has not answered yet. Redirect to atxfer-cancel-consult
+                            // which terminates the consulting call and Bridge()s the agent
+                            // back to the customer. Call tracking is preserved (no
+                            // _finalizarTransferencia).
                             // ================================================================
                             $this->_log->output('DEBUG: ========== CANCELAR CONSULTA | EN: CANCEL CONSULTATION ==========');
                             $this->_log->output('DEBUG: Agente/Agent: '.$sAgente.', Destino/Target: '.$transferDest.', login_channel: '.$loginChannel);
@@ -2309,6 +2361,7 @@ class ECCPConn
                             } else {
                                 $this->_log->output('WARN: Redirect falló: '.$r['Message'].', usando hangup normal | EN: Redirect failed: '.$r['Message'].', falling back to normal hangup');
                                 $hangchannel = $infoLlamada['actualchannel'];
+                            }
                             }
                         } else {
                             // ================================================================

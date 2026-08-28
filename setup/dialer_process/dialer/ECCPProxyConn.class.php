@@ -468,7 +468,10 @@ class ECCPProxyConn extends MultiplexConn
         $this->multiplexSrv->encolarDatosEscribir($this->sKey, $xml_response->asXML());
     }
 
-    function notificarEvento_ConsultationEnd($sAgente)
+    // $sReason: DIALSTATUS of the consult Dial() (BUSY/NOANSWER/CONGESTION/
+    // CHANUNAVAIL/...) when the consultation ended on its own, empty for any
+    // other way it can end (explicit cancel, completion, hangups).
+    function notificarEvento_ConsultationEnd($sAgente, $sReason = '')
     {
         if (is_null($this->_sUsuarioECCP)) return;
         if (!is_null($this->_sAgenteFiltrado) && $this->_sAgenteFiltrado != $sAgente) return;
@@ -476,6 +479,23 @@ class ECCPProxyConn extends MultiplexConn
         $xml_response = new SimpleXMLElement('<event />');
         $xml_consultEnd = $xml_response->addChild('consultationend');
         $xml_consultEnd->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+        if ($sReason !== '') {
+            $xml_consultEnd->addChild('reason', str_replace('&', '&amp;', $sReason));
+        }
+
+        $this->multiplexSrv->encolarDatosEscribir($this->sKey, $xml_response->asXML());
+    }
+
+    // The consultation's colleague has answered - the agent console can now
+    // offer to complete the transfer (as opposed to only cancel it).
+    function notificarEvento_ConsultationAnswered($sAgente)
+    {
+        if (is_null($this->_sUsuarioECCP)) return;
+        if (!is_null($this->_sAgenteFiltrado) && $this->_sAgenteFiltrado != $sAgente) return;
+
+        $xml_response = new SimpleXMLElement('<event />');
+        $xml_consultAnswered = $xml_response->addChild('consultationanswered');
+        $xml_consultAnswered->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
 
         $this->multiplexSrv->encolarDatosEscribir($this->sKey, $xml_response->asXML());
     }

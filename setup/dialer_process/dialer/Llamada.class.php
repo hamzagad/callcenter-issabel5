@@ -1247,11 +1247,6 @@ class Llamada
             if (!is_null($this->campania)) $paramProgreso['id_campaign_'.$this->tipo_llamada] = $this->campania->id;
             $this->_tuberia->msg_SQLWorkerProcess_sqlupdatecalls($paramActualizar);
 
-            $ruta = '/var/www/html/modules/agent_console/archivo.txt';
-    $file = fopen($ruta, 'w');
-    fwrite($file, $this->_tuberia->msg_SQLWorkerProcess_sqlupdatecalls($paramActualizar));
-    fclose($file);
-
 
             if (!is_null($this->agente)) {
                 $this->_tuberia->msg_SQLWorkerProcess_AgentUnlinked(
