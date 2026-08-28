@@ -2,6 +2,170 @@
 
 ---
 
+## 60. Attended Transfer for Callback Type Login
+**Date**: 2026-08-28
+
+Resolves the "Attended Transfer for Callback Type Login" TODO (High, added
+2026-08-28). Change #59 fixed the Agent-type (`app_agent_pool`) flow and left
+callback-type logins (agents on a plain SIP/IAX2/PJSIP extension) on their
+original mechanism, which had four defects. That mechanism was Asterisk's
+native `Atxfer` AMI action with `TRANSFER_CONTEXT=cbext-atxfer`, and it was
+the root of three of them: it offers no ringing/answered distinction, no
+`${DIALSTATUS}`, and no usable cancel. Callback now uses the same
+Redirect-based flow as the Agent type, in its own `[cbxfer-*]` contexts, so
+both agent types run one engine.
+
+### Bugs fixed
+
+- **Cancelling a transfer disconnected the customer.** All attended-transfer
+  hangup handling was gated on `type == 'Agent'`, so callback fell through to
+  a branch that made no ringing/answered distinction and always hung up the
+  agent's original channel. After the colleague answered that happened to
+  behave like a completion; while the colleague was still ringing it dropped
+  the customer and left the agent on the consult leg. Cancel now redirects
+  only the agent's channel to `[cbxfer-cancel-consult]`, which reconnects
+  them to the held customer and hangs up nothing. Completion is an atomic
+  dual `Redirect()` — colleague into `[atxfer-bridge]`, agent into
+  `[cbxfer-done]`.
+- **No "colleague answered" signal.** `[cbext-atxfer]` had no `U()` gosub, so
+  the console could not tell ringing from answered and the Hangup button's
+  transfer labels were suppressed for callback logins. `[cbxfer-consult]`
+  now carries `U(cbxfer-consult-answered^...)`, emitting `ConsultationAnswered`
+  with the colleague's channel. The agent id travels as a literal in the
+  `Dial()` option string, so no channel-variable inheritance is involved.
+- **A busy colleague was rung anyway.** The consultation dials the device
+  directly (deliberately, to avoid FreePBX's 20-second `Busy(20)` tone),
+  which bypasses `from-internal`/`ext-local` where Call Waiting and Do Not
+  Disturb are enforced — so a colleague already on a call was rung
+  regardless of their Call Waiting setting, and answering could drop their
+  original call. New `_verificarColegaDisponible()` checks `ExtensionState`
+  plus `DB(CW/<ext>)` and `DB(DND/<ext>)` *before* any channel is moved:
+  busy with Call Waiting off, or DND, is refused instantly with no leg
+  placed and no delay. Busy *with* Call Waiting on still proceeds.
+- **Stale `transfer` column.** `_registrarTransferencia()` stamps
+  `transfer=<exten>` when a consultation starts, for both agent types, but no
+  callback path ever cleared it. Callback now reaches the shared
+  `ConsultationEnd` handler, which clears it on every natural end.
+
+### Two Agent-type bugs found while auditing the shared helper
+
+`_manejarHangupLoginChannelEnConsulta()` is reached by both agent types,
+because the `uniqueidlink` index it resolves through is populated for both.
+
+- **It hung up the customer even when the colleague had answered.** The
+  `Hangup(actualchannel)` ran unconditionally, and only then did the
+  answered branch do its lightweight release "so the ongoing conversation
+  still finalizes with its real duration" — but that conversation had just
+  been killed. Reachable whenever an agent completes a transfer by
+  physically hanging up their phone instead of clicking the button, which is
+  why console-driven testing never hit it. Now conditional on the colleague
+  not having answered.
+- **It force-logged-off callback agents.** A callback agent whose device hung
+  up mid-consultation was run through `_ejecutarLogoffAgente()` and kicked
+  out of the console. Now gated to login-channel (Agent type) logins; a
+  callback agent keeps its session and simply takes the next call.
+
+### Consultation start/end ordering
+
+`marcarConsultationIniciada` is an async message sent just before the
+Redirect, so an instantly-failing colleague could produce a `ConsultationEnd`
+UserEvent that was processed *first* — the cleanup was skipped and the late
+mark then set a flag nobody would clear, wedging the Hangup button on
+"Cancel transfer" until the call ended. Agent type was immune only because
+the synchronous `prepararAtxferComplete` RPC had already set a second flag
+the guard tested; callback has no such flag. Fixed with a monotonic guard
+rather than a new synchronous RPC: `ConsultationEnd` records
+`_consultaTerminadaEn[$agent]` and acts unconditionally, and
+`_marcarConsultationIniciada()` discards a mark older than that timestamp.
+
+### UI
+
+- The Hangup button's amber **Cancel transfer** / green **Complete transfer**
+  cues now apply to callback logins too; the `isAgentPoolType` suppression
+  added in #59 and the `IS_AGENT_TYPE` template variable are removed.
+- Busy and Do Not Disturb refusals surface as an immediate error notice
+  through the existing ECCP failure path, before any consultation is placed.
+
+### Also
+
+- `[atxfer-hold]` bounded its music on hold at 30 minutes followed by
+  `Hangup()`. It previously never returned, so a customer whose consultation
+  collapsed in an unhandled way waited there indefinitely holding a channel.
+  Applies to both agent types.
+- `[cbext-atxfer]` is now emitted only for Asterisk 11/13, where the native
+  `Atxfer` fallback is still used.
+
+### Files affected
+
+- `setup/installer.php` → `/etc/asterisk/extensions_custom.conf`: new
+  `[cbxfer-consult]`, `[cbxfer-consult-answered]`, `[cbxfer-cancel-consult]`
+  and `[cbxfer-done]`; `[atxfer-hold]` bounded; `[cbext-atxfer]` moved to the
+  Asterisk 11/13 branch.
+- `setup/dialer_process/dialer/ECCPConn.class.php` → `/opt/issabel/dialer/`:
+  callback branch of `Request_agentauth_atxfercall()` rewritten as a dual
+  `Redirect()`; new `_verificarColegaDisponible()`; callback
+  attended-transfer block of `Request_agentauth_hangup()` given the
+  ringing/answered split.
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` →
+  `/opt/issabel/dialer/`: `_consultaTerminadaEn` ordering guard;
+  `_manejarHangupLoginChannelEnConsulta()` and
+  `_terminarConsultaSiClienteCuelga()` made agent-type aware;
+  `_ejecutarLogoffAgente()` clears the consultation maps.
+- `modules/agent_console/{index.php,themes/default/agent_console.tpl,
+  themes/default/js/javascript.js}` → `/var/www/html/modules/agent_console/`:
+  `isAgentPoolType` suppression removed.
+
+No change was needed in `AMIClientConn.class.php` (`Redirect`, `SetVar`,
+`Hangup`, `ExtensionState` and `database_get()` were all already available)
+or `ECCPProxyConn.class.php` (its `ConsultationStart/Answered/End`
+notifications were already agent-type agnostic).
+
+### Test steps
+
+Callback agent (`SIP/101`) on a live call, "Attended transfer" → colleague:
+
+1. Colleague answers → **Complete transfer** → colleague and customer stay
+   bridged, agent released and free for the next call.
+2. **Cancel transfer** while ringing → agent reconnected, customer **not**
+   dropped.
+3. Complete by hanging up the phone instead of the button → same as 1.
+4. Colleague busy with Call Waiting off, or on DND → refused instantly, no
+   leg placed, their existing call untouched.
+5. Colleague declines / never answers / unavailable → auto-reconnect with the
+   matching notice; the next hangup ends a normal call and is not recorded
+   as a transfer.
+6. Customer hangs up mid-consultation → consultation torn down, no orphaned
+   channel.
+7. Agent's device dies mid-consultation → agent stays logged in.
+
+Verified live end-to-end on inbound queue calls, together with the Change #59
+Agent-type scenarios as a regression pass. `_verificarColegaDisponible()` and
+the ordering guard were additionally unit-tested against the live Asterisk
+(real `InUse`, `Ringing` and `Unavailable` device states, and both Call
+Waiting settings), and `setup/installer.php` was confirmed to regenerate
+`/etc/asterisk/extensions_custom.conf` byte-identically.
+
+```bash
+grep -E "cbxfer|ConsultationAnswered|ConsultationEnd UserEvent received|CANCELAR CONSULTA|COMPLETAR TRANSFERENCIA|_verificarColegaDisponible|ignoring late consultation mark" /opt/issabel/dialer/dialerd.log
+grep "consultation state resynced" /var/log/callcenter-module/debug.log
+```
+
+### Not yet verified
+
+Outgoing campaigns. Attended transfer has only ever been exercised against
+inbound queue calls, for either agent type. The flow is structurally
+direction-agnostic — the agent leg is delivered by the same queue and every
+direction-sensitive site already switches on `tipo_llamada` — but two things
+are worth confirming when an outgoing campaign is tested: that the deferred
+finalization writes `end_time`, `duration` and `status` on `calls` (incoming
+writes `datetime_end`/`terminada` instead, so that branch is unexercised),
+and that a predictive-campaign agent is not left `reservado`, since
+`llamadaTransferidaDesdeAgente()` omits the reservation release that
+`llamadaFinalizaSeguimiento()` performs. That omission is pre-existing and
+shared with blind transfer.
+
+---
+
 ## 59. Attended Transfer for Agent Type Login
 **Date**: 2026-08-28
 

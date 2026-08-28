@@ -30,15 +30,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: Implement `eccp_authorized_clients` table for agent authorization. The table exists and is used for authorization lookup, but could be expanded for IP/client-based authorization.
 * **Status**: Partially Solved
 
-### Attended Transfer for Callback Type Login
-
-* **Type**: Bug
-* **Urgency**: High
-* **Date Added**: 2026-08-28
-* **Location**: `ECCPConn.class.php:2411-2463` (`Request_agentauth_hangup`), `extensions_custom.conf` `[cbext-atxfer]`
-* **Description**: The attended-transfer hangup logic is gated on `$agentFields['type'] == 'Agent'` (`ECCPConn.class.php:2264`), so callback-type agents (SIP/IAX2/PJSIP) fall through to a separate branch that draws no ringing/answered distinction and always assumes "complete", hanging up the agent's original channel. Four defects follow: (1) hanging up while the colleague is still ringing disconnects the customer and leaves the agent on the consult leg, instead of cancelling and reconnecting; (2) no `ConsultationAnswered` signal exists — `[cbext-atxfer]` has no `U()` gosub hook (that is Agent-type only), so the console cannot tell ringing from answered, and the Hangup button's transfer labels are therefore suppressed for callback logins (`javascript.js`, `isAgentPoolType`); (3) `[cbext-atxfer]` dials the device directly from `DB(DEVICE/<ext>/dial)`, bypassing `from-internal`/`ext-local` where FreePBX enforces Call Waiting and busy state, so a consultation is forced onto a colleague already on a call regardless of their Call Waiting setting (not tech-specific — reproduced on both SIP and PJSIP), and the colleague answering it can drop their original call; (4) the stale `transfer` column exposure described in Change #59 is unfixed on this path — `_registrarTransferencia()` stamps it for both agent types but no callback path clears it. Fixing requires giving callback its own ringing/answered handling (cancel must hang up the consult leg, not the original channel) plus a device-state check before dialing. The direct-device dial was deliberate, to avoid FreePBX's 20-second busy tone delay, so any fix must preserve that.
-* **Status**: Untouched
-
 ---
 
 ## Medium

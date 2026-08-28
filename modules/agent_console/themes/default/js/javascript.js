@@ -52,22 +52,6 @@ var lblCancelTransfer = null;     // Set from server-side translation in agent_c
 var msgTransferBusy = null;        // Set from server-side translation in agent_console.tpl
 var msgTransferNoAnswer = null;    // Set from server-side translation in agent_console.tpl
 var msgTransferUnavailable = null; // Set from server-side translation in agent_console.tpl
-/* TRUE sólo para logins tipo Agent (app_agent_pool). Las etiquetas
- * "Cancel transfer"/"Complete transfer" del botón Hangup describen el
- * comportamiento del flujo tipo Agent. Para agentes callback ese botón sigue
- * otra ruta (ECCPConn::Request_agentauth_hangup) que no distingue "sonando" de
- * "contestada": colgar durante la consulta desconecta al cliente en vez de
- * cancelar, así que mostrar "Cancel transfer" invitaría al agente a perder la
- * llamada. Hasta que esa ruta distinga ambos casos, el botón conserva su
- * etiqueta normal para agentes callback. */
-/* EN: TRUE only for Agent-type (app_agent_pool) logins. The Hangup button's
- * "Cancel transfer"/"Complete transfer" labels describe the Agent-type flow.
- * Callback agents take a different path (ECCPConn::Request_agentauth_hangup)
- * that draws no ringing/answered distinction: hanging up mid-consultation
- * disconnects the customer instead of cancelling, so showing "Cancel transfer"
- * would invite the agent to drop the call. Until that path distinguishes the
- * two cases, the button keeps its normal label for callback agents. */
-var isAgentPoolType = false;
 
 // Shift filter variables (default: full day 00:00-23:59)
 var shiftFromHour = 0;
@@ -1144,13 +1128,11 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.consultation = 'ringing';
 			$('#btn_hold').button('disable');
 			$('#btn_transfer').button('disable');
-			if (isAgentPoolType) {
-				if (lblCancelTransfer) {
-					$('#btn_hangup').button('option', 'label', lblCancelTransfer);
-				}
-				$('#btn_hangup').removeClass('issabel-callcenter-boton-completar-transferencia')
-					.addClass('issabel-callcenter-boton-cancelar-transferencia');
+			if (lblCancelTransfer) {
+				$('#btn_hangup').button('option', 'label', lblCancelTransfer);
 			}
+			$('#btn_hangup').removeClass('issabel-callcenter-boton-completar-transferencia')
+				.addClass('issabel-callcenter-boton-cancelar-transferencia');
 			break;
 		case 'consultationanswered':
 			// Colleague picked up - clicking Hangup now completes the
@@ -1159,13 +1141,11 @@ function manejarRespuestaStatus(respuesta)
 			estadoCliente.consultation = 'answered';
 			$('#btn_hold').button('disable');
 			$('#btn_transfer').button('disable');
-			if (isAgentPoolType) {
-				if (lblCompleteTransfer) {
-					$('#btn_hangup').button('option', 'label', lblCompleteTransfer);
-				}
-				$('#btn_hangup').removeClass('issabel-callcenter-boton-cancelar-transferencia')
-					.addClass('issabel-callcenter-boton-completar-transferencia');
+			if (lblCompleteTransfer) {
+				$('#btn_hangup').button('option', 'label', lblCompleteTransfer);
 			}
+			$('#btn_hangup').removeClass('issabel-callcenter-boton-cancelar-transferencia')
+				.addClass('issabel-callcenter-boton-completar-transferencia');
 			break;
 		case 'consultationend':
 			// Consultation ended - re-enable all buttons only if the agent

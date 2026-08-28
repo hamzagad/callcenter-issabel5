@@ -243,7 +243,6 @@ $(document).ready(function() {
     initialize_client_state({$INITIAL_CLIENT_STATE});
     lblCompleteTransfer = "{$LBL_COMPLETE_TRANSFER|escape:'javascript'}";
     lblCancelTransfer = "{$LBL_CANCEL_TRANSFER|escape:'javascript'}";
-    isAgentPoolType = {if $IS_AGENT_TYPE}true{else}false{/if};
     msgTransferBusy = "{$MSG_TRANSFER_BUSY|escape:'javascript'}";
     msgTransferNoAnswer = "{$MSG_TRANSFER_NOANSWER|escape:'javascript'}";
     msgTransferUnavailable = "{$MSG_TRANSFER_UNAVAILABLE|escape:'javascript'}";

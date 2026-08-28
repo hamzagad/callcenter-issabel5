@@ -313,31 +313,6 @@ exten => _X.,n(skiprecord),Dial(${AGENTCHANNEL},300,tw)
 exten => h,1,Macro(hangupcall,)
 ';
 
-        // Callback agent attended transfer context (SIP/IAX2/PJSIP types)
-        // Dials device directly to avoid 20-second busy tone delay when target declines
-        $sContextos .= '
-; Attended transfer context for callback agents (SIP/IAX2/PJSIP)
-; Dials device directly to avoid busy tone delay from from-internal failure handling
-[cbext-atxfer]
-exten => _X.,1,NoOp(Issabel CallCenter: Callback attended transfer routing for ${EXTEN})
- same => n,Set(CLEAN_EXTEN=${FILTER(0123456789,${EXTEN})})
- same => n,ExecIf($["${CLEAN_EXTEN}" = ""]?Set(CLEAN_EXTEN=${EXTEN}))
- same => n,Set(DIAL_DEVICE=${DB(DEVICE/${CLEAN_EXTEN}/dial)})
- same => n,GotoIf($["${DIAL_DEVICE}" != ""]?direct)
- same => n(fallback),NoOp(Issabel CallCenter: No device found for ${CLEAN_EXTEN} - routing via from-internal)
- same => n,Dial(Local/${CLEAN_EXTEN}@from-internal/n,120)
- same => n,Hangup()
- same => n(direct),NoOp(Issabel CallCenter: Direct device dial: ${DIAL_DEVICE})
- same => n,GotoIf($["${DIAL_DEVICE:0:5}" = "PJSIP"]?pjsip)
- same => n,Dial(${DIAL_DEVICE},120)
- same => n,Hangup()
- same => n(pjsip),Set(PJSIP_CONTACTS=${PJSIP_DIAL_CONTACTS(${CLEAN_EXTEN})})
- same => n,ExecIf($["${PJSIP_CONTACTS}" = ""]?Set(PJSIP_CONTACTS=${DIAL_DEVICE}))
- same => n,NoOp(Issabel CallCenter: PJSIP dial: ${PJSIP_CONTACTS})
- same => n,Dial(${PJSIP_CONTACTS},120)
- same => n,Hangup()
-';
-
         // app_agent_pool contexts (Asterisk 12+):
         // [agent-login]: login via context (no Asterisk password prompt)
         // [atxfer-complete]: re-enter AgentLogin after attended transfer
@@ -368,7 +343,9 @@ exten => _X.,1,NoOp(Issabel CallCenter: Connecting to Agent ${EXTEN})
 [atxfer-hold]
 exten => s,1,NoOp(Issabel CallCenter: Attended Transfer - Caller on hold)
  same => n,Answer()
- same => n,MusicOnHold()
+ same => n,MusicOnHold(,1800)
+ same => n,NoOp(Issabel CallCenter: Attended transfer hold expired - releasing caller)
+ same => n,Hangup()
 
 [atxfer-consult]
 exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
@@ -415,9 +392,74 @@ exten => s,1,NoOp(Issabel CallCenter: Cancelling consultation - reconnecting age
 exten => s,1,NoOp(Issabel CallCenter: Transfer complete - bridging target with held caller)
  same => n,Bridge(${ATXFER_HELD_CHAN})
  same => n,Hangup()
+
+; Attended transfer contexts for callback type logins (SIP/IAX2/PJSIP)
+; Same Redirect-based flow as the Agent type above, but the agent has no
+; AgentLogin session to re-enter, so the consult leg just hangs up when the
+; reconnected conversation ends. ATXFER_AGENT_ID carries the full agent id
+; (e.g. SIP/1002) because the dialer keys its consultation state on that,
+; not on a bare agent number. The device is dialled directly to avoid the
+; 20-second busy tone from from-internal failure handling; busy and DND are
+; checked by the dialer before the consultation is ever placed.
+[cbxfer-consult]
+exten => _X.,1,NoOp(Issabel CallCenter: Callback attended transfer - consulting ${EXTEN})
+ same => n,Set(__ATXFER_HELD_CHAN=${ATXFER_HELD_CHAN})
+ same => n,Set(AGENT_ID=${ATXFER_AGENT_ID})
+ same => n,Set(CLEAN_EXTEN=${FILTER(0123456789,${EXTEN})})
+ same => n,ExecIf($["${CLEAN_EXTEN}" = ""]?Set(CLEAN_EXTEN=${EXTEN}))
+ same => n,Set(DIAL_DEVICE=${DB(DEVICE/${CLEAN_EXTEN}/dial)})
+ same => n,ExecIf($["${DIAL_DEVICE:0:5}" = "PJSIP"]?Set(DIAL_DEVICE=${PJSIP_DIAL_CONTACTS(${CLEAN_EXTEN})}))
+ same => n,ExecIf($["${DIAL_DEVICE}" = ""]?Set(DIAL_DEVICE=Local/${CLEAN_EXTEN}@from-internal/n))
+ same => n,NoOp(Issabel CallCenter: Callback consult dial: ${DIAL_DEVICE})
+ same => n,Dial(${DIAL_DEVICE},120,gF(atxfer-bridge^s^1)U(cbxfer-consult-answered^${AGENT_ID}))
+ same => n,NoOp(Issabel CallCenter: Callback consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
+ same => n,UserEvent(ConsultationEnd,Agent: ${AGENT_ID},Status: ${DIALSTATUS})
+ same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Hangup()
+
+[cbxfer-consult-answered]
+exten => s,1,NoOp(Issabel CallCenter: Callback consult answered by colleague for ${ARG1})
+ same => n,UserEvent(ConsultationAnswered,Agent: ${ARG1},Channel: ${CHANNEL})
+ same => n,Return()
+
+[cbxfer-cancel-consult]
+exten => s,1,NoOp(Issabel CallCenter: Cancelling callback consultation - reconnecting agent to caller)
+ same => n,UserEvent(ConsultationEnd,Agent: ${ATXFER_AGENT_ID})
+ same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Hangup()
+
+[cbxfer-done]
+exten => s,1,NoOp(Issabel CallCenter: Callback consultation terminated - releasing agent channel)
+ same => n,Hangup()
 ';
         } else {
             fputs(STDERR, "INFO: Skipping app_agent_pool contexts (chan_agent on Asterisk $astMajor)\n");
+
+            // Legacy callback attended transfer target context, used only by the
+            // native Atxfer fallback on Asterisk 11/13. Asterisk 12+ uses the
+            // Redirect-based [cbxfer-*] contexts above instead.
+            $sContextos .= '
+; Attended transfer context for callback agents (SIP/IAX2/PJSIP) - Asterisk 11/13
+; Dials device directly to avoid busy tone delay from from-internal failure handling
+[cbext-atxfer]
+exten => _X.,1,NoOp(Issabel CallCenter: Callback attended transfer routing for ${EXTEN})
+ same => n,Set(CLEAN_EXTEN=${FILTER(0123456789,${EXTEN})})
+ same => n,ExecIf($["${CLEAN_EXTEN}" = ""]?Set(CLEAN_EXTEN=${EXTEN}))
+ same => n,Set(DIAL_DEVICE=${DB(DEVICE/${CLEAN_EXTEN}/dial)})
+ same => n,GotoIf($["${DIAL_DEVICE}" != ""]?direct)
+ same => n(fallback),NoOp(Issabel CallCenter: No device found for ${CLEAN_EXTEN} - routing via from-internal)
+ same => n,Dial(Local/${CLEAN_EXTEN}@from-internal/n,120)
+ same => n,Hangup()
+ same => n(direct),NoOp(Issabel CallCenter: Direct device dial: ${DIAL_DEVICE})
+ same => n,GotoIf($["${DIAL_DEVICE:0:5}" = "PJSIP"]?pjsip)
+ same => n,Dial(${DIAL_DEVICE},120)
+ same => n,Hangup()
+ same => n(pjsip),Set(PJSIP_CONTACTS=${PJSIP_DIAL_CONTACTS(${CLEAN_EXTEN})})
+ same => n,ExecIf($["${PJSIP_CONTACTS}" = ""]?Set(PJSIP_CONTACTS=${DIAL_DEVICE}))
+ same => n,NoOp(Issabel CallCenter: PJSIP dial: ${PJSIP_CONTACTS})
+ same => n,Dial(${PJSIP_CONTACTS},120)
+ same => n,Hangup()
+';
         }
 
         $contenido[] = $sContextos;
