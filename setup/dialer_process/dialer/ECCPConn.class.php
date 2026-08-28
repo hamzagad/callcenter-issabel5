@@ -2723,8 +2723,18 @@ class ECCPConn
         }
 
         // Reportar el estado de hold, si aplica
-        if ($infoAgente['estado_consola'] == 'logged-in')
+        if ($infoAgente['estado_consola'] == 'logged-in') {
             $xml_agent->addChild('onhold', is_null($infoAgente['id_hold']) ? 0 : 1);
+            // Inicio del hold en curso, cargado por cargarInfoPausa() desde la
+            // fila de audit. Sin esto la consola sabe que el agente está en
+            // hold pero no desde cuándo, y el cronómetro no sobrevive a un F5.
+            // EN: start of the running hold, loaded by cargarInfoPausa() from
+            // the audit row. Without it the console knows the agent is on hold
+            // but not since when, and the timer cannot survive a refresh.
+            if (isset($infoAgente['holdstart']))
+                $xml_agent->addChild('holdstart',
+                    str_replace(date('Y-m-d '), '', $infoAgente['holdstart']));
+        }
 
         // Reportar los estados de break, si aplica
         if (!is_null($infoAgente['id_break'])) {

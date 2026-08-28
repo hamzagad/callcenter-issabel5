@@ -2,6 +2,106 @@
 
 ---
 
+## 61. On-Hold State for the Agent Console Status Bar
+**Date**: 2026-08-28
+
+The agent console status bar had four states — blue "No active call", purple
+"Waiting for call", green "Connected to call" and red "On break". Putting a
+call on hold changed none of them: `describirEstadoBarra()` returned
+`llamada` as soon as `calltype` was set and never looked at `onhold`, so the
+agent saw the same green bar and the same call timer whether the customer was
+on the line or parked.
+
+Adds a fifth state: **orange `#F57C00`, "Call on hold"**, with a counter for
+the current hold. The colour is the same value `.shift-stat-hold` already uses
+for the shift bar's Total Hold Time box — that box stays cumulative for the
+shift, while the new bar counter is this hold only.
+
+This covers items (1) and (2) of the "Hold Timeout Countdown" feature request.
+Item (3), a countdown of the time *remaining* before the parked call
+auto-returns, is **not** implemented and remains tracked in TODO.md.
+
+### The gap that had to be closed first
+
+Hold is not a separate mechanism here — it is a break row with
+`break.tipo = 'H'`, writing an `audit` row with `datetime_init`, and `Agente`
+tracks it in fields parallel to the break ones (`id_audit_hold` beside
+`id_audit_break`). The break half loads its start time through
+`cargarInfoPausa()` and publishes it as `pausestart`; the hold half never did,
+because nothing had needed it. The console was therefore told *that* an agent
+was on hold but not *since when*, so a refresh could not restore the counter.
+
+`cargarInfoPausa()` now loads `holdstart` from `id_audit_hold` using the same
+query — it is keyed on `audit.id`, so it serves both — and the agent status
+XML publishes `<holdstart>` beside the `<onhold>` it already sent.
+
+### Behaviour
+
+- **Survives F5 mid-hold.** The initial render reads server truth
+  (`onhold` + `holdstart`), so the bar comes back orange and the counter
+  continues from the real hold start rather than restarting at zero.
+- **Not shown while transferring.** During an attended-transfer consultation
+  the customer also hears music, but the agent is talking to a colleague, so
+  the bar stays green. Structurally an attended-transfer hold is not a dialer
+  hold at all — the customer is `Redirect`ed into `[atxfer-hold]` rather than
+  parked, so `id_hold` stays null — and a `consultation` guard additionally
+  covers the Agent-type `ATXFER_ON_HOLD` path, where a real parked hold can
+  coexist with transfer state. A hold taken *after* a consultation ends
+  correctly shows orange.
+- **Both login types.** Nothing on this path is type-specific: `onhold`
+  derives from `id_hold`, set by `_iniciarHoldAgente()` for both, and
+  `holdstart` comes from the audit row, written for both.
+- Existing precedence is unchanged — hold is evaluated inside the "on a call"
+  branch, so a break taken during a call still shows green.
+
+### Bug fixed along the way
+
+**The call timer came back seconds behind after a hold ended.**
+`$iDuracionLlamada` was computed at the start of the request, but the long
+poll then blocks until an event arrives; when `holdexit` landed N seconds
+later, the bar returned to green using a value computed N seconds earlier, so
+the timer restarted that far behind. A page reload corrected it. The duration
+is now recomputed at the point of use, from whichever `linkstart` is current.
+
+The staleness pattern predates this change — the bar could previously only
+reach `llamada` via `agentlinked`, which already recomputed inside the loop,
+so nothing exposed it. The hold state added a second route that did not.
+Breaks are unaffected: `$iDuracionPausa` is recomputed inside the loop, and
+the bar only reaches `break` through a pause event.
+
+### Files affected
+
+- `setup/dialer_process/dialer/ECCPHelper.lib.php` → `/opt/issabel/dialer/`:
+  `cargarInfoPausa()` also loads `holdstart` from `id_audit_hold`.
+- `setup/dialer_process/dialer/ECCPConn.class.php` → `/opt/issabel/dialer/`:
+  `<holdstart>` published beside `<onhold>` in the shared agent-status
+  emitter, so both the console and the supervisor view carry it.
+- `modules/agent_console/libs/paloSantoConsola.class.php`: reads `holdstart`,
+  with the same date normalisation `pausestart` gets.
+- `modules/agent_console/index.php`: `hold` state in
+  `describirEstadoBarra()`, the page-load and long-poll renderings, and the
+  call-timer recomputation.
+- `modules/agent_console/themes/default/{js/javascript.js,css/issabel-callcenter.css}`:
+  new state class, and stripping it on the next state change.
+- `modules/agent_console/lang/{en,es}.lang`: "Call on hold".
+
+No dialplan change; `agent_console.tpl` untouched.
+
+### Test steps
+
+1. Press **Hold** → orange bar, "Call on hold", counter from zero.
+2. **F5 while on hold** → orange returns and the counter continues from the
+   real hold start.
+3. **End Hold** → green returns with the true call duration.
+4. Attended transfer, ringing and answered → bar stays green.
+5. Cancel a transfer, then Hold → orange.
+6. Second hold on the same call → counter restarts for the new hold.
+
+Verified live for both Agent-type and callback-type logins, on inbound and
+outgoing calls.
+
+---
+
 ## 60. Attended Transfer for Callback Type Login
 **Date**: 2026-08-28
 
@@ -152,17 +252,21 @@ grep "consultation state resynced" /var/log/callcenter-module/debug.log
 
 ### Not yet verified
 
-Outgoing campaigns. Attended transfer has only ever been exercised against
-inbound queue calls, for either agent type. The flow is structurally
-direction-agnostic — the agent leg is delivered by the same queue and every
-direction-sensitive site already switches on `tipo_llamada` — but two things
-are worth confirming when an outgoing campaign is tested: that the deferred
-finalization writes `end_time`, `duration` and `status` on `calls` (incoming
-writes `datetime_end`/`terminada` instead, so that branch is unexercised),
-and that a predictive-campaign agent is not left `reservado`, since
-`llamadaTransferidaDesdeAgente()` omits the reservation release that
-`llamadaFinalizaSeguimiento()` performs. That omission is pre-existing and
-shared with blind transfer.
+Outgoing campaigns have since been tested and behave correctly, including the
+deferred finalization that writes `end_time`, `duration` and `status` on
+`calls` (incoming takes the `datetime_end`/`terminada` branch instead, so that
+path had never been exercised).
+
+One case remains unverified: a **predictive** campaign agent who had a
+reservation when a transfer completed. `llamadaTransferidaDesdeAgente()`
+(`Llamada.class.php:1130`) — the lightweight release every completed transfer
+goes through — omits the `$a->reservado` →
+`msg_CampaignProcess_verificarFinLlamadasAgendables()` call and the
+`agente_agendado` un-pause that `llamadaFinalizaSeguimiento()` performs, so
+such an agent could in principle be left `reservado` and skipped for the next
+campaign call. The omission is pre-existing and shared with blind transfer and
+transfer-to-agent, not introduced here. If it does show up, the fix is to add
+the same reservation-release block to `llamadaTransferidaDesdeAgente()`.
 
 ---
 

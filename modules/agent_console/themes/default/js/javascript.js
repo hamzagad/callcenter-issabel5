@@ -967,6 +967,7 @@ function manejarRespuestaStatus(respuesta)
 				.removeClass('issabel-callcenter-class-estado-break')
 				.removeClass('issabel-callcenter-class-estado-activo')
 				.removeClass('issabel-callcenter-class-estado-esperando')
+				.removeClass('issabel-callcenter-class-estado-hold')
 				.addClass(respuesta[i].class_estado_agente_inicial);
 		if (respuesta[i].timer_seconds != null) {
 			if (respuesta[i].timer_seconds !== '') {

@@ -51,6 +51,9 @@
 .issabel-callcenter-class-estado-break {
     background-color: #BD0000;
 }
+.issabel-callcenter-class-estado-hold {
+    background-color: #F57C00;  /* Orange - matches .shift-stat-hold */
+}
 
 td.issabel-callcenter-class-estado-esperando,
 td.issabel-callcenter-class-estado-activo {

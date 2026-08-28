@@ -34,16 +34,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## Medium
 
-### Hold Timeout Countdown
-
-* **Type**: Feature
-* **Urgency**: Low
-* **Date Added**: Original (pre-2011)
-* **Date Updated**: 2026-03-09
-* **Location**: `AMIEventProcess.class.php:4014-4015`, `agent_console/`
-* **Description**: When agent puts call on hold, call is parked in Asterisk with configurable timeout (default 45-180 seconds, set in `features.conf` parkingtime). The `ParkedCall` AMI event includes `Timeout` parameter (seconds until auto-return) but this is NOT displayed to agents. Feature request: (1) Add "Call On-Hold" status to agent console with distinct color in status bar (e.g., yellow/orange indicator), (2) Add hold duration counter showing elapsed time, (3) Add countdown timer showing time REMAINING until call returns. Current implementation tracks `onhold` flag and has `shiftHoldTime` for elapsed time, but no countdown. Implementation requires: store parking timeout in `Llamada` object, include `parking_timeout` in ECCP agent status XML, add JavaScript countdown timer, add UI element to agent console template.
-* **Status**: Untouched
-
 ### RINGING-as-Free Analysis
 
 * **Type**: Investigation
@@ -52,6 +42,16 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Location**: `QueueShadow.class.php`, `Predictor.class.php`
 * **Description**: Even in predictive mode, counting RINGING agents as "free" may cause over-placement. Analysis needed to determine if this behavior is optimal.
 * **Status**: Untouched
+
+### Hold Timeout Countdown
+
+* **Type**: Feature
+* **Urgency**: Low
+* **Date Added**: Original (pre-2011)
+* **Date Updated**: 2026-08-28
+* **Location**: `AMIEventProcess.class.php:4014-4015`, `agent_console/`
+* **Description**: When agent puts call on hold, call is parked in Asterisk with configurable timeout (default 45-180 seconds, set in `features.conf` parkingtime). The `ParkedCall` AMI event includes `Timeout` parameter (seconds until auto-return) but this is NOT displayed to agents, so an agent has no warning that a held call is about to come back. Add a countdown timer showing the time REMAINING until the call returns. Implementation requires: store the parking timeout in the `Llamada` object, include `parking_timeout` in the ECCP agent status XML, add a JavaScript countdown, and add the UI element. The original request also asked for an on-hold status with a distinct colour in the status bar and an elapsed-hold counter; both were delivered by Change #61, which leaves only the countdown.
+* **Status**: Partially Solved
 
 ---
 

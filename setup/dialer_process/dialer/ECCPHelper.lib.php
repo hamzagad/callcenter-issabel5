@@ -306,20 +306,41 @@ function construirEventoPauseEnd($db, $sAgente, $id_audit_break, $pause_class)
 
 function cargarInfoPausa($db, &$infoAgente, &$recordset)
 {
-    if (!is_null($infoAgente['id_audit_break'])) {
-        if (is_null($recordset)) {
-            $recordset = $db->prepare(
-                'SELECT audit.datetime_init, break.name '.
-                'FROM audit, break WHERE audit.id_break = break.id AND audit.id = ?');
-        }
+    /* El hold es un break de tipo 'H': ambos escriben una fila de audit con
+     * datetime_init, y el Agente los sigue en campos paralelos
+     * (id_audit_break / id_audit_hold). La consulta va por audit.id, así que
+     * sirve igual para los dos. */
+    /* EN: A hold is a break of type 'H': both write an audit row with
+     * datetime_init, and Agente tracks them in parallel fields
+     * (id_audit_break / id_audit_hold). The query is keyed on audit.id, so it
+     * serves both. */
+    $bHayBreak = !is_null($infoAgente['id_audit_break']);
+    $bHayHold  = isset($infoAgente['id_audit_hold']) && !is_null($infoAgente['id_audit_hold']);
+
+    if (($bHayBreak || $bHayHold) && is_null($recordset)) {
+        $recordset = $db->prepare(
+            'SELECT audit.datetime_init, break.name '.
+            'FROM audit, break WHERE audit.id_break = break.id AND audit.id = ?');
     }
-    if (!is_null($infoAgente['id_audit_break'])) {
+    if ($bHayBreak) {
         $recordset->execute(array($infoAgente['id_audit_break']));
         $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
         $recordset->closeCursor();
         if ($tupla) {
             $infoAgente['pausename'] = $tupla['name'];
             $infoAgente['pausestart'] = $tupla['datetime_init'];
+        }
+    }
+    if ($bHayHold) {
+        // Inicio del hold actual, para que la consola pueda mostrar (y
+        // recuperar tras un refresco) el cronómetro del hold en curso.
+        // EN: start of the current hold, so the console can show - and
+        // restore after a refresh - the running hold timer.
+        $recordset->execute(array($infoAgente['id_audit_hold']));
+        $tupla = $recordset->fetch(PDO::FETCH_ASSOC);
+        $recordset->closeCursor();
+        if ($tupla) {
+            $infoAgente['holdstart'] = $tupla['datetime_init'];
         }
     }
 }

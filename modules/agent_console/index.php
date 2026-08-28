@@ -915,6 +915,39 @@ function manejarSesionActiva_HTML($module_name, &$smarty, $sDirLocalPlantillas, 
                         $_SESSION['callcenter']['ultimo_campaignform']),
         ));
     }
+
+    /* Barra naranja de llamada retenida. Va después de los bloques de arriba
+     * porque el de llamada activa asigna el verde incondicionalmente. Se toma
+     * el estado del servidor (no el del cliente) y el inicio real del hold, así
+     * que tras un F5 en mitad de una retención la barra vuelve en naranja y el
+     * cronómetro continúa desde donde iba en vez de reiniciarse a cero.
+     * describirEstadoBarra() decide lo mismo para el long-poll. */
+    /* EN: Orange bar for a held call. It comes after the blocks above because
+     * the active-call one assigns green unconditionally. It reads server state
+     * (not client state) and the real hold start, so after an F5 mid-hold the
+     * bar comes back orange and the timer continues from where it was instead
+     * of restarting at zero. describirEstadoBarra() makes the same decision for
+     * the long poll. */
+    if (describirEstadoBarra(array(
+            'calltype'      =>  is_null($estado['callinfo']) ? NULL : $estado['callinfo']['calltype'],
+            'onhold'        =>  $estado['onhold'],
+            'consultation'  =>  isset($estado['consultation']) ? $estado['consultation'] : 'none',
+            'waitingcall'   =>  !is_null($estado['waitedcallinfo']),
+            'break_id'      =>  is_null($estado['pauseinfo']) ? NULL : $estado['pauseinfo']['pauseid'],
+        )) == 'hold') {
+        $iDuracionHoldInicial = empty($estado['holdstart'])
+            ? 0 : time() - strtotime($estado['holdstart']);
+        $smarty->assign(array(
+            'CLASS_ESTADO_AGENTE_INICIAL'   =>  'issabel-callcenter-class-estado-hold',
+            'TEXTO_ESTADO_AGENTE_INICIAL'   =>  _tr('Call on hold'),
+            'CRONOMETRO'                    =>  sprintf('%02d:%02d:%02d',
+                ($iDuracionHoldInicial - ($iDuracionHoldInicial % 3600)) / 3600,
+                (($iDuracionHoldInicial - ($iDuracionHoldInicial % 60)) / 60) % 60,
+                $iDuracionHoldInicial % 60),
+        ));
+        $estadoInicial['timer_seconds'] = $iDuracionHoldInicial;
+    }
+
     $json = new Services_JSON();
     $smarty->assign(array(
         'APPLY_UI_STYLES'   =>  $json->encode(array(
@@ -1454,6 +1487,8 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
 
     $sNombrePausa = NULL;
     $iDuracionLlamada = NULL;
+    $sLinkStartLlamada = NULL;
+    $iDuracionHold = NULL;
     $iDuracionPausa = $iDuracionPausaActual = NULL;
 
     $estadoCliente = getParameter('clientstate');
@@ -1532,6 +1567,11 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     }
 
     // Verificación de la consistencia del estado de hold
+    // Duración del hold en curso, para el cronómetro de la barra naranja
+    // EN: duration of the running hold, for the orange bar's timer
+    if ($estado['onhold'] && !empty($estado['holdstart'])) {
+        $iDuracionHold = time() - strtotime($estado['holdstart']);
+    }
     if (!$estadoCliente['onhold'] && $estado['onhold']) {
         // La consola debe de entrar en hold
         $respuesta[] = construirRespuesta_holdenter();
@@ -1543,7 +1583,8 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
     }
 
     if (!is_null($estado['callinfo'])) {
-        $iDuracionLlamada = time() - strtotime($estado['callinfo']['linkstart']);
+        $sLinkStartLlamada = $estado['callinfo']['linkstart'];
+        $iDuracionLlamada = time() - strtotime($sLinkStartLlamada);
     }
 
     // Verificación de atención a llamada
@@ -1769,7 +1810,8 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
                         'callid'        =>  $evento['call_id'],
                         'callnumber'    =>  $evento['phone'],
                     );
-                    $iDuracionLlamada = time() - strtotime($nuevoEstado['linkstart']);
+                    $sLinkStartLlamada = $nuevoEstado['linkstart'];
+                    $iDuracionLlamada = time() - strtotime($sLinkStartLlamada);
 
                     // Leer información del formulario de la campaña
                     if ($nuevoEstado['calltype'] == 'incoming' && is_null($nuevoEstado['campaign_id'])) {
@@ -1900,6 +1942,21 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
             _debug(__FUNCTION__.' '.$evento['event'].': does not modify clientstate');
             break;
         }
+        /* El long-poll se bloquea hasta que llega un evento, así que la
+         * duración calculada al inicio de la petición puede tener muchos
+         * segundos de retraso cuando por fin se usa aquí. Se recalcula en el
+         * momento de usarla, o el cronómetro arrancaría atrasado justo esos
+         * segundos: se nota al salir de un hold, donde la barra vuelve a
+         * "llamada" mucho después de haberse calculado. */
+        /* EN: The long poll blocks until an event arrives, so the duration
+         * computed at the start of the request can be many seconds stale by
+         * the time it is used here. Recompute it at the point of use, or the
+         * timer starts exactly that many seconds behind - visible when leaving
+         * a hold, where the bar returns to "llamada" long after the value was
+         * computed. */
+        if (!is_null($sLinkStartLlamada)) {
+            $iDuracionLlamada = time() - strtotime($sLinkStartLlamada);
+        }
         $sDescFinal = describirEstadoBarra($estadoCliente);
         $iPosEvento = count($respuesta) - 1;
         _debug(__FUNCTION__.' old barstate '.$sDescInicial.' new barstate '.$sDescFinal);
@@ -1913,6 +1970,12 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
             $respuesta[$iPosEvento]['txt_estado_agente_inicial'] = _tr('On break').': '.$sNombrePausa;
             $respuesta[$iPosEvento]['class_estado_agente_inicial'] = 'issabel-callcenter-class-estado-break';
             $respuesta[$iPosEvento]['timer_seconds'] = $iDuracionPausa;
+            break;
+        case 'hold':
+            $respuesta[$iPosEvento]['txt_estado_agente_inicial'] = _tr('Call on hold');
+            $respuesta[$iPosEvento]['class_estado_agente_inicial'] = 'issabel-callcenter-class-estado-hold';
+            // Timer for the current hold, not the call and not the shift total
+            $respuesta[$iPosEvento]['timer_seconds'] = is_null($iDuracionHold) ? 0 : $iDuracionHold;
             break;
         case 'esperando':
             $respuesta[$iPosEvento]['txt_estado_agente_inicial'] = _tr('Waiting for call');
@@ -1973,8 +2036,26 @@ function manejarSesionActiva_checkStatus($module_name, $smarty,
  */
 function describirEstadoBarra($estado)
 {
-    if (!is_null($estado['calltype']))
+    if (!is_null($estado['calltype'])) {
+        /* El hold es un refinamiento de "en llamada", así que se comprueba
+         * dentro de esta rama y se conserva la precedencia actual (un break
+         * tomado durante una llamada sigue mostrándose en verde).
+         *
+         * Nunca durante una consulta de transferencia atendida: ahí el cliente
+         * también escucha música, pero el agente está hablando con un colega,
+         * no reteniendo la llamada. */
+        /* EN: A hold is a refinement of "on a call", so it is checked inside
+         * this branch and the existing precedence is preserved (a break taken
+         * during a call still shows green).
+         *
+         * Never during an attended-transfer consultation: the customer hears
+         * music there too, but the agent is talking to a colleague rather than
+         * holding the call. */
+        if (!empty($estado['onhold']) &&
+                (!isset($estado['consultation']) || $estado['consultation'] == 'none'))
+            return 'hold';
         return 'llamada';
+    }
     if ($estado['waitingcall'])
         return 'esperando';
     if (!is_null($estado['break_id']))
