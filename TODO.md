@@ -62,15 +62,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: When agent puts call on hold, call is parked in Asterisk with configurable timeout (default 45-180 seconds, set in `features.conf` parkingtime). The `ParkedCall` AMI event includes `Timeout` parameter (seconds until auto-return) but this is NOT displayed to agents. Feature request: (1) Add "Call On-Hold" status to agent console with distinct color in status bar (e.g., yellow/orange indicator), (2) Add hold duration counter showing elapsed time, (3) Add countdown timer showing time REMAINING until call returns. Current implementation tracks `onhold` flag and has `shiftHoldTime` for elapsed time, but no countdown. Implementation requires: store parking timeout in `Llamada` object, include `parking_timeout` in ECCP agent status XML, add JavaScript countdown timer, add UI element to agent console template.
 * **Status**: Untouched
 
-### Campaign Purge Pending Calls
-
-* **Type**: Feature
-* **Urgency**: Medium
-* **Date Added**: 2026-03-09
-* **Location**: `modules/campaign_out/`
-* **Description**: Add purge option in outgoing campaigns module to delete all pending calls (calls with status Pending, Placing, etc.). Currently no way to clear pending calls without database operations.
-* **Status**: Untouched
-
 ### RINGING-as-Free Analysis
 
 * **Type**: Investigation

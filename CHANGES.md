@@ -2,6 +2,142 @@
 
 ---
 
+## 58. Outgoing Campaigns List Improvements
+**Date**: 2026-08-28
+
+Three related improvements to the `campaign_out` (outgoing campaigns) list
+grid: a new **Purge Pending Calls** action, no-selection feedback for all
+per-row actions, and an activity-status guard on campaign deletion.
+
+### Purge Pending Calls (new feature)
+
+Resolves the "Campaign Purge Pending Calls" TODO (Medium, added 2026-03-09).
+The module had no way to clear a campaign's pending calls without direct
+database operations. The new button deletes all never-originated calls of
+the selected campaign, leaving the campaign itself (and every call that was
+actually dialed) untouched.
+
+**Design decisions** (informed by the dialer code, see also the related
+"Campaign Deletion Not Coordinated With Dialer" TODO):
+
+- **Scope = `status IS NULL` only.** A `NULL`-status call has never been
+  originated: `CampaignProcess` marks a call `'Placing'` in the same
+  statement sequence that issues `Originate()` (`CampaignProcess.class.php`)
+  and no code path ever reverts an originated call back to `NULL` (dialer
+  startup recovery sets orphaned `Placing`/`Ringing`/`OnQueue` → `Failure`
+  and `OnHold`/connected-`Success` → `Hangup`; `_cleanOrphanedPlacingCalls`
+  sets `Failure`). Retry-eligible failed calls (`Failure`, `NoAnswer`,
+  `ShortCall`, `Abandoned`) are therefore never purged, preserving call
+  history and retry counts.
+- **Guard: campaign must be Inactive (`campaign.estatus = 'I'`).** This
+  eliminates even the narrow single-cycle race with `CampaignProcess`, which
+  only selects/places calls of campaigns it considers active.
+- **Child-table cleanup limited to `call_attribute`.** Of the five tables
+  with FKs into `calls`, only `call_attribute` has rows for a `NULL`-status
+  call (written at CSV contact-load time, `paloContactInsert.class.php`).
+  `call_progress_log`, `call_recording`, `form_data_recolected` and
+  `current_calls` only gain rows after `Originate()`. Since no FK uses
+  `ON DELETE CASCADE`, `call_attribute` must be deleted first (otherwise the
+  `calls` DELETE fails with FK error 1451); the other four provably have no
+  rows for the purged set and are omitted.
+
+### No-selection feedback for all row actions (bug fix)
+
+Previously, clicking **Purge Pending Calls**, **Delete** or **Change
+Status** without selecting a campaign radio button gave no feedback: the
+purge and delete buttons still showed their confirm dialog and then silently
+reloaded the page, and Change Status silently reloaded — because the
+handlers were gated on `!is_null($id_campaign)` and an unchecked radio posts
+no `id_campaign` at all, so the guard simply fell through.
+
+### Delete guarded on activity status (new guard)
+
+`delete_campaign()` could delete a campaign in any state, including
+**Active** — the exact hot-deletion scenario behind the "Campaign Deletion
+Not Coordinated With Dialer" TODO, where removing a campaign with in-flight
+calls poisons the dialer's `SQLWorkerProcess` action queue (lost
+`call_progress_log` rows). Deleting is now refused unless the campaign is
+**Inactive (`I`) or Finished (`T`)**. This partially mitigates that TODO
+(refuses the common hot-deletion case) but does not fully resolve it — an
+Inactive campaign deactivated moments earlier could still have in-flight
+calls, and no dialer notification is sent. The TODO entry remains open. The
+same unguarded pattern also exists in `campaign_in`'s
+`paloSantoIncomingCampaign::delete_campaign()` and was left unchanged.
+
+### Implementation
+
+- `modules/campaign_out/libs/paloSantoCampaignCC.class.php`:
+  - New `purge_pending_calls($idCampaign)` — validates the campaign exists
+    and is Inactive, then runs a two-statement transaction (`DELETE FROM
+    call_attribute WHERE id_call IN (SELECT id FROM calls WHERE
+    id_campaign=? AND status IS NULL)`, then `DELETE FROM calls WHERE
+    id_campaign=? AND status IS NULL`), modeled on `delete_campaign()`.
+  - `delete_campaign()` first reads `campaign.estatus` — a missing row fails
+    with "Campaign not found", and `estatus = 'A'` fails with "Campaign must
+    be inactive or finished to delete it" (both via `$this->errMsg`, so the
+    GUI's existing delete-error branch displays them without further
+    changes).
+- `modules/campaign_out/index.php` (`listCampaign()`):
+  - POST handler for `purge_pending` (mirrors the existing delete/activate
+    handlers) and a `Purge Pending Calls` grid action button
+    (`addSubmitAction` with JS confirmation, trash-o icon), reusing the
+    radio-button campaign selection.
+  - All three handlers (`delete`, `purge_pending`, `change_status`) now show
+    a "You must select a campaign" message box (under "Delete Error" /
+    "Purge Error" / new "Change Status Error" titles) when posted without a
+    valid selection.
+  - Client-side, a shared `$js_check_campaign` JS string is prepended to the
+    Delete and Purge buttons' `onclick`: it checks that a campaign radio is
+    checked and otherwise alerts and cancels before any confirm dialog
+    appears. The `deleteList()` call was replaced by an `addHTMLAction()`
+    button replicating `deleteList()`'s exact output (submit named
+    `delete`, `fa fa-eraser` icon, red `#ec6459` styling) because
+    `deleteList()` hardcodes its `confirmSubmit` onclick, accepts no custom
+    one, and `arrActions` is private. The label keeps `_tr('Delete')`, which
+    the framework's global lang already translates (es: "Eliminar"). No
+    client-side check is possible for Change Status: the grid template's
+    combo branch (`_list.tpl`) renders the combo's submit button without any
+    onclick support, so the server-side message is the fix there.
+- `modules/campaign_out/lang/{en,es}.lang`: 10 new key pairs — purge button
+  label, confirm dialog, success/error messages, both purge guard errors,
+  delete guard error, "You must select a campaign", and "Change Status
+  Error" ("Campaign not found" shared by both guards).
+
+### Verification performed
+
+`php -l` clean on both PHP files; both lang files parse in `$arrLangModule`
+(en + es) with every new key present. CLI harnesses driving the classes
+directly plus SQL assertions (`/tmp/test_purge_pending.php` and
+`/tmp/test_delete_guard.php`, 15/15 PASS each — the delete harness only
+deletes campaigns it creates itself):
+
+- **Purge**: refused on an Active campaign with "Campaign must be inactive
+  to purge pending calls"; nonexistent id refused with "Campaign not found";
+  on a disposable Inactive campaign populated with 2 `NULL` + 1 `Failure` +
+  1 `Success` calls (each with a `call_attribute` row): only the `NULL`
+  calls and their attributes were deleted, `Failure`/`Success` rows +
+  attributes kept, campaign row survived, second purge idempotent.
+- **Delete guard**: live Active campaign refused with the
+  inactive-or-finished message and left untouched (row, status, calls);
+  nonexistent id refused; disposable Active campaign refused and kept;
+  disposable Inactive campaign (with `calls` + `call_attribute` rows) fully
+  deleted; disposable Finished (`T`) campaign deletable; no test residue.
+- **No-selection**: simulated POSTs — `delete`, `purge_pending` and
+  `change_status` without `id_campaign` all route to their message branches;
+  `delete` with a selection still routes to `delete_campaign()` exactly as
+  before. The generated Delete-button HTML was checked for correct attribute
+  quoting (double-quoted attributes, single-quoted JS strings), matching
+  `_list.tpl`'s `{$accion.html}` raw-output branch in both `tenant` and
+  `farsi_rtl` themes.
+- **GUI** (user retest): purge guard and no-selection alert confirmed
+  working; Delete without selection now alerts instead of
+  confirm-then-nothing.
+- Dialer stayed running throughout; `grep -E "ERR.*(1451|1452|23000|foreign
+  key|call_progress_log)" /opt/issabel/dialer/dialerd.log` shows no FK
+  errors.
+
+---
+
 ## 57. Fix XSS in Agent Console Debug Function
 **Date**: 2026-08-28
 
