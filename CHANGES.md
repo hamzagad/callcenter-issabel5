@@ -2,6 +2,69 @@
 
 ---
 
+## 62. ECCP Examples for the Consultation Events
+**Date**: 2026-08-28
+
+`eccp-examples/` is the reference client set for the ECCP protocol — one small
+script per protocol feature, used to exercise the dialer from a shell without
+the agent console. Changes #59 and #60 added a server-side event and extended
+another, but shipped no examples for them:
+
+- **`consultationanswered`** — new in #59/#60
+  (`ECCPProxyConn::notificarEvento_ConsultationAnswered()`), the signal that
+  lets a client offer to *complete* an attended transfer rather than only
+  cancel it.
+- **`consultationend`** — gained an optional `<reason>` child carrying the
+  `${DIALSTATUS}` of the consultation `Dial()`.
+
+Three examples close the gap, one per event, following the trigger-then-listen
+pattern `agentlogin.php` already uses: perform the request that produces the
+event, then loop on `wait_response()` / `getEvent()` until it arrives. Each one
+also breaks on the event that means "this will never arrive", so none of them
+can hang.
+
+### Files affected
+
+- `setup/dialer_process/dialer/eccp-examples/consultationstart.php` (new) →
+  `/opt/issabel/dialer/eccp-examples/`: starts the consultation with
+  `atxfercall()` and waits for `consultationstart`. Also exits on
+  `consultationend`, which is what arrives when `_verificarColegaDisponible()`
+  refuses a busy-with-Call-Waiting-off or DND colleague before any channel is
+  moved.
+- `setup/dialer_process/dialer/eccp-examples/consultationanswered.php` (new):
+  waits for the colleague to pick up. The extension argument is optional — the
+  answer happens on a physical phone and cannot be driven from ECCP, so the
+  example either starts the consultation itself or just listens while the
+  console does. Exits on `consultationend` when nobody answers.
+- `setup/dialer_process/dialer/eccp-examples/consultationend.php` (new):
+  demonstrates both shapes of `<reason>`. Listening only shows a natural end
+  (`BUSY`/`NOANSWER`/`CONGESTION`/`CHANUNAVAIL`); passing an extension starts
+  the consultation and calls `hangup()` on `consultationstart` to cancel it,
+  producing the reason-less form.
+
+No dialer or console code changed — these are clients. The examples directory
+is copied wholesale by `build/5.0/install-issabel-callcenter.sh` and the RPM
+spec, so no packaging change was needed.
+
+### Test steps
+
+With an agent logged in and on an active call:
+
+1. `consultationstart.php Agent/9000 <pass> 9001` → prints `consultationstart`
+   as soon as 9001 rings.
+2. `consultationanswered.php Agent/9000 <pass> 9001`, then answer 9001 →
+   prints `consultationanswered`.
+3. `consultationend.php Agent/9000 <pass> 9001` → prints `consultationstart`,
+   cancels, then `consultationend` with `(none - cancelled or completed)`.
+4. `consultationend.php Agent/9000 <pass>` while transferring from the console
+   to a busy or unreachable extension → `consultationend` with the reason.
+
+```bash
+grep -E "ConsultationAnswered|ConsultationEnd|CANCELAR CONSULTA" /opt/issabel/dialer/dialerd.log
+```
+
+---
+
 ## 61. On-Hold State for the Agent Console Status Bar
 **Date**: 2026-08-28
 
