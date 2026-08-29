@@ -66,8 +66,15 @@ The server presents the certificate installed by
 `/opt/issabel/dialer/eccp-cert.sh` at `/etc/issabel/dialer/eccp.pem` (key in
 `eccp.key`, readable by the `asterisk` user): by default a dedicated,
 self-signed **ECDSA P-256** certificate generated at install time. It is
-generated rather than copied from Apache so that the web server's private key is
-never duplicated into an `asterisk`-readable file.
+generated rather than copied from Apache so that a pinned fingerprint never
+moves when the web certificate is renewed, because ECDSA signs the handshake far
+faster than RSA-2048, and to keep the ECCP identity separate from the web and
+SIP/WSS one. (It is not about hiding the web key from `asterisk`: Issabel
+already ships that key as `/etc/asterisk/keys/asterisk.pem`, owned by
+`asterisk`.) `ECCP_CERT_MODE=generate-san` adds SANs for clients that also want
+hostname verification, and `ECCP_CERT_MODE=copy` reuses Issabel's Apache
+certificate — sensible when that is a real CA-issued certificate. After a
+renewal, `eccp-cert.sh renew` refreshes the copy and restarts the dialer.
 
 ### Default: encryption without verification
 

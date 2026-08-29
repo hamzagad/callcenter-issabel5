@@ -54,8 +54,15 @@ texto claro: un cliente que abra el puerto sin negociar TLS es descartado.
 El certificado del servidor lo instala /opt/issabel/dialer/eccp-cert.sh en
 /etc/issabel/dialer/eccp.pem (clave en eccp.key), legible por el usuario
 asterisk. Por omisión es un certificado autofirmado ECDSA P-256 generado en la
-instalación, no una copia del de Apache, para no duplicar la clave privada del
-servidor web en un fichero legible por asterisk.
+instalación y no una copia del de Apache, por tres motivos: que la huella fijada
+por los clientes no cambie al renovarse el certificado web, que ECDSA firme el
+saludo mucho más rápido que RSA-2048, y para separar la identidad de ECCP de la
+del web y la de SIP/WSS. (No se trata de ocultar la clave web al usuario
+asterisk: Issabel ya la entrega en /etc/asterisk/keys/asterisk.pem, propiedad de
+asterisk.) Con ECCP_CERT_MODE=generate-san se añaden SAN, y con
+ECCP_CERT_MODE=copy se reutiliza el certificado de Apache, lo que tiene sentido
+cuando éste procede de una CA real. Tras una renovación, eccp-cert.sh renew
+actualiza la copia y reinicia el dialer.
 
 Por omisión el cliente NO verifica el certificado del servidor: sólo se cifra.
 Esto es deliberado, ya que permite alcanzar al dialer por localhost, por nombre

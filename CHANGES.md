@@ -39,16 +39,20 @@ login.
 - **A dedicated self-signed ECDSA P-256 certificate is generated at install**,
   placed at `/etc/issabel/dialer/eccp.pem` (key `eccp.key`) and owned by
   `asterisk`, which the unprivileged dialer needs in order to read it.
-  Generated rather than copied from Apache so the web server's private key is
-  never duplicated into an `asterisk`-readable file: `httpd` reads that key as
-  root before dropping privileges, so `asterisk` has no access to it today and
-  should not gain any. ECDSA pairs with the TLS 1.3 AEAD suites and its
-  handshake signature is ~29x cheaper than RSA-2048 (measured on this hardware:
-  0.026 ms vs 0.767 ms), which matters because the signing happens inside the
-  single-threaded `ECCPProcess` loop. The certificate carries no SAN, because
-  nothing checks names. `ECCP_CERT_MODE=copy` still reuses Issabel's Apache
-  certificate for sites that prefer it, and a failed generate falls back to
-  copying.
+  Generated rather than copied from Apache for three reasons: **pinning
+  stability** (a pinned fingerprint must not move, and a web certificate is
+  renewed — every Let's Encrypt renewal would break every pinned client);
+  **handshake cost** (ECDSA P-256 signs ~29x faster than RSA-2048, measured
+  0.026 ms vs 0.767 ms, and that signing happens inside the single-threaded
+  `ECCPProcess` loop); and **identity separation**, so an ECCP key compromise
+  does not also impersonate the web interface and SIP/WSS TLS. It is explicitly
+  *not* about keeping the web key away from the `asterisk` user — Issabel
+  already ships that same key and certificate as `/etc/asterisk/keys/asterisk.pem`
+  owned by `asterisk`, so `copy` mode exposes nothing new. The certificate
+  carries no SAN, because nothing checks names; `ECCP_CERT_MODE=generate-san`
+  adds them for clients that also want hostname verification, and
+  `ECCP_CERT_MODE=copy` reuses Issabel's Apache certificate (sensible when that
+  is a real CA-issued certificate). A failed generate falls back to copying.
 - **The client does not verify the certificate by default.** Deliberate, and
   the reason the change is safe to deploy anywhere: verification would tie
   connectivity to names and addresses, and installs routinely reach the dialer
