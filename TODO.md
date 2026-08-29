@@ -21,6 +21,17 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## Medium
 
+### Static Queue Member Warning Never Fires
+
+* **Type**: Bug
+* **Urgency**: Medium
+* **Date Added**: 2026-08-29
+* **Location**: `SQLWorkerProcess.class.php:829`
+* **Description**: The "static agent found in queue" warning tests `stripos($regs[2], 'SIP/') === 0 || stripos($regs[2], 'IAX2/') === 0` against each `member=` line of `/etc/asterisk/queues_additional.conf`. On this Issabel version the GUI writes **every** static queue member as a Local channel - `member=Local/101@from-queue/n,0,User101,hint:101@ext-local` - regardless of the extension's technology, so the test matches nothing for SIP, PJSIP or IAX2 alike. Confirmed live: extensions 101 (SIP), 102 (PJSIP) and 105 (IAX2) were all added to queue 502 as static members and the dialer was restarted; the file was parsed and zero warnings were logged. This was originally filed as "the warning is missing PJSIP", but adding `PJSIP/` would fix nothing - the whole detector is obsolete. The underlying concern is still real: a static member receives queue calls outside the dialer's control. Either re-target the check at the `Local/<ext>@from-queue` form issabelPBX actually writes (extracting the extension and matching it against the agent list), or drop the check and the dead code with it.
+* **Status**: Untouched
+
+---
+
 ### RINGING-as-Free Analysis
 
 * **Type**: Investigation

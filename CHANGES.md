@@ -2,6 +2,60 @@
 
 ---
 
+## 66. PJSIP Trunks Accepted by Outgoing Campaigns
+**Date**: 2026-08-29
+
+`CampaignProcess::_construirPlantillaMarcado()` whitelisted `SIP/`, `Zap/`,
+`DAHDI/`, `IAX/` and `IAX2/` when a campaign pins an explicit trunk, but not
+`PJSIP/`. The check is `strpos($sTrunk, 'SIP/') === 0`, and `'PJSIP/'` does not
+start with `'SIP/'` - `strpos` returns 2, not 0 - so a PJSIP trunk fell through
+to the "unknown trunk type" branch.
+
+The GUI offers the trunk regardless: `paloSantoTrunk::getTrunks()` builds
+`upper(tech)/channelid`, so `PJSIP/<name>` appears in the campaign's trunk
+dropdown. Selecting it produced a campaign that selected contacts but never
+dialled, logging this **every 3 seconds indefinitely**:
+
+```
+ERR: trunk 'PJSIP/...' es un tipo de trunk desconocido. Actualice su versión de CallCenter.
+ERR: no se puede construir plantilla de marcado a partir de trunk 'PJSIP/...'!
+```
+
+Only the whitelist was at fault. `_leerPropiedadesTrunk()` already handles PJSIP
+correctly: it lowercases the technology and queries `asterisk.trunks` with
+`tech = 'pjsip'`, which matches the row issabelPBX writes.
+
+Note this only affects campaigns with an **explicitly pinned** trunk. A campaign
+left in dialplan mode (`trunk` = NULL) builds `Local/$OUTNUM$@from-internal` and
+lets the outbound route pick the trunk, so PJSIP trunks already worked that way
+and never touched this code.
+
+**Fix**: added `stripos($sTrunk, 'PJSIP/') === 0` to the whitelist.
+
+**Verification performed**:
+- `php -l` clean.
+- Branch-logic table over eleven trunk forms - NULL, `SIP/`, `PJSIP/`, lowercase
+  `pjsip/`, `IAX2/`, `IAX/`, `DAHDI/`, `Zap/`, a `$OUTNUM$` custom trunk, a
+  `Local/` custom trunk, and `H323/`. Only the two PJSIP forms change; `H323/`
+  is still correctly rejected and every other form is untouched.
+- Drove the **real shipped method** through reflection against the live
+  `asterisk.trunks` table:
+
+  | trunk | result |
+  |---|---|
+  | `NULL` | `Local/$OUTNUM$@from-internal` |
+  | `SIP/120Issabel4` | `SIP/120Issabel4/$OUTNUM$` + CID `1500` (unchanged) |
+  | `PJSIP/PJSIP120Issabel4` | `PJSIP/PJSIP120Issabel4/$OUTNUM$` (was rejected) |
+  | `IAX2/nosuchtrunk` | `NULL` - still rejected, no such row |
+
+- Deployed and dialer restarted clean.
+
+**Files affected**:
+- `setup/dialer_process/dialer/CampaignProcess.class.php` (also applied to
+  `/opt/issabel/dialer/`)
+
+---
+
 ## 65. ECCP XML Hardening: Escaping Helper, Serialization Fail-Safe, DB Charset
 **Date**: 2026-08-29
 

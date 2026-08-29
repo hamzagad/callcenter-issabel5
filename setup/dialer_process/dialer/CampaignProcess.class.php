@@ -2192,14 +2192,27 @@ PETICION_LLAMADAS_AGENTE;
             // This is a custom trunk that provides $OUTNUM$ already prepared
             return array('TRUNK' => $sTrunk);
         } elseif (strpos($sTrunk, 'SIP/') === 0
+            || stripos($sTrunk, 'PJSIP/') === 0
             || stripos($sTrunk, 'Zap/') === 0
             || stripos($sTrunk, 'DAHDI/') === 0
             || strpos($sTrunk,  'IAX/') === 0
             || strpos($sTrunk, 'IAX2/') === 0) {
-            // Este es un trunk Zap o SIP. Se debe concatenar el prefijo de marcado
-            // (si existe), y a continuación el número a marcar.
-            // This is a Zap or SIP trunk. The dialing prefix must be concatenated
-            // (if it exists), followed by the number to dial.
+            /* Este es un trunk Zap, SIP, PJSIP o IAX. Se debe concatenar el
+             * prefijo de marcado (si existe), y a continuación el número a marcar.
+             * PJSIP debe comprobarse por separado: 'PJSIP/' no empieza por 'SIP/'
+             * (strpos devuelve 2, no 0), asi que sin esta linea getTrunks() ofrece
+             * el trunk en la GUI pero la campaña lo rechaza como tipo desconocido
+             * y reintenta en bucle sin llegar a marcar nunca.
+             * _leerPropiedadesTrunk() ya resuelve PJSIP: pasa la tecnologia a
+             * minusculas y consulta asterisk.trunks con tech='pjsip'. */
+            /* This is a Zap, SIP, PJSIP or IAX trunk. The dialing prefix must be
+             * concatenated (if it exists), followed by the number to dial.
+             * PJSIP has to be checked separately: 'PJSIP/' does not start with
+             * 'SIP/' (strpos returns 2, not 0), so without this line getTrunks()
+             * offers the trunk in the GUI but the campaign rejects it as an
+             * unknown type and retries in a loop without ever dialling.
+             * _leerPropiedadesTrunk() already resolves PJSIP: it lowercases the
+             * technology and queries asterisk.trunks with tech='pjsip'. */
             $infoTrunk = $this->_leerPropiedadesTrunk($sTrunk);
             if (is_null($infoTrunk)) return NULL;
 
