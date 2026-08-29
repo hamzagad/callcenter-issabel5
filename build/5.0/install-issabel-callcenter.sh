@@ -1,9 +1,8 @@
 #!/bin/bash
 
-# Unified installation script for Issabel CallCenter
-# Usage:
-#   ./install-issabel-callcenter.sh          # Install from GitHub
-#   ./install-issabel-callcenter.sh --local  # Install from local directory
+# Unified installation script for Issabel CallCenter.
+# Run with --help for usage; the usage() function below is the authoritative
+# description of what this installer does.
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,17 +15,82 @@ GITHUB_ACCOUNT='ISSABELPBX'
 # previous installation blocks the install, and reused by the --local branch.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Parse arguments
+usage() {
+    cat <<EOF
+Issabel Call Center ${RELEASE} installer
+
+Usage: $(basename "$0") [options]
+
+Options:
+  -l, --local   Install from the checkout this script lives in, instead of
+                cloning https://github.com/${GITHUB_ACCOUNT}/callcenter-issabel5
+                into /usr/src/callcenter
+  -h, --help    Show this help and exit
+
+Must be run as root, and only performs a CLEAN install: it aborts when a previous
+Call Center installation is detected. Remove that one first with
+  bash ${SCRIPT_DIR}/remove-issabel-callcenter.sh
+answering 'n' to its database question to keep your existing data.
+
+What gets installed:
+  web modules       /var/www/html/modules/           (call center GUI modules)
+  dashboard patch   ProcessesStatus applet gains a "Dialer" service entry
+  dialer daemon     /opt/issabel/dialer/ + /etc/systemd/system/issabeldialer.service
+  ECCP TLS cert     /etc/issabel/dialer/eccp.pem and eccp.key  (see below)
+  menu entry        issabel-menumerge  (Call Center menu)
+  database          call_center MySQL database, created/migrated by setup/installer.php
+  logrotate         /etc/logrotate.d/issabeldialer and .../callcenter-modules
+  logs              /var/log/callcenter-module/
+  DNC helper        /usr/bin/issabel-callcenter-local-dnc
+  SSE Apache conf   /etc/httpd/conf.d/issabel-sse.conf   (Rocky hosts only)
+It also sets the asterisk user's shell to /bin/bash, then enables and starts
+issabeldialer and runs asterisk -rx 'core reload'.
+
+ECCP TLS certificate:
+  The ECCP port (20005) that agent consoles connect to is TLS-only, and the dialer
+  runs as the unprivileged asterisk user, so it needs its own readable certificate
+  and key. By default a dedicated self-signed ECDSA P-256 certificate valid for
+  10 years is generated; an existing eccp.pem/eccp.key pair is kept untouched, so
+  reinstalling never churns working TLS material. The install FAILS if this step
+  fails, because the dialer refuses to start its ECCP listener without it.
+  Manage the certificate later (renew, remove, force a new one) with
+  /opt/issabel/dialer/eccp-cert.sh.
+
+  ECCP_CERT_MODE=generate       dedicated self-signed certificate (default)
+  ECCP_CERT_MODE=generate-san   same, plus SANs for this host's names and IPs
+  ECCP_CERT_MODE=copy           reuse Issabel's Apache certificate instead
+  ECCP_SRC_CERT=, ECCP_SRC_KEY= source paths used by copy mode
+
+Examples:
+  bash $(basename "$0")                    # install from GitHub
+  bash $(basename "$0") --local            # install from this checkout
+  ECCP_CERT_MODE=copy bash $(basename "$0") --local
+EOF
+}
+
+# Parse arguments. This runs before the root check below so that --help works
+# for any user, and rejects anything unrecognised rather than falling through
+# into a full installation.
 LOCAL_INSTALL=false
-if [ "$1" = "--local" ] || [ "$1" = "-l" ]; then
-    LOCAL_INSTALL=true
-fi
+ORIG_ARGS="$*"   # kept for the "sudo bash ..." hint below, which runs after the shifts
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -l|--local) LOCAL_INSTALL=true ;;
+        -h|--help)  usage; exit 0 ;;
+        *)
+            echo -e "${RED}Error: unknown option '$1'${NC}" >&2
+            echo "Run 'bash $0 --help' for usage." >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 # Must run as root: the installer writes to /opt, /etc and /var/www, manages
 # systemd units and the database, and installs the ECCP TLS certificate.
 if [ "$(id -u)" -ne 0 ]; then
     echo -e "${RED}Error: this installer must be run as root.${NC}"
-    echo -e "${YELLOW}Try:  sudo bash $0 $*${NC}"
+    echo -e "${YELLOW}Try:  sudo bash $0 $ORIG_ARGS${NC}"
     exit 1
 fi
 

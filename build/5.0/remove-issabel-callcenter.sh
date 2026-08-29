@@ -1,5 +1,38 @@
 #!/bin/bash
 
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+usage() {
+    cat <<EOF
+Issabel Call Center uninstaller
+
+Usage: $(basename "$0") [options]
+
+Options:
+  -h, --help   Show this help and exit
+
+Run as root. Removes the Issabel Call Center dialer and its web modules, then
+asks whether to drop the call_center MySQL database. Answer 'n' to keep your
+agents, campaigns, calls, forms, breaks and reports so a later installation can
+reuse them; 'y' starts from an empty database.
+EOF
+}
+
+# Parse arguments before anything is stopped or deleted below.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        *)
+            echo -e "${RED}Error: unknown option '$1'${NC}" >&2
+            echo "Run 'bash $0 --help' for usage." >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+
 #stop service and disable it
 systemctl stop issabeldialer 2>/dev/null || true
 systemctl disable issabeldialer 2>/dev/null || true

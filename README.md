@@ -35,6 +35,8 @@ cd callcenter-issabel5
 bash build/5.0/install-issabel-callcenter.sh -l
 # For production repo installation:
 bash build/5.0/install-issabel-callcenter.sh
+# To see what the installer does (options, installed files, ECCP TLS certificate):
+bash build/5.0/install-issabel-callcenter.sh -h
 # To Uninstall:
 bash build/5.0/remove-issabel-callcenter.sh
 
