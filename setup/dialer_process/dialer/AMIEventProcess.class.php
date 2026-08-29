@@ -1638,9 +1638,26 @@ class AMIEventProcess extends TuberiaProcess
 
         // Se arma mapa de miembros tal como aparecen en database --> channel
         // Build map of members as they appear in database --> channel
+        /* La letra de prefijo debe coincidir con la convencion propia de
+         * issabelPBX en admin/modules/queues/agi-bin/queue_devstate.agi
+         * ($member_prefix): A=AGENT, S=SIP, P=PJSIP, X=IAX2, Z=ZAP, D=DAHDI.
+         * Tomar $type[0] es incorrecto para IAX2: da 'I' en vez de 'X', asi
+         * que el agente nunca coincide con la clave que escribe issabelPBX. */
+        /* The prefix letter must match issabelPBX's own convention in
+         * admin/modules/queues/agi-bin/queue_devstate.agi ($member_prefix):
+         * A=AGENT, S=SIP, P=PJSIP, X=IAX2, Z=ZAP, D=DAHDI.
+         * Taking $type[0] is wrong for IAX2: it yields 'I' instead of 'X', so
+         * the agent never matches the key issabelPBX actually writes. */
+        $prefijoTecnologia = array(
+            'AGENT' => 'A', 'SIP' => 'S', 'PJSIP' => 'P',
+            'IAX2'  => 'X', 'ZAP' => 'Z', 'DAHDI' => 'D',
+        );
         $arrExt = array();
         foreach ($total_agents as $tupla) {
-            $extension = $tupla['type'][0] . $tupla['number'];
+            $sTipo = strtoupper($tupla['type']);
+            $sPrefijo = isset($prefijoTecnologia[$sTipo])
+                ? $prefijoTecnologia[$sTipo] : substr($tupla['type'], 0, 1);
+            $extension = $sPrefijo . $tupla['number'];
             $arrExt[$extension] = $tupla['type'].'/'.$tupla['number'];
         }
 

@@ -457,6 +457,20 @@ class MultiplexServer
     public function encolarDatosEscribir($sKey, &$s)
     {
         if (!isset($this->_conexiones[$sKey])) return;
+        if (!is_string($s)) {
+            /* Un FALSE aqui viene tipicamente de un asXML() que fallo. Al
+             * concatenarlo se convierte en cadena vacia y la respuesta o el
+             * evento desaparecen sin dejar rastro; se reporta en vez de
+             * perderse en silencio. */
+            /* A FALSE here typically comes from a failed asXML(). Concatenating
+             * it turns it into an empty string and the response or event
+             * vanishes without a trace; report it instead of losing it
+             * silently. */
+            $this->_oLog->output('ERR: '.__METHOD__.": datos a escribir para $sKey no son".
+                ' una cadena ('.gettype($s).'), no se escribe nada. | EN: ERR: '.__METHOD__.
+                ": data to write for $sKey is not a string (".gettype($s).'), nothing written.');
+            return;
+        }
         $this->_conexiones[$sKey]['pendiente_escribir'] .= $s;
     }
 

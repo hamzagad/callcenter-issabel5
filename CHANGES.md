@@ -2,6 +2,253 @@
 
 ---
 
+## 65. ECCP XML Hardening: Escaping Helper, Serialization Fail-Safe, DB Charset
+**Date**: 2026-08-29
+
+Resolves the **Critical** "ECCP Response Silently Dropped When Serialization
+Fails" and **High** "Hand-Rolled XML Escaping in the ECCP Protocol" TODOs, both
+raised by a field report: a WebRTC client made the dialer log
+`SimpleXMLElement::asXML(): invalid character value` while database connections
+climbed until they hit `max_connections`.
+
+### (a) One escaping helper instead of 54 copies of the same expression
+
+Every value written into an ECCP response went through
+`str_replace('&', '&amp;', $v)` before `addChild()` - 35 times in
+`ECCPConn.class.php` and 19 times in `ECCPProxyConn.class.php`. Confirmed before
+touching anything that all 54 were **byte-for-byte the same expression** applied
+to a plain variable or array element, with no variants, so the replacement is
+purely mechanical. (Three other `str_replace()` calls in these files strip a
+date prefix and are unrelated; they were left alone.)
+
+Measured what `addChild()` actually does on PHP 7.4 before changing it:
+
+| input | `addChild()` alone | with the old `str_replace` |
+|---|---|---|
+| `<` and `>` | escaped correctly | escaped correctly |
+| `&` | **value dropped entirely** ("unterminated entity reference") | correct |
+| `&amp;` as literal text | round-trips | round-trips |
+| control char (e.g. `0x0B`) | value emptied, libxml warning | value emptied, libxml warning |
+| invalid UTF-8 | **silently truncated at the bad byte, no warning** | same |
+
+So the `&` escaping is load-bearing and had to be preserved exactly - verified by
+round-tripping `A & B`, `A &amp; B`, `R&D` and `100% & <b>` through
+`addChild()` -> `asXML()` -> re-parse, all byte-identical before and after. The
+two real gaps are the last two rows.
+
+**Fix**: added `xmlSafe()` to `ECCPHelper.lib.php` (the library `ECCPConn` and
+`SQLWorkerProcess` already load; `ECCPProxyConn` now loads it too) and replaced
+all 54 call sites. It repairs invalid UTF-8 to `U+FFFD`, strips the characters
+forbidden in XML 1.0 (`0x00-0x08`, `0x0B`, `0x0C`, `0x0E-0x1F`) while keeping
+tab, newline and carriage return, then applies the original `&` escape.
+
+### (b) The client is now always answered
+
+`do_eccprequest()` ended with `$s = $response->asXML();` and returned `$s`
+unchecked. When libxml refuses to serialize the tree, `asXML()` returns `FALSE`,
+which reaches `MultiplexServer::encolarDatosEscribir()` and is concatenated with
+`.=` - appending an empty string. **Nothing was written to the socket and the
+request was never answered**, with no log line saying a response had been lost.
+
+That is what pumped the database. A client that retries or reconnects on timeout
+multiplies in-flight requests; each concurrent request is dispatched to a
+*distinct* free `ECCPWorkerProcess` (`HubProcess.class.php:307-326`), a new one
+is spawned when none is free, each holds its own PDO connection, and idle
+workers are never reaped - so the connection count only ever climbs. The
+unbounded worker pool is intended behaviour and was left as is; the silent drop
+was the defect.
+
+**Fix**, two layers:
+- `ECCPConn.class.php` - if `asXML()` returns `FALSE`, log it and send a
+  well-formed `<failure>` response carrying the original request id, with a
+  fixed literal-XML last resort if even that cannot be serialized.
+- `MultiplexServer.class.php` - `encolarDatosEscribir()` now rejects and logs a
+  non-string payload instead of silently appending nothing. This covers the 17
+  further `asXML()` call sites on `ECCPProxyConn`'s asynchronous event paths,
+  which previously could drop an event without a trace.
+
+Note the reporting client's libxml differs from this box's. On libxml 2.9.7 the
+same input degrades gently - `xmlEscapeEntities : char out of range`, the value
+is emptied and a string is still returned. The `invalid character value` message
+and the outright `FALSE` come from a newer libxml. Same root cause, worse
+failure mode there; (a) prevents it and (b) contains it either way.
+
+### (c) `call_center` database default charset
+
+Change #32 converted every table to `utf8mb4`, but the **database itself** was
+still `latin1`: `paloSantoInstaller::createNewDatabaseMySQL()` issues a bare
+`CREATE DATABASE $db_name` with no charset, so it inherits the server default.
+Every existing table was already `utf8mb4` so nothing was broken, but any future
+`CREATE TABLE` without an explicit charset would have inherited `latin1` - the
+exact trap Change #32 had to clean up for five tables. The installer's
+`convertirCharsetUtf8mb4()` fixes tables, not the schema default.
+
+**Fix**: `setup/installer.php` now runs
+`ALTER DATABASE call_center CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci`
+before the per-table conversion. Applied to the live database as well.
+`paloSantoInstaller.class.php` is Issabel core, shared by every module and
+replaced on upgrade, so it was deliberately not modified.
+
+**Verification performed** (live box, idle: 0 channels, 0 agents online, no
+active campaigns; Asterisk never restarted, uptime continuous throughout):
+- `php -l` clean on all five edited files.
+- Confirmed all 54 escaping call sites were one identical expression before
+  replacing them, and that zero occurrences of the old idiom remain.
+- Unit-tested `xmlSafe()` over 14 inputs - ampersands, literal `&amp;`, angle
+  brackets, a script tag, accented and CJK and emoji UTF-8, vertical tab, NUL,
+  ESC/BEL, invalid latin1 bytes, tab/newline, an integer and NULL. All 14 now
+  serialize with **no libxml warning at all**; previously four of them warned or
+  silently lost data. Clean input still round-trips byte-identical.
+- End-to-end through the running dialer: stored
+  `R&D <b>x</b>\x0B café \x00 ñ` into `break.name`, then read it back over
+  ECCP with `getpauses.php`. The client received
+  `R&D <b>x</b> café  ñ` - ampersand and markup intact, control characters
+  stripped, UTF-8 preserved. The same bytes through the old expression produced
+  an **empty** value plus `xmlEscapeEntities : char out of range`. Value
+  restored afterwards.
+- Both fallback layers in (b) were parsed to confirm they are well-formed.
+- Confirmed the two `asterisk`-database connections changed in #64 are safe:
+  that database and all 98 of its tables are already `utf8mb4`, and
+  `SELECT user, dial FROM devices` plus `SHOW TABLES LIKE 'trunks'` return
+  identical results with and without the charset in the DSN.
+- Regression sweep after deploy and dialer restart: `getpauses`,
+  `getcampaignlist`, `agentstatus` for SIP/PJSIP/IAX2, `getagentqueues` for all
+  three techs and `getextensionstatus` against ground truth - all correct, no
+  `ERR`/`WARN` in the dialer log.
+
+**Files affected** (repo and the live copies under `/opt/issabel/dialer/`):
+- `setup/dialer_process/dialer/ECCPHelper.lib.php` - new `xmlSafe()`
+- `setup/dialer_process/dialer/ECCPConn.class.php` - 35 call sites, `asXML()` fail-safe
+- `setup/dialer_process/dialer/ECCPProxyConn.class.php` - 19 call sites, library include
+- `setup/dialer_process/dialer/MultiplexServer.class.php` - non-string write guard
+- `setup/installer.php` - `ALTER DATABASE ... utf8mb4`
+
+---
+
+## 64. Device-Type Defects Found in the PJSIP / IAX2 Test Pass
+**Date**: 2026-08-29
+
+All prior call-center testing had been done with `chan_sip` devices. A targeted
+pass over the code that actually branches on channel technology turned up four
+defects, three of them confirmed live with a same-run SIP control proving the
+failure was device-type-specific. All four are fixed here.
+
+### (a) IAX2 agents could never log in - wrong dynamic-queue prefix letter
+
+`AMIEventProcess::_cb_Command_DatabaseShow()` derived the AstDB member key from
+the **first letter of the agent type**:
+
+```php
+$extension = $tupla['type'][0] . $tupla['number'];   // 'IAX2'[0] === 'I' -> I105
+```
+
+issabelPBX's own convention, in
+`/var/www/html/admin/modules/queues/agi-bin/queue_devstate.agi:96`, is:
+
+```php
+$member_prefix = array('A'=>'AGENT','S'=>'SIP','P'=>'PJSIP','X'=>'IAX2','Z'=>'ZAP','D'=>'DAHDI');
+```
+
+`S`/`P`/`A` happen to agree with `$type[0]`; **`IAX2` maps to `X`, not `I`.** So
+for IAX2 - and only IAX2 - the dialer looked up a key that nothing ever writes.
+The GUI writes `X105`, the dialer looked for `I105`, found nothing, and refused
+login with "dynamic agent IAX2/105 is not dynamic member of any queue".
+
+Adjudicated by tracing all three consumers of the QPENALTY keys rather than
+assuming: the dialplan and `generate_queue_hints.php` read bare numbers, and
+`queue_devstate.agi` maps the prefix letter to `MEMBERTECH`, which becomes
+`AddQueueMember(${QUEUENO},${MEMBERTECH}/${CALLBACKNUM},...)`. `X` is correct
+and `I` is not a valid prefix anywhere, so **the dialer was the wrong side**.
+
+**Fix**: replaced `$type[0]` with an explicit technology-to-prefix map matching
+`queue_devstate.agi`, falling back to `substr($type,0,1)` for any technology not
+in the map so unknown types behave exactly as before.
+
+### (b) A dead PJSIP phone reported as registered
+
+`Request_eccpauth_getextensionstatus()` decided a PJSIP endpoint was registered
+with:
+
+```php
+if (stripos($line, 'Contact:') !== false && stripos($line, 'Avail') !== false)
+```
+
+Asterisk 18 contact statuses are `Avail`, **`Unavail`**, `Unknown`, `NonQual`,
+`Created`, `Removed`. `'Unavail'` contains `'Avail'` as a substring, so an
+endpoint whose contact had gone stale reported `registered: yes` and the agent
+was allowed to log in on a phone that could not receive calls. Confirmed live:
+PJSIP 102 with an `Unavail` contact returned `yes`, while SIP 101 in the same
+state (`UNREACHABLE`) correctly returned `no`.
+
+**Fix**: split the contact line on whitespace and compare the status **token by
+token** against an explicit whitelist, instead of substring-matching the whole
+line. This also removes a second, subtler false positive: a contact URI that
+merely contained the letters "avail" used to be enough.
+
+`NonQual` (contact present, qualify disabled) deliberately still counts as *not*
+registered, exactly as before - this change is scoped to the `Unavail` bug and
+introduces no new permissive case. The whitelist is a named array so accepting
+`NonQual` later is a one-token edit.
+
+### (c) Dialer database connections spoke latin1 to utf8mb4 tables
+
+Change #32 converted every `call_center` table to `utf8mb4`, and noted that
+`paloSantoDB.class.php` and the `agent_console` copy already pass
+`charset=utf8mb4` in the PDO DSN. **The dialer's own five DSNs did not.** They
+therefore negotiated `latin1` against `utf8mb4` columns, so any non-ASCII text
+written by the web GUI and read back by the dialer (or vice versa) came back as
+mojibake or as invalid UTF-8 - which then feeds straight into
+`SimpleXMLElement::asXML()` on the ECCP path.
+
+Verified on the live box: without the charset the connection reported
+`character_set_client=latin1`; with it, `utf8mb4`, and a round trip of
+`café ñ 日本 😀 & <tag>` came back byte-identical.
+
+**Fix**: appended `;charset=utf8mb4` to all five dialer PDO DSNs (three to
+`call_center`, two to the issabelPBX `asterisk` DB).
+
+**Related**: the `call_center` *schema* default was still `latin1` at the time of
+this change. Fixed in Change #65(c).
+
+### (d) Removed a dead configuration key
+
+`modules/agent_console/configs/default.conf.php` defined
+`'hardware' => 'SIP|IAX2|ZAP|H323|OH323'`, a stale technology whitelist that
+predates PJSIP. Nothing in the repo or the live tree ever read the key, so it
+was misleading rather than harmful. Removed.
+
+**Verification performed** (live box, idle: 0 channels, no agents logged in, no
+active campaigns; Asterisk never restarted):
+- `php -l` clean on all six edited files.
+- Unit-tested the new PJSIP parser against ten real `pjsip show endpoint`
+  output shapes (header-only, Avail, Unavail, Unknown, NonQual, Created, two
+  contacts in each combination, `Not Found`, and a URI containing "avail").
+  All ten produce the expected verdict; the only behaviour changes versus the
+  old parser are the intended ones.
+- Confirmed the prefix map changes `IAX2` only - `Agent`, `SIP`, `PJSIP`,
+  `ZAP`, `DAHDI` and unknown technologies all keep their previous letter. Those
+  are the only four types present in `call_center.agent` on this box.
+- End-to-end after deploy and dialer restart, with the GUI-written `X105` key
+  in AstDB: `getagentqueues IAX2/105` returns queue `502` (it returned empty
+  before the fix), while `SIP/101` and `PJSIP/102` still return `[502, 503]`
+  and `SIP/103` still returns `502` - no regression.
+- `getextensionstatus` against ground truth after deploy: `SIP/101` yes
+  (peer OK), `IAX2/105` yes (peer OK), `PJSIP/102` no (no contacts). The
+  live `Unavail` case is covered by the unit test rather than a live capture,
+  because the box has no working PJSIP soft client.
+- Dialer restarted clean with no `ERR`/`WARN` in the log.
+
+**Files affected** (repo and the live copies under `/opt/issabel/dialer/` and
+`/var/www/html/modules/`):
+- `setup/dialer_process/dialer/AMIEventProcess.class.php` - prefix map
+- `setup/dialer_process/dialer/ECCPConn.class.php` - PJSIP status parser, DSN
+- `setup/dialer_process/dialer/CampaignProcess.class.php` - two DSNs
+- `setup/dialer_process/dialer/ECCPWorkerProcess.class.php` - DSN
+- `setup/dialer_process/dialer/SQLWorkerProcess.class.php` - DSN
+- `modules/agent_console/configs/default.conf.php` - dead `hardware` key
+
+---
+
 ## 63. TLS Encryption for the ECCP Protocol
 **Date**: 2026-08-29
 

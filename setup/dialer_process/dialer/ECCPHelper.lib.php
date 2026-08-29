@@ -22,6 +22,68 @@
   +----------------------------------------------------------------------+
   $Id: ECCPHelper.lib.php,v 1.48 2009/03/26 13:46:58 alex Exp $ */
 
+
+/**
+ * Preparar un valor arbitrario para insertarlo como texto en una respuesta XML
+ * del protocolo ECCP.
+ *
+ * SimpleXMLElement::addChild() escapa '<' y '>' por su cuenta, pero NO escapa
+ * '&': un '&' crudo provoca "unterminated entity reference" y descarta el valor
+ * completo. Por eso el escape de '&' se conserva exactamente como estaba en las
+ * 54 llamadas que esta funcion reemplaza. Lo que addChild() no maneja, y esta
+ * funcion agrega, es:
+ *
+ *   - UTF-8 invalido, que addChild() trunca en silencio en el primer byte malo,
+ *     sin emitir ninguna advertencia.
+ *   - Caracteres prohibidos en XML 1.0 (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F), que
+ *     hacen que libxml vacie el valor o, en versiones mas nuevas, que asXML()
+ *     falle por completo y devuelva FALSE, dejando al cliente sin respuesta.
+ *
+ * EN: Prepare an arbitrary value to be inserted as text into an ECCP protocol
+ * XML response.
+ *
+ * SimpleXMLElement::addChild() escapes '<' and '>' by itself, but does NOT
+ * escape '&': a raw '&' raises "unterminated entity reference" and drops the
+ * whole value. That is why the '&' escaping is kept exactly as it was in the 54
+ * call sites this function replaces. What addChild() does not handle, and this
+ * function adds, is:
+ *
+ *   - Invalid UTF-8, which addChild() silently truncates at the first bad byte,
+ *     without emitting any warning at all.
+ *   - Characters forbidden in XML 1.0 (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F), which
+ *     make libxml empty the value or, on newer versions, make asXML() fail
+ *     outright and return FALSE, leaving the client with no response.
+ *
+ * @param   mixed   $sValor     Valor a insertar / value to insert
+ *
+ * @return  string  Texto seguro para addChild() / text safe for addChild()
+ */
+function xmlSafe($sValor)
+{
+    $sValor = (string)$sValor;
+
+    // Reparar UTF-8 invalido antes de que addChild() lo trunque en silencio.
+    // Repair invalid UTF-8 before addChild() silently truncates it.
+    if ($sValor !== '' && !mb_check_encoding($sValor, 'UTF-8')) {
+        $mSustitutoPrevio = mb_substitute_character();
+        mb_substitute_character(0xFFFD);
+        $sValor = mb_convert_encoding($sValor, 'UTF-8', 'UTF-8');
+        mb_substitute_character($mSustitutoPrevio);
+    }
+
+    /* Quitar caracteres prohibidos en XML 1.0. Se opera byte a byte a proposito:
+     * todos estos bytes son < 0x80 y por lo tanto nunca aparecen dentro de una
+     * secuencia UTF-8 multibyte, cuyos bytes de continuacion son 0x80-0xBF. */
+    /* Strip characters forbidden in XML 1.0. This works byte-wise on purpose:
+     * all of these bytes are < 0x80 and therefore never appear inside a
+     * multi-byte UTF-8 sequence, whose continuation bytes are 0x80-0xBF. */
+    $sValor = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $sValor);
+
+    // Escape de '&': identico al que hacian las llamadas reemplazadas.
+    // '&' escaping: identical to what the replaced call sites did.
+    return str_replace('&', '&amp;', $sValor);
+}
+
 /**
  * Procedimiento que consulta toda la información de la base de datos sobre
  * una llamada de campaña. Se usa para el evento agentlinked, así como para

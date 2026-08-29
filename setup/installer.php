@@ -128,6 +128,19 @@ if (file_exists($path_script_db))
     actualizarLongitudCampo($pDB, 'call_center', 'current_call_entry', 'ChannelClient', 50);
     actualizarLongitudCampo($pDB, 'call_center', 'current_calls', 'ChannelClient', 50);
 
+    /* Fijar el charset por omision de la base de datos misma. El CREATE
+     * DATABASE de paloSantoInstaller::createNewDatabaseMySQL() no lleva
+     * charset, asi que la base hereda el del servidor (latin1 en una
+     * instalacion tipica) aunque todas sus tablas sean utf8mb4. Cualquier
+     * CREATE TABLE futuro sin charset explicito heredaria latin1. */
+    /* Set the default charset of the database itself. The CREATE DATABASE in
+     * paloSantoInstaller::createNewDatabaseMySQL() carries no charset, so the
+     * database inherits the server default (latin1 on a typical install) even
+     * though all of its tables are utf8mb4. Any future CREATE TABLE without an
+     * explicit charset would inherit latin1. */
+    $pDB->genQuery('ALTER DATABASE call_center CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+    fputs(STDERR, "INFO: call_center database default charset set to utf8mb4 | Es: charset por omision de la base call_center fijado a utf8mb4\n");
+
     // Convertir todas las tablas a utf8mb4 para soporte completo de Unicode
     // EN: Convert all tables to utf8mb4 for full Unicode support
     convertirCharsetUtf8mb4($pDB, 'call_center');

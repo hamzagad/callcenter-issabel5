@@ -236,7 +236,7 @@ class CampaignProcess extends TuberiaProcess
         if (isset($infoConfig['database']) && isset($infoConfig['database']['dbpass']))
             $dbPass = $infoConfig['database']['dbpass'];
 
-        return array("mysql:host=$dbHost;dbname=call_center", $dbUser, $dbPass);
+        return array("mysql:host=$dbHost;dbname=call_center;charset=utf8mb4", $dbUser, $dbPass);
     }
 
     private function _iniciarConexionDB()
@@ -2436,7 +2436,7 @@ PETICION_LLAMADAS_AGENTE;
             return NULL;
         }
         try {
-            $dbConn = new PDO("mysql:host={$dbParams['AMPDBHOST']};dbname=asterisk",
+            $dbConn = new PDO("mysql:host={$dbParams['AMPDBHOST']};dbname=asterisk;charset=utf8mb4",
                 $dbParams['AMPDBUSER'], $dbParams['AMPDBPASS']);
             $dbConn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $dbConn->setAttribute(PDO::ATTR_EMULATE_PREPARES, FALSE);

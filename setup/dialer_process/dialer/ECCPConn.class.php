@@ -217,6 +217,44 @@ class ECCPConn
 
         $s = $response->asXML();
 
+        if ($s === FALSE) {
+            /* asXML() devuelve FALSE cuando libxml no puede serializar el arbol,
+             * por ejemplo si un caracter ilegal en XML 1.0 se colo en algun valor.
+             * Sin este respaldo el FALSE se concatena como cadena vacia en
+             * MultiplexServer::encolarDatosEscribir(), no se escribe nada al
+             * socket, y el cliente queda esperando una respuesta que nunca llega:
+             * reintenta, reconecta, y cada peticion simultanea toma un
+             * ECCPWorkerProcess nuevo con su propia conexion PDO, hasta agotar
+             * max_connections. Siempre hay que devolver algo bien formado. */
+            /* asXML() returns FALSE when libxml cannot serialize the tree, for
+             * example if a character illegal in XML 1.0 slipped into some value.
+             * Without this fallback the FALSE is concatenated as an empty string
+             * in MultiplexServer::encolarDatosEscribir(), nothing is written to
+             * the socket, and the client waits for a response that never arrives:
+             * it retries, reconnects, and every simultaneous request takes a fresh
+             * ECCPWorkerProcess with its own PDO connection, until max_connections
+             * is exhausted. Something well-formed must always be returned. */
+            $sNombrePeticion = (isset($comando) && !is_null($comando))
+                ? $comando->getName() : 'desconocida/unknown';
+            $this->_log->output('ERR: '.__METHOD__.': no se puede serializar a XML la'.
+                ' respuesta a la peticion '.$sNombrePeticion.', se responde fallo generico.'.
+                ' | EN: ERR: '.__METHOD__.': cannot serialize the response to request '.
+                $sNombrePeticion.' as XML, replying with a generic failure.');
+
+            $xFallo = $this->_generarRespuestaFallo(500,
+                'Internal server error - response could not be serialized',
+                isset($request['id']) ? (string)$request['id'] : NULL);
+            $s = $xFallo->asXML();
+
+            // Ultimo recurso: XML fijo, sin ningun dato variable que pueda fallar.
+            // Last resort: fixed XML, with no variable data that could fail.
+            if ($s === FALSE) {
+                $s = '<?xml version="1.0"?>'."\n".
+                     '<response><failure><code>500</code>'.
+                     '<message>Internal server error</message></failure></response>'."\n";
+            }
+        }
+
         return array($s, $nuevos_valores, $eventos);
     }
 
@@ -249,7 +287,7 @@ class ECCPConn
     {
         $failureTag = $x->addChild("failure");
         $failureTag->addChild("code", $iCodigo);
-        $failureTag->addChild("message", str_replace('&', '&amp;', $sMensaje));
+        $failureTag->addChild("message", xmlSafe($sMensaje));
     }
 
     private function _parseAgent($sAgente)
@@ -460,7 +498,7 @@ class ECCPConn
             $this->_agregarRespuestaFallo($xml_GetQueueScriptResponse, 404, 'Queue not found in incoming queues');
             return $xml_response;
         }
-        $xml_GetQueueScriptResponse->addChild('script', str_replace('&', '&amp;', $tupla['script']));
+        $xml_GetQueueScriptResponse->addChild('script', xmlSafe($tupla['script']));
         return $xml_response;
     }
 
@@ -598,7 +636,7 @@ class ECCPConn
             $xml_campaign = $xml_campaigns->addChild('campaign');
             $xml_campaign->addChild('id', $tupla['id']);
             $xml_campaign->addChild('type', $tupla['campaign_type']);
-            $xml_campaign->addChild('name', str_replace('&', '&amp;', $tupla['name']));
+            $xml_campaign->addChild('name', xmlSafe($tupla['name']));
             $xml_campaign->addChild('status', $descEstados[$tupla['status']]);
         }
 
@@ -904,11 +942,11 @@ class ECCPConn
                  * with HTML entities to the database. For compatibility with
                  * old campaigns, HTML encoding is undone here. */
                 $sValor = html_entity_decode($sValor, ENT_COMPAT, 'UTF-8');
-                $xml_GetCampaignInfoResponse->addChild($sKey, str_replace('&', '&amp;', $sValor));
+                $xml_GetCampaignInfoResponse->addChild($sKey, xmlSafe($sValor));
                 break;
             case 'status':
                 $sValor = $descEstados[$sValor];
-                $xml_GetCampaignInfoResponse->addChild($sKey, str_replace('&', '&amp;', $sValor));
+                $xml_GetCampaignInfoResponse->addChild($sKey, xmlSafe($sValor));
                 break;
             case 'trunk':   // Sólo para campañas salientes
                                 // Only for outgoing campaigns
@@ -916,7 +954,7 @@ class ECCPConn
                 // Pass to default case if value is not null
                 if (is_null($sValor)) break;
             default:
-                $xml_GetCampaignInfoResponse->addChild($sKey, str_replace('&', '&amp;', $sValor));
+                $xml_GetCampaignInfoResponse->addChild($sKey, xmlSafe($sValor));
                 break;
             }
         }
@@ -983,8 +1021,8 @@ class ECCPConn
             $xml_Field = $xml_Form->addChild('field');
             $xml_Field->addAttribute('order', $tuplaCampo['order']);
             $xml_Field->addAttribute('id', $tuplaCampo['id']);
-            $xml_Field->addChild('label', str_replace('&', '&amp;', $tuplaCampo['label']));
-            $xml_Field->addChild('type', str_replace('&', '&amp;', $tuplaCampo['type']));
+            $xml_Field->addChild('label', xmlSafe($tuplaCampo['label']));
+            $xml_Field->addChild('type', xmlSafe($tuplaCampo['type']));
 
             // TODO: permitir especificar longitud de la entrada
             // TODO: allow specifying input length
@@ -1004,7 +1042,7 @@ class ECCPConn
                 }
                 $xml_Values = $xml_Field->addChild('options');
                 foreach (explode(',', $tuplaCampo['value']) as $sValor) {
-                    $xml_Values->addChild('value', str_replace('&', '&amp;', $sValor));
+                    $xml_Values->addChild('value', xmlSafe($sValor));
                 }
             } else {
                 // Usar el valor 'value' como valor por omisión.
@@ -1016,7 +1054,7 @@ class ECCPConn
                 // implemented in agent_console or in web interface form definition
                 $sDefVal = trim($tuplaCampo['value']);
                 if ($sDefVal != '')
-                    $xml_Field->addChild('default_value', str_replace('&', '&amp;', $sDefVal));
+                    $xml_Field->addChild('default_value', xmlSafe($sDefVal));
             }
         }
     }
@@ -1075,9 +1113,9 @@ class ECCPConn
                 $xml_callAttrlist = $xml_GetCallInfoResponse->addChild($sKey);
                 foreach ($valor as $tuplaAttr) {
                     $xml_callAttr = $xml_callAttrlist->addChild('attribute');
-                    $xml_callAttr->addChild('label', str_replace('&', '&amp;', $tuplaAttr['label']));
-                    $xml_callAttr->addChild('value', str_replace('&', '&amp;', $tuplaAttr['value']));
-                    $xml_callAttr->addChild('order', str_replace('&', '&amp;', $tuplaAttr['order']));
+                    $xml_callAttr->addChild('label', xmlSafe($tuplaAttr['label']));
+                    $xml_callAttr->addChild('value', xmlSafe($tuplaAttr['value']));
+                    $xml_callAttr->addChild('order', xmlSafe($tuplaAttr['order']));
                 }
                 break;
             case 'matching_contacts':
@@ -1087,9 +1125,9 @@ class ECCPConn
                     $xml_callAttrlist->addAttribute('id', $id_contact);
                     foreach ($tuplaContact as $tuplaAttr) {
                         $xml_callAttr = $xml_callAttrlist->addChild('attribute');
-                        $xml_callAttr->addChild('label', str_replace('&', '&amp;', $tuplaAttr['label']));
-                        $xml_callAttr->addChild('value', str_replace('&', '&amp;', $tuplaAttr['value']));
-                        $xml_callAttr->addChild('order', str_replace('&', '&amp;', $tuplaAttr['order']));
+                        $xml_callAttr->addChild('label', xmlSafe($tuplaAttr['label']));
+                        $xml_callAttr->addChild('value', xmlSafe($tuplaAttr['value']));
+                        $xml_callAttr->addChild('order', xmlSafe($tuplaAttr['order']));
                     }
                 }
                 break;
@@ -1101,13 +1139,13 @@ class ECCPConn
                     foreach ($valoresForm as $tuplaValor) {
                         $xml_callFormField = $xml_callForm->addChild('field');
                         $xml_callFormField->addAttribute('id', $tuplaValor['id']);
-                        $xml_callFormField->addChild('label', str_replace('&', '&amp;', $tuplaValor['label']));
-                        $xml_callFormField->addChild('value', str_replace('&', '&amp;', $tuplaValor['value']));
+                        $xml_callFormField->addChild('label', xmlSafe($tuplaValor['label']));
+                        $xml_callFormField->addChild('value', xmlSafe($tuplaValor['value']));
                     }
                 }
                 break;
             default:
-                if (!is_null($valor)) $xml_GetCallInfoResponse->addChild($sKey, str_replace('&', '&amp;', $valor));
+                if (!is_null($valor)) $xml_GetCallInfoResponse->addChild($sKey, xmlSafe($valor));
                 break;
             }
         }
@@ -1360,10 +1398,10 @@ class ECCPConn
         foreach ($recordset as $tupla) {
             $xml_pause = $xml_getPausesResponse->addChild('pause');
             $xml_pause->addAttribute('id', $tupla['id']);
-            $xml_pause->addChild('name', str_replace('&', '&amp;', $tupla['name']));
-            $xml_pause->addChild('status', str_replace('&', '&amp;', $tupla['status']));
-            $xml_pause->addChild('type', str_replace('&', '&amp;', $tupla['tipo']));
-            $xml_pause->addChild('description', str_replace('&', '&amp;', $tupla['description']));
+            $xml_pause->addChild('name', xmlSafe($tupla['name']));
+            $xml_pause->addChild('status', xmlSafe($tupla['status']));
+            $xml_pause->addChild('type', xmlSafe($tupla['tipo']));
+            $xml_pause->addChild('description', xmlSafe($tupla['description']));
         }
 
         return $xml_response;
@@ -1538,7 +1576,7 @@ class ECCPConn
             return NULL;
         }
         try {
-            $dbConn = new PDO("mysql:host={$dbParams['AMPDBHOST']};dbname=asterisk",
+            $dbConn = new PDO("mysql:host={$dbParams['AMPDBHOST']};dbname=asterisk;charset=utf8mb4",
                 $dbParams['AMPDBUSER'], $dbParams['AMPDBPASS']);
             $dbConn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $dbConn->setAttribute(PDO::ATTR_EMULATE_PREPARES, FALSE);
@@ -2078,7 +2116,7 @@ class ECCPConn
         $xml_agents = $xml_getAgentStatusResponse->addChild('agents');
         foreach ($agentlist as $sAgente) {
             $xml_agent = $xml_agents->addChild('agent');
-            $xml_agent->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+            $xml_agent->addChild('agent_number', xmlSafe($sAgente));
 
             $infoSeguimiento = $is[$sAgente];
             $infoLlamada = $il[$sAgente];
@@ -2700,7 +2738,7 @@ class ECCPConn
         }
         if (!is_null($sAgentStatus)) {
             $xml_agent->addChild('status', $sAgentStatus);
-            if (!is_null($sCanalExt)) $xml_agent->addChild('channel', str_replace('&', '&amp;', $sCanalExt));
+            if (!is_null($sCanalExt)) $xml_agent->addChild('channel', xmlSafe($sCanalExt));
             if (!is_null($sExtension)) $xml_agent->addChild('extension', $sExtension);
         }
 
@@ -2711,7 +2749,7 @@ class ECCPConn
              * Agente::resumenSeguimiento().
              */
             $xml_agent->addChild(($flattened ? 'callchannel' : 'remote_channel'),
-                str_replace('&', '&amp;', $infoAgente['clientchannel']));
+                xmlSafe($infoAgente['clientchannel']));
         }
 
         // Reportar la información de la llamada que el agente está esperando, si aplica
@@ -2740,7 +2778,7 @@ class ECCPConn
             $xml_pauseInfo = $flattened ? $xml_agent : $xml_agent->addChild('pauseinfo');
             $xml_pauseInfo->addChild('pauseid', $infoAgente['id_break']);
             if (isset($infoAgente['pausename']))
-                $xml_pauseInfo->addChild('pausename', str_replace('&', '&amp;', $infoAgente['pausename']));
+                $xml_pauseInfo->addChild('pausename', xmlSafe($infoAgente['pausename']));
             if (isset($infoAgente['pausestart']))
                 $xml_pauseInfo->addChild('pausestart', str_replace(date('Y-m-d '), '', $infoAgente['pausestart']));
         }
@@ -4125,7 +4163,7 @@ SQL_INSERTAR_AGENDAMIENTO;
             // $listaColas[$sAgente][0] son colas suscritas actualmente
             // $listaColas[$sAgente][1] son colas dinámicas a las que puede suscribirse
             foreach (array_unique(array_merge($listaColas[$sAgente][0], $listaColas[$sAgente][1])) as $sCola) {
-                $xml_agentQueues->addChild('queue', str_replace('&', '&amp;', $sCola));
+                $xml_agentQueues->addChild('queue', xmlSafe($sCola));
             }
         }
 
@@ -4182,10 +4220,10 @@ SQL_INSERTAR_AGENDAMIENTO;
         $xml_agents = $xml_getagentqueuesResponse->addChild('agents');
         foreach (array_keys($agentlist) as $sAgente) {
             $xml_agent = $xml_agents->addChild('agent');
-            $xml_agent->addChild('agent_number', str_replace('&', '&amp;', $sAgente));
+            $xml_agent->addChild('agent_number', xmlSafe($sAgente));
             $xml_agentQueues = $xml_agent->addChild('queues');
             foreach ($agentlist[$sAgente]['queues'] as $sCola) {
-                $xml_agentQueues->addChild('queue', str_replace('&', '&amp;', $sCola));
+                $xml_agentQueues->addChild('queue', xmlSafe($sCola));
             }
         }
 
@@ -4309,7 +4347,7 @@ LEER_ULTIMA_SESION;
         foreach ($listaAgentes as $infoAgente) {
         	$xml_agent = $xml_agents->addChild('agent');
             $xml_agent->addChild('agentchannel', $infoAgente['type'].'/'.$infoAgente['number']);
-            $xml_agent->addChild('agentname', str_replace('&', '&amp;', $infoAgente['name']));
+            $xml_agent->addChild('agentname', xmlSafe($infoAgente['name']));
             $xml_agent->addChild('logintime', is_null($infoAgente['total_login_time']) ? 0 : $infoAgente['total_login_time']);
 
             $listaResumen = array('incoming' => array(), 'outgoing' => array());
@@ -4372,7 +4410,7 @@ LEER_ULTIMA_SESION;
             $this->_agregarRespuestaFallo($xml_getchanvarsResponse, 417, 'Agent not in call');
             return $xml_response;
         }
-        $xml_getchanvarsResponse->addChild('clientchannel', str_replace('&', '&amp;', $sCanalRemoto));
+        $xml_getchanvarsResponse->addChild('clientchannel', xmlSafe($sCanalRemoto));
         $xml_chanvars = $xml_getchanvarsResponse->addChild('chanvars');
 
         // Listar la información disponible sobre las variables de canal
@@ -4385,8 +4423,8 @@ LEER_ULTIMA_SESION;
                     $bSeccionVars = TRUE;
                 } elseif ($bSeccionVars && preg_match('/^(\w+)=(.*)$/', $sLinea, $regs)) {
                 	$xml_chanvar = $xml_chanvars->addChild('chanvar');
-                    $xml_chanvar->addChild('label', str_replace('&', '&amp;', $regs[1]));
-                    $xml_chanvar->addChild('value', str_replace('&', '&amp;', $regs[2]));
+                    $xml_chanvar->addChild('label', xmlSafe($regs[1]));
+                    $xml_chanvar->addChild('value', xmlSafe($regs[2]));
                 } elseif (trim($sLinea) == '') {
                 	$bSeccionVars = FALSE;
                 }
@@ -4521,7 +4559,7 @@ LOG_CAMPANIA_SALIENTE;
         foreach ($recordset as $tupla) {
             $xml_logentry = $xml_logentries->addChild('logentry');
         	foreach ($tupla as $k => $v) if (!is_null($v)) {
-        		$xml_logentry->addChild($k, str_replace('&', '&amp;', $v));
+        		$xml_logentry->addChild($k, xmlSafe($v));
         	}
         }
         return $xml_response;
@@ -4593,12 +4631,36 @@ LOG_CAMPANIA_SALIENTE;
             case 'PJSIP':
                 $result = $this->_ami->Command("pjsip show endpoint $sPeer");
                 if (isset($result['data']) && strpos($result['data'], 'Not Found') === false) {
+                    /* Estados de contacto en Asterisk 18: Avail, Unavail, Unknown,
+                     * NonQual, Created, Removed. Solo Avail (contacto presente y
+                     * alcanzable) cuenta como registrado.
+                     * stripos($line, 'Avail') era incorrecto porque 'Unavail' lo
+                     * contiene como subcadena, de modo que un contacto muerto se
+                     * reportaba como registrado. Se compara token por token.
+                     * NOTA: 'NONQUAL' (qualify deshabilitado) sigue contando como
+                     * no registrado, igual que antes. Agregarlo a este arreglo si
+                     * se decide aceptar extensiones con qualify apagado. */
+                    /* Asterisk 18 contact statuses: Avail, Unavail, Unknown,
+                     * NonQual, Created, Removed. Only Avail (contact present and
+                     * reachable) counts as registered.
+                     * stripos($line, 'Avail') was wrong because 'Unavail' contains
+                     * it as a substring, so a dead contact was reported as
+                     * registered. Compare token by token instead.
+                     * NOTE: 'NONQUAL' (qualify disabled) still counts as not
+                     * registered, same as before. Add it to this array if
+                     * extensions with qualify turned off should be accepted. */
+                    $estadosRegistrado = array('AVAIL');
                     $lines = explode("\n", $result['data']);
                     foreach ($lines as $line) {
-                        // Contact line with "Avail" means endpoint has a registered contact
-                        if (stripos($line, 'Contact:') !== false && stripos($line, 'Avail') !== false) {
-                            $bRegistered = TRUE;
-                            break;
+                        if (stripos($line, 'Contact:') === false) continue;
+
+                        // Contact:  <Aor/ContactUri> <Hash> <Status> <RTT(ms)>
+                        $campos = preg_split('/\s+/', trim($line), -1, PREG_SPLIT_NO_EMPTY);
+                        foreach ($campos as $campo) {
+                            if (in_array(strtoupper($campo), $estadosRegistrado)) {
+                                $bRegistered = TRUE;
+                                break 2;
+                            }
                         }
                     }
                 }
