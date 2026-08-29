@@ -152,6 +152,19 @@ chmod 750 /var/log/callcenter-module/
 # Set ownership
 chown asterisk.asterisk /opt/issabel -R
 
+echo "Installing ECCP TLS certificate..."
+# The ECCP port (20005) is TLS-only, and the dialer runs as the unprivileged
+# asterisk user, so it needs its own readable copy of a certificate and key.
+# Existing certificates are kept, so upgrades never churn working TLS material.
+if ! command -v openssl &> /dev/null; then
+    dnf -y install openssl || yum -y install openssl
+fi
+if ! bash /opt/issabel/dialer/eccp-cert.sh install; then
+    echo -e "${RED}Error: could not install the ECCP TLS certificate.${NC}"
+    echo -e "${RED}The dialer will refuse to start its ECCP listener without it.${NC}"
+    exit 1
+fi
+
 echo "Installing module installer files..."
 # Install module installer files
 rm -rf /usr/share/issabel/module_installer/callcenter/
@@ -216,3 +229,84 @@ echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}Issabel CallCenter ${RELEASE} installation complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo
+
+# Post-install reminders for settings the installer deliberately does not touch.
+# Everything here is read-only and failure-tolerant: a probe that cannot answer
+# prints "unknown" and the recommendation is shown anyway. Never changes $?.
+print_post_install_notice() {
+    local maxconn parkingtime parkpos parkstart parkend parkslots parkfiles parkfilehint f v
+    local rootpw
+
+    # --- MariaDB max_connections -------------------------------------------
+    maxconn='unknown'
+    rootpw=$(awk -F= '/^mysqlrootpwd/{print $2}' /etc/issabel.conf 2>/dev/null)
+    if [ -n "$rootpw" ] && command -v mysql &> /dev/null; then
+        # MYSQL_PWD (not -p<pw>) so the root password never appears in ps output
+        v=$(MYSQL_PWD="$rootpw" mysql -uroot -N -B \
+                -e "SHOW VARIABLES LIKE 'max_connections'" 2>/dev/null \
+            | awk '{print $2}')
+        [ -n "$v" ] && maxconn="$v"
+    fi
+    unset rootpw
+
+    # --- Parking lot: timeout and slot range --------------------------------
+    # Later files override earlier ones, so keep the last match found.
+    if [ -n "$VERSION" ] && [ "$VERSION" -ge 12 ] 2>/dev/null; then
+        parkfiles="/etc/asterisk/res_parking.conf /etc/asterisk/res_parking_additional.conf /etc/asterisk/res_parking_custom.conf"
+        parkfilehint="res_parking_additional.conf"
+    else
+        parkfiles="/etc/asterisk/features.conf /etc/asterisk/features_additional.conf /etc/asterisk/features_custom.conf"
+        parkfilehint="features_additional.conf"
+    fi
+    parkingtime='unknown'
+    parkpos='unknown'
+    for f in $parkfiles; do
+        [ -r "$f" ] || continue
+        v=$(grep -E '^[[:space:]]*parkingtime[[:space:]]*=' "$f" 2>/dev/null \
+            | tail -n1 | cut -d= -f2 | tr -d '[:space:]')
+        [ -n "$v" ] && parkingtime="$v"
+        v=$(grep -E '^[[:space:]]*parkpos[[:space:]]*=' "$f" 2>/dev/null \
+            | tail -n1 | cut -d= -f2 | tr -d '[:space:]')
+        [ -n "$v" ] && parkpos="$v"
+    done
+
+    parkslots='unknown'
+    parkstart=${parkpos%%-*}
+    parkend=${parkpos##*-}
+    if [ "$parkpos" != "unknown" ] && [ "$parkstart" != "$parkend" ] &&
+       [ -n "$parkstart" ] && [ -n "$parkend" ] &&
+       [ "$parkstart" -ge 0 ] 2>/dev/null && [ "$parkend" -ge "$parkstart" ] 2>/dev/null; then
+        parkslots=$(( parkend - parkstart + 1 ))
+    fi
+
+    echo
+    echo -e "${YELLOW}============================================${NC}"
+    echo -e "${YELLOW} POST-INSTALL: manual steps still required${NC}"
+    echo -e "${YELLOW}============================================${NC}"
+    echo "The installer does NOT change these. Please review them:"
+    echo
+    echo -e "${YELLOW}1) Increase the MariaDB maximum connections${NC}"
+    echo "   current: max_connections = ${maxconn}   (recommended: >= 500)"
+    echo "   The dialer runs one process per agent connection on top of the web"
+    echo "   modules and Issabel's own usage."
+    echo "   Edit /etc/my.cnf.d/*.cnf  ->  [mysqld]"
+    echo "                                 max_connections = 500"
+    echo "   then: systemctl restart mariadb"
+    echo
+    echo -e "${YELLOW}2) Increase the PBX Park timeout - the agent Hold feature uses Park${NC}"
+    echo "   current: parkingtime = ${parkingtime} s     (recommended: >= 1800)"
+    echo "   A held call is parked; when parkingtime expires the caller is"
+    echo "   returned automatically, so this is the maximum hold time."
+    echo "   Set it in the GUI: PBX -> PBX Configuration -> Parking Lot ->"
+    echo "   \"Parking Timeout (seconds)\", then Apply Changes."
+    echo "   Do NOT hand-edit ${parkfilehint} - it is regenerated."
+    echo
+    echo -e "${YELLOW}3) Check the number of parking slots - it caps concurrent holds${NC}"
+    echo "   current: parkpos = ${parkpos} (${parkslots} slots)"
+    echo "   Only that many calls can be on hold at once, system-wide. Widen the"
+    echo "   range in the same Parking Lot screen to cover your concurrent agents."
+    echo
+    return 0
+}
+
+print_post_install_notice

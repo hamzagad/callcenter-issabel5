@@ -44,6 +44,31 @@ systemctl status issabeldialer
 systemctl stop issabeldialer
 ```
 
+Post-installation notes
+----
+
+The installer prints these reminders when it finishes; it does **not** apply them
+for you. Review all three before putting the module into production.
+
+**1. Increase the MariaDB maximum connections.** The dialer is multi-process and
+opens one worker connection per connected agent, on top of the web modules and
+Issabel's own usage, so the stock `max_connections = 151` is exhausted by a busy
+floor. Set `max_connections = 500` (or higher) under `[mysqld]` in
+`/etc/my.cnf.d/*.cnf`, then `systemctl restart mariadb`.
+
+**2. Increase the PBX Park timeout — the agent Hold feature uses Park.** Putting a
+call on hold parks it, so `parkingtime` is effectively the maximum hold time: when
+it expires the caller is returned automatically, with no warning to the agent.
+Raise it to at least 1800 seconds in the GUI under
+*PBX → PBX Configuration → Parking Lot → "Parking Timeout (seconds)"*, then click
+Apply Changes. Do not hand-edit `res_parking_additional.conf` (`features_additional.conf`
+on Asterisk 11) — it is regenerated from the database.
+
+**3. Check the number of parking slots — it caps concurrent holds.** The `parkpos`
+range of the parking lot (default `7001-7010`, i.e. 10 slots) limits how many calls
+can be on hold at once across the whole system, regardless of agent count. Widen it
+in the same Parking Lot screen to cover the number of concurrent agents you expect.
+
 License
 ----
 
