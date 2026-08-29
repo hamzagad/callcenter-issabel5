@@ -17,7 +17,7 @@ Callcenter Issabel 5
 Call Center Module for Issabel V5, Updated for installing on rocky 8 , with php compatiblle with v7.4 up to v8.0 , In callback and agent modes. 
 
 esta version puede ser instalada en asterisk 18 en IssabelPBX.
-This repo is tested with Asterisk 18, and it is no logner backward compatible with Issabel 4
+This repo is tested with Issabel v5 and Asterisk 18, and it is no logner backward compatible with Issabel 4
 
 #### Version actualizada por la comunidad de Issabel, cualquier duda o problema escribir a https://t.me/IssabelPBXip:
 Gracias a la colaboracion de Nicolás Gudiño, Hamza ,Julio pacheco, y comunidad de Issabel en telegram
@@ -33,7 +33,7 @@ git clone https://github.com/ISSABELPBX/callcenter-issabel5.git
 cd callcenter-issabel5
 # For local installation:
 bash build/5.0/install-issabel-callcenter.sh -l
-# For latest update installation:
+# For production repo installation:
 bash build/5.0/install-issabel-callcenter.sh
 # To Uninstall:
 bash build/5.0/remove-issabel-callcenter.sh
@@ -47,25 +47,16 @@ systemctl stop issabeldialer
 Post-installation notes
 ----
 
-The installer prints these reminders when it finishes; it does **not** apply them
-for you. Review all three before putting the module into production.
 
-**1. Increase the MariaDB maximum connections.** The dialer is multi-process and
-opens one worker connection per connected agent, on top of the web modules and
-Issabel's own usage, so the stock `max_connections = 151` is exhausted by a busy
-floor. Set `max_connections = 500` (or higher) under `[mysqld]` in
-`/etc/my.cnf.d/*.cnf`, then `systemctl restart mariadb`.
-
-**2. Increase the PBX Park timeout — the agent Hold feature uses Park.** Putting a
+**1. Increase the PBX Park timeout — the agent Hold feature uses Park.** Putting a
 call on hold parks it, so `parkingtime` is effectively the maximum hold time: when
 it expires the caller is returned automatically, with no warning to the agent.
 Raise it to at least 1800 seconds in the GUI under
-*PBX → PBX Configuration → Parking Lot → "Parking Timeout (seconds)"*, then click
-Apply Changes. Do not hand-edit `res_parking_additional.conf` (`features_additional.conf`
-on Asterisk 11) — it is regenerated from the database.
+*PBX → PBX Configuration → Applications → Parking → Default Lot → "Parking Timeout (seconds)"*, then click
+Apply Changes. Do not hand-edit the Asterisk 11 configuration files — it is regenerated from the database.
 
-**3. Check the number of parking slots — it caps concurrent holds.** The `parkpos`
-range of the parking lot (default `7001-7010`, i.e. 10 slots) limits how many calls
+**2. Check the number of parking slots — it caps concurrent holds.** The `parkpos`
+range of the parking lot (default `701-708`, i.e. 8 slots) limits how many calls
 can be on hold at once across the whole system, regardless of agent count. Widen it
 in the same Parking Lot screen to cover the number of concurrent agents you expect.
 
