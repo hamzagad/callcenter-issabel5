@@ -72,9 +72,15 @@ login.
   and rejected: OpenSSL will not treat a self-signed leaf as its own trust
   anchor without `X509_V_FLAG_PARTIAL_CHAIN`, which PHP does not expose, so it
   refused the genuine certificate along with impostors.
-- **Fail closed.** If the certificate is missing or unreadable, `ECCPProcess`
-  logs `FATAL` and declines to start the listener rather than silently exposing
-  ECCP in plain text.
+- **Fail closed, and on the right things.** `ECCPProcess` validates the TLS
+  material at startup and declines to start the listener — logging a distinct
+  bilingual `FATAL` — when the certificate or key is unreadable, when either is
+  not parseable by OpenSSL, or when the key does not match the certificate.
+  Checking readability alone was not enough: a corrupt certificate or a
+  mismatched key left the port open while every handshake failed with only a
+  generic per-connection warning, which is far harder to diagnose than not
+  starting. An expired certificate logs a `WARN` and keeps running, since
+  nothing verifies expiry but it usually signals a failed renewal.
 - **The login credential itself is unchanged.** `eccp_authorized_clients` still
   accepts a password with or without an MD5 hash. Inside TLS it is no longer
   sniffable, which is what the TODO asked for. It remains replayable by anyone

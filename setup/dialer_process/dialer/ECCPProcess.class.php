@@ -62,17 +62,61 @@ class ECCPProcess extends TuberiaProcess
         if (isset($infoConfig['eccp']['tls_cert'])) $sCertTLS = $infoConfig['eccp']['tls_cert'];
         if (isset($infoConfig['eccp']['tls_key']))  $sClaveTLS = $infoConfig['eccp']['tls_key'];
 
+        /* Se falla en cerrado: sin certificado utilizable no se levanta el
+         * listener, en lugar de exponer ECCP en texto claro. */
+        /* Fail closed: without usable certificate material the listener is not
+         * started, instead of exposing ECCP in plain text. */
+        $sPistaEs = ' - ejecute /opt/issabel/dialer/eccp-cert.sh install';
+        $sPistaEn = ' - run /opt/issabel/dialer/eccp-cert.sh install';
         if (!is_readable($sCertTLS) || !is_readable($sClaveTLS)) {
-            /* Se falla en cerrado: sin certificado no se levanta el listener,
-             * en lugar de exponer ECCP en texto claro. */
-            /* Fail closed: with no certificate the listener is not started,
-             * instead of exposing ECCP in plain text. */
             $this->_log->output(
-                "FATAL: no se puede leer el certificado TLS de ECCP ($sCertTLS / $sClaveTLS)".
-                ' - ejecute /opt/issabel/dialer/eccp-cert.sh install'.
-                " | EN: FATAL: cannot read the ECCP TLS certificate ($sCertTLS / $sClaveTLS)".
-                ' - run /opt/issabel/dialer/eccp-cert.sh install');
+                "FATAL: no se puede leer el certificado TLS de ECCP ($sCertTLS / $sClaveTLS)". $sPistaEs.
+                " | EN: FATAL: cannot read the ECCP TLS certificate ($sCertTLS / $sClaveTLS)". $sPistaEn);
             return FALSE;
+        }
+
+        /* No basta con que los ficheros existan: un certificado ilegible para
+         * OpenSSL, o una clave que no le corresponde, dejarían el puerto
+         * abierto mientras fallan todas las negociaciones, que es mucho más
+         * difícil de diagnosticar que no arrancar. */
+        /* It is not enough for the files to exist: a certificate OpenSSL
+         * cannot parse, or a key that does not belong to it, would leave the
+         * port open while every negotiation fails, which is far harder to
+         * diagnose than not starting at all. */
+        $rCertTLS = @openssl_x509_read(file_get_contents($sCertTLS));
+        if ($rCertTLS === FALSE) {
+            $this->_log->output(
+                "FATAL: el certificado TLS de ECCP no es válido ($sCertTLS)". $sPistaEs.
+                " | EN: FATAL: the ECCP TLS certificate is not valid ($sCertTLS)". $sPistaEn);
+            return FALSE;
+        }
+        if (@openssl_pkey_get_private(file_get_contents($sClaveTLS)) === FALSE) {
+            $this->_log->output(
+                "FATAL: la clave privada TLS de ECCP no es válida ($sClaveTLS)". $sPistaEs.
+                " | EN: FATAL: the ECCP TLS private key is not valid ($sClaveTLS)". $sPistaEn);
+            return FALSE;
+        }
+        if (!@openssl_x509_check_private_key($rCertTLS, file_get_contents($sClaveTLS))) {
+            $this->_log->output(
+                "FATAL: la clave privada TLS de ECCP no corresponde al certificado".
+                " ($sClaveTLS / $sCertTLS)".$sPistaEs.
+                " | EN: FATAL: the ECCP TLS private key does not match the certificate".
+                " ($sClaveTLS / $sCertTLS)".$sPistaEn);
+            return FALSE;
+        }
+
+        /* Un certificado vencido no impide cifrar, porque el cliente no lo
+         * verifica, pero suele indicar una renovación fallida. */
+        /* An expired certificate does not prevent encryption, because the
+         * client does not verify it, but it usually signals a failed renewal. */
+        $aInfoCert = @openssl_x509_parse($rCertTLS);
+        if (is_array($aInfoCert) && isset($aInfoCert['validTo_time_t'])
+            && $aInfoCert['validTo_time_t'] < time()) {
+            $this->_log->output(
+                "WARN: el certificado TLS de ECCP está vencido ($sCertTLS)".
+                ' - se sigue cifrando, pero conviene renovarlo'.
+                " | EN: WARN: the ECCP TLS certificate is expired ($sCertTLS)".
+                ' - traffic is still encrypted, but it should be renewed');
         }
 
         $rContextoSSL = stream_context_create(array('ssl' => array(
