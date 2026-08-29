@@ -22,6 +22,13 @@
   +----------------------------------------------------------------------+
   $Id: DialerProcess.class.php,v 1.48 2009/03/26 13:46:58 alex Exp $ */
 
+/* Material TLS por omisión del listener ECCP. Lo instala eccp-cert.sh, que es
+ * invocado por los scripts de instalación del módulo. */
+/* Default TLS material of the ECCP listener. It is installed by eccp-cert.sh,
+ * which is invoked by the module installation scripts. */
+define('ECCP_TLS_CERT', '/etc/issabel/dialer/eccp.pem');
+define('ECCP_TLS_KEY',  '/etc/issabel/dialer/eccp.key');
+
 class ECCPProcess extends TuberiaProcess
 {
     private $DEBUG = FALSE; // VERDADERO si se activa la depuración
@@ -41,7 +48,45 @@ class ECCPProcess extends TuberiaProcess
     public function inicioPostDemonio($infoConfig, &$oMainLog)
     {
     	$this->_log = $oMainLog;
-        $this->_multiplex = new ECCPServer('tcp://0.0.0.0:20005', $this->_log, $this->_tuberia);
+
+        /* El puerto ECCP siempre va cifrado con TLS. El cliente no verifica el
+         * certificado (sólo cifrado, sin autenticación del servidor), así que
+         * el dialer sigue siendo alcanzable por localhost, por nombre o por IP
+         * sin depender de DNS ni de los SAN del certificado. */
+        /* The ECCP port is always TLS encrypted. The client does not verify the
+         * certificate (encryption only, no server authentication), so the dialer
+         * remains reachable by localhost, by name or by IP without depending on
+         * DNS or on the certificate SANs. */
+        $sCertTLS = ECCP_TLS_CERT;
+        $sClaveTLS = ECCP_TLS_KEY;
+        if (isset($infoConfig['eccp']['tls_cert'])) $sCertTLS = $infoConfig['eccp']['tls_cert'];
+        if (isset($infoConfig['eccp']['tls_key']))  $sClaveTLS = $infoConfig['eccp']['tls_key'];
+
+        if (!is_readable($sCertTLS) || !is_readable($sClaveTLS)) {
+            /* Se falla en cerrado: sin certificado no se levanta el listener,
+             * en lugar de exponer ECCP en texto claro. */
+            /* Fail closed: with no certificate the listener is not started,
+             * instead of exposing ECCP in plain text. */
+            $this->_log->output(
+                "FATAL: no se puede leer el certificado TLS de ECCP ($sCertTLS / $sClaveTLS)".
+                ' - ejecute /opt/issabel/dialer/eccp-cert.sh install'.
+                " | EN: FATAL: cannot read the ECCP TLS certificate ($sCertTLS / $sClaveTLS)".
+                ' - run /opt/issabel/dialer/eccp-cert.sh install');
+            return FALSE;
+        }
+
+        $rContextoSSL = stream_context_create(array('ssl' => array(
+            'local_cert'            =>  $sCertTLS,
+            'local_pk'              =>  $sClaveTLS,
+            'verify_peer'           =>  FALSE,
+            'verify_peer_name'      =>  FALSE,
+            'allow_self_signed'     =>  TRUE,
+            'disable_compression'   =>  TRUE,
+            'ciphers'               =>  'HIGH:!aNULL:!eNULL:!MD5:!RC4:!3DES:!EXPORT',
+        )));
+
+        $this->_multiplex = new ECCPServer('tcp://0.0.0.0:20005', $this->_log,
+            $this->_tuberia, $rContextoSSL);
         $this->_tuberia->registrarMultiplexHijo($this->_multiplex);
         $this->_tuberia->setLog($this->_log);
 

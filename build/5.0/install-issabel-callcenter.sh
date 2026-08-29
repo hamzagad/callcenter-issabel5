@@ -12,10 +12,58 @@ NC='\033[0m' # No Color
 RELEASE='5.0.0-1'
 GITHUB_ACCOUNT='ISSABELPBX'
 
+# Resolve this script's directory up front: it is reported to the user when a
+# previous installation blocks the install, and reused by the --local branch.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Parse arguments
 LOCAL_INSTALL=false
 if [ "$1" = "--local" ] || [ "$1" = "-l" ]; then
     LOCAL_INSTALL=true
+fi
+
+# Must run as root: the installer writes to /opt, /etc and /var/www, manages
+# systemd units and the database, and installs the ECCP TLS certificate.
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}Error: this installer must be run as root.${NC}"
+    echo -e "${YELLOW}Try:  sudo bash $0 $*${NC}"
+    exit 1
+fi
+
+# Refuse to install over an existing installation. Installing on top of a
+# previous version leaves stale files behind and cannot reliably migrate
+# configuration, so a clean install is required.
+FOUND_MARKERS=""
+[ -d /opt/issabel/dialer ] && FOUND_MARKERS="${FOUND_MARKERS}  - /opt/issabel/dialer\n"
+[ -f /etc/systemd/system/issabeldialer.service ] && FOUND_MARKERS="${FOUND_MARKERS}  - /etc/systemd/system/issabeldialer.service\n"
+[ -f /etc/rc.d/init.d/issabeldialer ] && FOUND_MARKERS="${FOUND_MARKERS}  - /etc/rc.d/init.d/issabeldialer\n"
+if rpm -q issabel-callcenter &> /dev/null; then
+    FOUND_MARKERS="${FOUND_MARKERS}  - RPM package: $(rpm -q issabel-callcenter)\n"
+fi
+
+if [ -n "$FOUND_MARKERS" ]; then
+    INSTALLED_VERSION=""
+    if [ -f /usr/share/issabel/module_installer/callcenter/CHANGELOG ]; then
+        INSTALLED_VERSION=$(head -1 /usr/share/issabel/module_installer/callcenter/CHANGELOG 2>/dev/null | tr -d '\r')
+    fi
+
+    echo -e "${RED}Error: an Issabel CallCenter dialer is already installed on this system.${NC}"
+    if [ -n "$INSTALLED_VERSION" ]; then
+        echo -e "${YELLOW}Installed version: ${INSTALLED_VERSION}${NC}"
+    fi
+    echo
+    echo "Detected:"
+    echo -e "$FOUND_MARKERS"
+    echo -e "${YELLOW}This installer only performs a clean installation.${NC}"
+    echo "Remove the existing installation first, then run this script again:"
+    echo
+    echo "    bash ${SCRIPT_DIR}/remove-issabel-callcenter.sh"
+    echo
+    echo "The removal script asks whether to delete the call_center database."
+    echo "Answer 'n' to KEEP your existing data (agents, campaigns, calls, forms,"
+    echo "break definitions and reports); the new installation will reuse it."
+    echo "Answer 'y' only if you want to start from an empty database."
+    exit 1
 fi
 
 # Check Asterisk version
@@ -45,7 +93,6 @@ echo
 # Determine source directory
 if [ "$LOCAL_INSTALL" = true ]; then
     # Find the repository root (two levels up from this script)
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
     if [ ! -f "$REPO_ROOT/menu.xml" ]; then

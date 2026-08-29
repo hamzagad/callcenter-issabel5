@@ -13,6 +13,12 @@ rm -rf /var/www/html/modules/{graphic_calls,hold_time,ingoings_calls_success,log
 rm -rf /var/www/html/modules/{rep_agent_information,rep_agents_monitoring,rep_incoming_calls_monitoring}
 rm -rf /var/www/html/modules/{rep_incoming_campaigns_panel,rep_outgoing_campaigns_panel,reports_break,rep_trunks_used_per_hour}
 
+#remove ECCP TLS certificate (inlined rather than calling eccp-cert.sh, which
+#lives inside the dialer directory removed just below)
+rm -f /etc/issabel/dialer/eccp.pem /etc/issabel/dialer/eccp.key
+rmdir /etc/issabel/dialer 2>/dev/null
+rmdir /etc/issabel 2>/dev/null
+
 #remove dialer
 rm -rf /opt/issabel/dialer
 rm -f /etc/systemd/system/issabeldialer.service

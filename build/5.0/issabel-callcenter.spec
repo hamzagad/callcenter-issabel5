@@ -90,6 +90,11 @@ chkconfig --level 2345 issabeldialer on
 # Fix incorrect permissions left by earlier versions of RPM
 chown -R asterisk.asterisk /opt/issabel/dialer
 
+# The ECCP port is TLS-only and the dialer runs as asterisk, so it needs its own
+# readable certificate. Existing certificates are kept across upgrades.
+bash /opt/issabel/dialer/eccp-cert.sh install || \
+    echo "WARNING: could not install the ECCP TLS certificate - the dialer will not start its ECCP listener"
+
 # To update smarty (tpl updates)
 rm -rf /var/www/html/var/templates_c/*
 
@@ -118,6 +123,10 @@ if [ $1 -eq 0 ] ; then # Check to tell apart update and uninstall
   # Remove SSE config
   rm -f /etc/httpd/conf.d/issabel-sse.conf
   systemctl reload httpd 2>/dev/null || true
+  # Remove the ECCP TLS certificate (kept on upgrades, which do not reach here)
+  rm -f /etc/issabel/dialer/eccp.pem /etc/issabel/dialer/eccp.key
+  rmdir /etc/issabel/dialer 2>/dev/null || true
+  rmdir /etc/issabel 2>/dev/null || true
 fi
 
 %files

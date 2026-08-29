@@ -2,6 +2,187 @@
 
 ---
 
+## 63. TLS Encryption for the ECCP Protocol
+**Date**: 2026-08-29
+
+Resolves the **Critical** "ECCP Authentication Security" TODO (open since
+pre-2011). The ECCP port carried everything in the clear, so the dialer's login
+password — and every call record, contact name and phone number that follows it
+— was readable by anyone able to sniff the link. The port also listens on
+`0.0.0.0` with no firewall rule, so this was not confined to loopback.
+
+The original FIXME in `ECCPConn.class.php` framed the problem exactly:
+
+> It's not clear to me in what way it's more secure to send the password hash
+> than the plaintext password on an unencrypted connection, since in both cases
+> it can be captured with a sniffer.
+
+The answer is that it is not — a sniffed MD5 was directly replayable, because
+the login accepts `md5_password = ?` as readily as `md5(?)`. Rather than trade
+one wire secret for another, the transport itself is now encrypted, which
+removes the FIXME's premise and protects the whole stream instead of just the
+login.
+
+### Design decisions
+
+- **TLS-only, no plaintext fallback.** Keeping a cleartext port for
+  compatibility would have left the sniffable path in place and defeated the
+  purpose. A client that opens the port without negotiating TLS gets no reply.
+  Blast radius on a deployed system is nil: `agent_console` and all
+  `eccp-examples` scripts reach the dialer through the single
+  `ECCP::connect()`, so one client edit covers every caller.
+- **TLS 1.3 only**, negotiating `TLS_AES_256_GCM_SHA384`. TLS 1.2 is accepted
+  only where the PHP/OpenSSL build predates TLS 1.3. Note that TLS 1.3
+  ciphersuite selection cannot be pinned from PHP — the `ciphers` context option
+  only governs TLS 1.2 and below — but every TLS 1.3 suite is AEAD and
+  OpenSSL's default order selects AES-256-GCM.
+- **A dedicated self-signed ECDSA P-256 certificate is generated at install**,
+  placed at `/etc/issabel/dialer/eccp.pem` (key `eccp.key`) and owned by
+  `asterisk`, which the unprivileged dialer needs in order to read it.
+  Generated rather than copied from Apache so the web server's private key is
+  never duplicated into an `asterisk`-readable file: `httpd` reads that key as
+  root before dropping privileges, so `asterisk` has no access to it today and
+  should not gain any. ECDSA pairs with the TLS 1.3 AEAD suites and its
+  handshake signature is ~29x cheaper than RSA-2048 (measured on this hardware:
+  0.026 ms vs 0.767 ms), which matters because the signing happens inside the
+  single-threaded `ECCPProcess` loop. The certificate carries no SAN, because
+  nothing checks names. `ECCP_CERT_MODE=copy` still reuses Issabel's Apache
+  certificate for sites that prefer it, and a failed generate falls back to
+  copying.
+- **The client does not verify the certificate by default.** Deliberate, and
+  the reason the change is safe to deploy anywhere: verification would tie
+  connectivity to names and addresses, and installs routinely reach the dialer
+  as `localhost`, by hostname, or by bare LAN IP with no local DNS to resolve
+  it. With verification off, an IP change, a missing DNS record and even
+  certificate expiry are all non-events. This protects against **passive
+  interception**; on its own it does not authenticate the server.
+- **Optional certificate pinning closes the man-in-the-middle gap** for
+  deployments that need it. Clients pin the server certificate by **SHA-256
+  fingerprint** — not the chain, not the hostname — so pinning costs nothing in
+  reachability: `localhost`, hostname and raw IP keep working with no SAN or DNS
+  dependency. `ECCP::setCaFile()` takes a copy of the certificate,
+  `ECCP::setPeerFingerprint()` takes the fingerprint alone (for remote clients
+  that only have that), and the `ECCP_CA_FILE` / `ECCP_PEER_FINGERPRINT`
+  constants enable it globally without touching call sites. `eccp-cert.sh`
+  prints the fingerprint on install. A `cafile` chain approach was tried first
+  and rejected: OpenSSL will not treat a self-signed leaf as its own trust
+  anchor without `X509_V_FLAG_PARTIAL_CHAIN`, which PHP does not expose, so it
+  refused the genuine certificate along with impostors.
+- **Fail closed.** If the certificate is missing or unreadable, `ECCPProcess`
+  logs `FATAL` and declines to start the listener rather than silently exposing
+  ECCP in plain text.
+- **The login credential itself is unchanged.** `eccp_authorized_clients` still
+  accepts a password with or without an MD5 hash. Inside TLS it is no longer
+  sniffable, which is what the TODO asked for. It remains replayable by anyone
+  who obtains it another way (a database read, a compromised client host) — the
+  separate "ECCP Client Authorization" TODO covers that ground and stays open.
+
+### Implementation
+
+- `MultiplexServer.class.php` — TLS is **opt-in** via a new optional
+  `$rContextoSSL` constructor argument, so the four processes that use this
+  class for internal pipes and `HubServer` are untouched. With a context set,
+  the listener is still created on `tcp://` and the handshake is driven manually
+  after `accept()`, so `stream_socket_accept()` can never block the
+  single-threaded server. New `_continuarHandshakeTLS()` advances a
+  non-blocking handshake: `stream_socket_enable_crypto()` returning `0` means
+  "needs more data" and is retried on the next readable event; the connection is
+  not handed to the subclass (`procesarInicial()` is deferred) until it
+  completes. Connections that never finish negotiating are reaped after
+  `TIMEOUT_HANDSHAKE_TLS` (15 s) by a sweep placed outside the activity branch,
+  so a stalled handshake is cleaned up even on an idle server — a
+  denial-of-service guard the class previously lacked.
+- **`MultiplexServer` empty-read fix (would have broken consoles at random).**
+  The read path treated `fread() == ''` as "connection closed remotely". That
+  holds for plain TCP but not for TLS, where a socket can be readable while
+  OpenSSL holds only a *partial record* and yields no plaintext yet — the old
+  logic would have dropped live agent consoles unpredictably. The empty-read
+  branch now closes only on a true `feof()`. Correct for plain sockets too.
+- `ECCPServer.class.php` — passes the SSL context through to the parent.
+- `ECCPProcess.class.php` — reads `tls_cert` / `tls_key` from a new optional
+  `[eccp]` section of `dialerd.conf` (defaulting to the `ECCP_TLS_CERT` /
+  `ECCP_TLS_KEY` constants), verifies both are readable, and builds the server
+  context.
+- `modules/agent_console/libs/ECCP.class.php` — `connect()` now dials `tls://`
+  with `verify_peer`/`verify_peer_name` off and TLS 1.3 requested, plus the new
+  `setCaFile()` / `setPeerFingerprint()` opt-in pinning. Single change point;
+  all 28 `paloSantoConsola` call sites and every example inherit it.
+- `ECCPConn.class.php` — the obsolete FIXME is replaced with a note recording
+  that the transport is now encrypted. The adjacent `eccp_authorized_clients`
+  TODO is deliberately left in place: it belongs to a different open item.
+- `eccp-cert.sh` (new, shipped in the dialer directory) — `install [--force]`
+  and `remove`. It keeps an existing certificate rather than replacing it, so a
+  reinstall never churns working TLS material, proves the key is readable *as
+  `asterisk`* before reporting success, and prints the SHA-256 fingerprint for
+  distribution to clients that pin.
+- Certificate lifecycle wired into all three installation paths:
+  `install-issabel-callcenter.sh` installs the certificate after the dialer is
+  in place and **before** the service starts (it now fails closed without one);
+  `remove-issabel-callcenter.sh` deletes it, using inlined `rm`/`rmdir` because
+  `eccp-cert.sh` lives in the directory removed on the next line, and `rmdir`
+  only removes the directories when empty so an unrelated `/etc/issabel` is
+  never clobbered; `issabel-callcenter.spec` calls the same script from `%post`
+  and removes the certificate in `%preun` **inside the `$1 -eq 0` guard**, so an
+  RPM upgrade keeps it.
+- `Protocolo ECCP.txt` and `ECCP_Protocol.md` document the TLS 1.3 transport,
+  the default absence of verification, how to opt into pinning, and the
+  replacement for `telnet` when debugging
+  (`openssl s_client -connect localhost:20005`). The stale `ECCP_Protocol.md`
+  claims about "Authorized IPs only" and a five-minute inactivity timeout —
+  neither of which was ever implemented — were dropped.
+
+### Verification performed
+
+`php -l` clean on all five PHP files, `bash -n` clean on all three shell
+scripts. Dialer restarted with no `ERR:`/`FATAL:` lines after startup.
+
+- **Wire is encrypted (the acceptance test).** `tcpdump` on port 20005 while
+  running `getrequestlist.php`: 22 packets captured, TLS record headers
+  (`1603 01` ClientHello, `1603 03`) present, and **zero** occurrences of
+  `agentconsole`, `<request` or `<login>` — previously all three were plainly
+  visible. `openssl s_client` confirms **TLSv1.3 / TLS_AES_256_GCM_SHA384**
+  with an ECDSA signature.
+- **Plaintext is refused.** A `tcp://` client sending a well-formed
+  `<getrequestlist>` receives no response at all.
+- **Name/address independence** (the reason verification is off by default):
+  login succeeds identically via `localhost`, `127.0.0.1` and the LAN IP.
+- **Pinning works and blocks impostors.** With the certificate pinned, login
+  succeeds via `localhost`, `127.0.0.1` and the LAN IP — proving pinning keeps
+  address independence — both from a copy of the certificate and from a bare
+  fingerprint string; pinning to a *different* certificate refuses the
+  connection before the login is sent.
+- **Handshake guard.** A socket opened and held silent is reaped after 16 s, and
+  a normal client logs in successfully *while* that handshake is stalled —
+  proving the event loop is not blocked by a slow or hostile peer.
+- **Long-lived connection** (exercises the `feof` fix): one TLS connection held
+  open for 4 minutes across repeated `wait_response()` polls and requests — the
+  agent console's SSE pattern — with no spurious disconnect.
+- **Concurrency:** 25 simultaneous TLS sessions opened with no failures, all
+  still serving requests afterwards.
+- **Client regression sweep:** `getrequestlist`, `agentstatus`, `getpauses`,
+  `campaignlog`, `getincomingqueuelist`, `getcampaignlist`, `dumpstatus` all
+  pass unmodified, as does the agent console's own credential path (login with
+  the stored MD5 hash) and an agent-hash authenticated request.
+- **Certificate lifecycle:** install creates `eccp.pem` (0444) and `eccp.key`
+  (0400) owned `asterisk:asterisk` and verifies the key is readable as
+  `asterisk`; a second run keeps the existing certificate; `--force` refreshes
+  it; removal deletes both and leaves a non-empty `/etc/issabel` intact.
+- **Fail-closed:** pointing `tls_cert` at a missing file logs the bilingual
+  `FATAL` and leaves port 20005 closed.
+
+### Log collection
+
+```bash
+grep -E "negociación TLS|TLS negotiation" /opt/issabel/dialer/dialerd.log | tail -20
+grep -E "certificado TLS de ECCP|ECCP TLS certificate" /opt/issabel/dialer/dialerd.log
+grep -E "escuchando peticiones|listening" /opt/issabel/dialer/dialerd.log | tail -5
+grep -cE "FATAL|ERR:" /opt/issabel/dialer/dialerd.log
+openssl s_client -connect localhost:20005 -brief </dev/null
+openssl x509 -in /etc/issabel/dialer/eccp.pem -noout -fingerprint -sha256
+```
+
+---
+
 ## 62. ECCP Examples for the Consultation Events
 **Date**: 2026-08-28
 

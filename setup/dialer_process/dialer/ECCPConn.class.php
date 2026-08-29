@@ -334,14 +334,13 @@ class ECCPConn
         $xml_response = new SimpleXMLElement('<response />');
         $xml_loginResponse = $xml_response->addChild('login_response');
 
-        /* FIXME: No me queda claro de qué manera es más seguro mandar el hash
-         * del password, que el password en texto plano, en una conexión sin
-         * encriptar, ya que en ambos casos se puede recoger con un sniffer.
-         * Por ahora se acepta el password con o sin hash.
-         * FIXME: It's not clear to me in what way it's more secure to send the
-         * password hash than the plaintext password on an unencrypted connection,
-         * since in both cases it can be captured with a sniffer. For now,
-         * password is accepted with or without hash. */
+        /* La conexión ECCP va cifrada con TLS (ver ECCPProcess), así que la
+         * clave ya no puede recogerse con un sniffer. Se sigue aceptando con o
+         * sin hash md5 por compatibilidad con los clientes existentes.
+         * The ECCP connection is TLS encrypted (see ECCPProcess), so the
+         * password can no longer be captured with a sniffer. It is still
+         * accepted with or without md5 hash for compatibility with existing
+         * clients. */
         /* TODO: se puede almacenar cuál agente(s) está autorizado a atender en
          * la tabla eccp_authorized_clients
          * TODO: can store which agent(s) is authorized to attend in the

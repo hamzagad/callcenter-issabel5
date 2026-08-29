@@ -2,20 +2,7 @@
 
 Unresolved issues for the call center module. Items are sorted by urgency (Critical → High → Medium → Low). Within each urgency level, untouched items appear first, followed by partially solved items.
 
-**Last Reviewed**: 2026-03-09
-
----
-
-## Critical
-
-### ECCP Authentication Security
-
-* **Type**: Bug
-* **Urgency**: Critical
-* **Date Added**: Original (pre-2011)
-* **Location**: `ECCPConn.class.php:337-344`
-* **Description**: Password sent over unencrypted connection (plaintext or hash). The FIXME comment notes that sending a hash vs plaintext on an unencrypted connection is equally insecure since both can be captured with a sniffer.
-* **Status**: Untouched
+**Last Reviewed**: 2026-08-29
 
 ---
 
@@ -26,7 +13,7 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Type**: Feature
 * **Urgency**: High
 * **Date Added**: Original (pre-2011)
-* **Location**: `ECCPConn.class.php:345-348`
+* **Location**: `ECCPConn.class.php:344-347`
 * **Description**: Implement `eccp_authorized_clients` table for agent authorization. The table exists and is used for authorization lookup, but could be expanded for IP/client-based authorization.
 * **Status**: Partially Solved
 
