@@ -32,6 +32,63 @@ and never touched this code.
 
 **Fix**: added `stripos($sTrunk, 'PJSIP/') === 0` to the whitelist.
 
+### Second half: the dial-string format
+
+Allowing `PJSIP/` through the whitelist was necessary but not sufficient. The
+template was still built in chan_sip's shape:
+
+```
+SIP/TRUNKLABEL/<PREFIX>$OUTNUM$   ->   PJSIP/PJSIP120Issabel4/0100100102
+```
+
+chan_pjsip does not accept `TECH/trunk/number`. Its dial string is
+`PJSIP/<user>@<endpoint>`, so Asterisk rejected the channel string before
+creating a channel and the Originate failed instantly:
+
+```
+[Response] => Failure   [Channel] => PJSIP/PJSIP120Issabel4/0100100102
+[Reason] => 0           [Uniqueid] => <unknown>
+```
+
+The dialer then held the call waiting for a failure cause that never arrived,
+and reaped it a minute later:
+
+```
+ERR: llamada 14903-7-65 espera causa de fallo desde hace 76.69 segundos, se elimina.
+```
+
+issabelPBX itself does exactly the rewrite that was missing. In
+`macro-dialout-trunk` it builds the chan_sip shape first and then converts it:
+
+```
+exten => s,n,Set(DIALSTR=${OUT_${DIAL_TRUNK}}/${OUTNUM})
+exten => s,n,GosubIf($["${DIALSTR:0:5}" = "PJSIP"]?pjsipdial,1())
+exten => pjsipdial,1,Set(PJ=${CUT(DIALSTR,/,2)})
+exten => pjsipdial,n,Set(DIALSTR=PJSIP/${OUTNUM}@${PJ})
+```
+
+with `OUTNUM = ${OUTPREFIX_${DIAL_TRUNK}}${DIAL_NUMBER}`, so the dial-out prefix
+belongs on the number, ahead of the `@`.
+
+**Fix**: for a `PJSIP/` trunk the template is now
+`PJSIP/<PREFIX>$OUTNUM$@ENDPOINT`; every other technology keeps
+`TECH/TRUNKLABEL/<PREFIX>$OUTNUM$` unchanged.
+
+| trunk | template |
+|---|---|
+| `SIP/120Issabel4` | `SIP/120Issabel4/$OUTNUM$` (unchanged, CID `1500` preserved) |
+| `PJSIP/PJSIP120Issabel4` | `PJSIP/$OUTNUM$@PJSIP120Issabel4` |
+| with a `9` prefix | `PJSIP/9$OUTNUM$@PJSIP120Issabel4` - matches `PJSIP/${OUTNUM}@${PJ}` |
+
+Note the three-part form is not universally invalid - `PJSIP_DIAL_CONTACTS()`
+returns `PJSIP/102/sip:102@192.168.1.77:61859;ob`, which chan_pjsip accepts
+because the third field there is a full SIP URI. A bare dialled number is not a
+URI, which is why the trunk case failed.
+
+Live confirmation of an actual outbound call through a pinned PJSIP trunk is
+still outstanding; the campaign was stopped at the time of the fix.
+
+
 **Verification performed**:
 - `php -l` clean.
 - Branch-logic table over eleven trunk forms - NULL, `SIP/`, `PJSIP/`, lowercase

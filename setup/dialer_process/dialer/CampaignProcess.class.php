@@ -2216,10 +2216,32 @@ PETICION_LLAMADAS_AGENTE;
             $infoTrunk = $this->_leerPropiedadesTrunk($sTrunk);
             if (is_null($infoTrunk)) return NULL;
 
-            // SIP/TRUNKLABEL/<PREFIX>$OUTNUM$
-            $sPlantilla = $sTrunk.'/';
-            if (isset($infoTrunk['PREFIX'])) $sPlantilla .= $infoTrunk['PREFIX'];
-            $sPlantilla .= '$OUTNUM$';
+            $sPrefijo = isset($infoTrunk['PREFIX']) ? $infoTrunk['PREFIX'] : '';
+            if (stripos($sTrunk, 'PJSIP/') === 0) {
+                /* chan_pjsip no acepta la forma TECH/troncal/numero de chan_sip.
+                 * Su sintaxis es PJSIP/<usuario>@<endpoint>, y es exactamente lo
+                 * que hace issabelPBX en macro-dialout-trunk: arma primero
+                 * DIALSTR=<trunk>/<OUTNUM> y luego, si empieza por PJSIP, lo
+                 * reescribe con Set(DIALSTR=PJSIP/${OUTNUM}@${PJ}).
+                 * Con la forma de chan_sip el Originate falla de inmediato con
+                 * Response=Failure, Reason=0 y Uniqueid=<unknown>, porque
+                 * Asterisk rechaza la cadena de canal antes de crear el canal. */
+                /* chan_pjsip does not accept chan_sip's TECH/trunk/number form.
+                 * Its syntax is PJSIP/<user>@<endpoint>, which is exactly what
+                 * issabelPBX does in macro-dialout-trunk: it first builds
+                 * DIALSTR=<trunk>/<OUTNUM> and then, if it starts with PJSIP,
+                 * rewrites it with Set(DIALSTR=PJSIP/${OUTNUM}@${PJ}).
+                 * With the chan_sip form the Originate fails immediately with
+                 * Response=Failure, Reason=0 and Uniqueid=<unknown>, because
+                 * Asterisk rejects the channel string before creating a channel. */
+                list($sTecnologia, $sEndpoint) = explode('/', $sTrunk, 2);
+
+                // PJSIP/<PREFIX>$OUTNUM$@ENDPOINT
+                $sPlantilla = $sTecnologia.'/'.$sPrefijo.'$OUTNUM$@'.$sEndpoint;
+            } else {
+                // SIP/TRUNKLABEL/<PREFIX>$OUTNUM$
+                $sPlantilla = $sTrunk.'/'.$sPrefijo.'$OUTNUM$';
+            }
 
             // Agregar información de Caller ID, si está disponible
             // Add Caller ID information, if available
