@@ -22,28 +22,18 @@ Issabel Call Center ${RELEASE} installer
 Usage: $(basename "$0") [options]
 
 Options:
-  -l, --local   Install from the checkout this script lives in, instead of
-                cloning https://github.com/${GITHUB_ACCOUNT}/callcenter-issabel5
-                into /usr/src/callcenter
+  -l, --local   Install from the checkout this script lives in (locally)
+                instead of cloning the repository from GitHub.
   -h, --help    Show this help and exit
+
+Requires Asterisk 18 - the installer aborts on any other version.
 
 Must be run as root, and only performs a CLEAN install: it aborts when a previous
 Call Center installation is detected. Remove that one first with
   bash ${SCRIPT_DIR}/remove-issabel-callcenter.sh
 answering 'n' to its database question to keep your existing data.
 
-What gets installed:
-  web modules       /var/www/html/modules/           (call center GUI modules)
-  dashboard patch   ProcessesStatus applet gains a "Dialer" service entry
-  dialer daemon     /opt/issabel/dialer/ + /etc/systemd/system/issabeldialer.service
-  ECCP TLS cert     /etc/issabel/dialer/eccp.pem and eccp.key  (see below)
-  menu entry        issabel-menumerge  (Call Center menu)
-  database          call_center MySQL database, created/migrated by setup/installer.php
-  logrotate         /etc/logrotate.d/issabeldialer and .../callcenter-modules
-  logs              /var/log/callcenter-module/
-  DNC helper        /usr/bin/issabel-callcenter-local-dnc
-  SSE Apache conf   /etc/httpd/conf.d/issabel-sse.conf   (Rocky hosts only)
-It also sets the asterisk user's shell to /bin/bash, then enables and starts
+The installer sets the asterisk user's shell to /bin/bash, then enables and starts
 issabeldialer and runs asterisk -rx 'core reload'.
 
 ECCP TLS certificate:
@@ -130,7 +120,9 @@ if [ -n "$FOUND_MARKERS" ]; then
     exit 1
 fi
 
-# Check Asterisk version
+# Check Asterisk version. This release targets Asterisk 18 and nothing else, so
+# any other version is refused up front rather than half-installed: the check
+# runs before the first file is written, so an aborted run changes nothing.
 VERSION=$(asterisk -rx "core show version" 2>/dev/null | awk '{print $2}' | cut -d. -f 1)
 
 if [ -z "$VERSION" ]; then
@@ -138,20 +130,17 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-if [ "$VERSION" = "11" ]; then
-    echo -e "${YELLOW}Info: Detected Asterisk 11. Using chan_agent compatibility mode.${NC}"
-    echo -e "${YELLOW}  - Agent authentication: via Asterisk (password in agents.conf)${NC}"
-    echo -e "${YELLOW}  - Agent interface: Agent/XXXX${NC}"
-    echo -e "${YELLOW}  - Agent logout: Agentlogoff AMI command${NC}"
-elif [ "$VERSION" = "13" ] || [ "$VERSION" = "16" ] || [ "$VERSION" = "18" ]; then
-    echo -e "${GREEN}Info: Detected Asterisk $VERSION. Using app_agent_pool mode.${NC}"
-    echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
-    echo -e "${GREEN}  - Agent interface: Local/XXXX@agents${NC}"
-    echo -e "${GREEN}  - Agent logout: Hangup login channel${NC}"
-else
-    echo -e "${YELLOW}Warning: Issabel CallCenter ${RELEASE} is tested with Asterisk 11/13/18. Detected version: $VERSION${NC}"
-    echo -e "${YELLOW}Proceeding with installation, but some features may not work correctly.${NC}"
+if [ "$VERSION" != "18" ]; then
+    echo -e "${RED}Error: Issabel CallCenter ${RELEASE} requires Asterisk 18.${NC}"
+    echo -e "${RED}Detected Asterisk version: ${VERSION}${NC}"
+    echo -e "${RED}Installation aborted - nothing was installed or modified.${NC}"
+    exit 1
 fi
+
+echo -e "${GREEN}Info: Detected Asterisk $VERSION. Using app_agent_pool mode.${NC}"
+echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
+echo -e "${GREEN}  - Agent interface: Local/XXXX@agents${NC}"
+echo -e "${GREEN}  - Agent logout: Hangup login channel${NC}"
 echo
 
 # Determine source directory
@@ -361,14 +350,11 @@ print_post_install_notice() {
     unset rootpw
 
     # --- Parking lot: timeout and slot range --------------------------------
-    # Later files override earlier ones, so keep the last match found.
-    if [ -n "$VERSION" ] && [ "$VERSION" -ge 12 ] 2>/dev/null; then
-        parkfiles="/etc/asterisk/res_parking.conf /etc/asterisk/res_parking_additional.conf /etc/asterisk/res_parking_custom.conf"
-        parkfilehint="res_parking_additional.conf"
-    else
-        parkfiles="/etc/asterisk/features.conf /etc/asterisk/features_additional.conf /etc/asterisk/features_custom.conf"
-        parkfilehint="features_additional.conf"
-    fi
+    # Asterisk 18 is guaranteed by the version check above, so parking always
+    # lives in res_parking*. Later files override earlier ones, so keep the last
+    # match found.
+    parkfiles="/etc/asterisk/res_parking.conf /etc/asterisk/res_parking_additional.conf /etc/asterisk/res_parking_custom.conf"
+    parkfilehint="res_parking_additional.conf"
     parkingtime='unknown'
     parkpos='unknown'
     for f in $parkfiles; do
