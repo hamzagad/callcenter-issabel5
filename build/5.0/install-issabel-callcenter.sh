@@ -36,25 +36,27 @@ answering 'n' to its database question to keep your existing data.
 The installer sets the asterisk user's shell to /bin/bash, then enables and starts
 issabeldialer and runs asterisk -rx 'core reload'.
 
-ECCP TLS certificate:
-  The ECCP port (20005) that agent consoles connect to is TLS-only, and the dialer
-  runs as the unprivileged asterisk user, so it needs its own readable certificate
-  and key. By default a dedicated self-signed ECDSA P-256 certificate valid for
-  10 years is generated; an existing eccp.pem/eccp.key pair is kept untouched, so
-  reinstalling never churns working TLS material. The install FAILS if this step
-  fails, because the dialer refuses to start its ECCP listener without it.
-  Manage the certificate later (renew, remove, force a new one) with
-  /opt/issabel/dialer/eccp-cert.sh.
+The ECCP port (20005) that agent consoles connect to is TLS-only, and the dialer
+creates /etc/issabel/dialer/(eccp.pem,eccp.key) pair.
+Manage the certificate later (renew, remove, force a new one) with
+/opt/issabel/dialer/eccp-cert.sh.
 
   ECCP_CERT_MODE=generate       dedicated self-signed certificate (default)
   ECCP_CERT_MODE=generate-san   same, plus SANs for this host's names and IPs
   ECCP_CERT_MODE=copy           reuse Issabel's Apache certificate instead
-  ECCP_SRC_CERT=, ECCP_SRC_KEY= source paths used by copy mode
+  ECCP_SRC_CERT=, ECCP_SRC_KEY= source paths for copy mode (also used as the
+                                fallback if certificate generation fails)
+
+  Note: the variables above only apply when no certificate exists yet. An
+  existing eccp.pem/eccp.key pair is kept as-is, so on a reinstall they have
+  no effect.
 
 Examples:
   bash $(basename "$0")                    # install from GitHub
   bash $(basename "$0") --local            # install from this checkout
   ECCP_CERT_MODE=copy bash $(basename "$0") --local
+  ECCP_CERT_MODE=copy ECCP_SRC_CERT=/path/to/cert.pem ECCP_SRC_KEY=/path/to/key.pem \\
+    bash $(basename "$0") --local
 EOF
 }
 
