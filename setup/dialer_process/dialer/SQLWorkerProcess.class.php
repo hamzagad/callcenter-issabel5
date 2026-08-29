@@ -826,10 +826,6 @@ class SQLWorkerProcess extends TuberiaProcess
                 } elseif (preg_match('/^(\w+)\s*=\s*(.*)/', trim($s), $regs)) {
                     if (in_array($regs[1], array('eventmemberstatus', 'eventwhencalled'))) {
                         $queueflags[$queue][$regs[1]] = in_array($regs[2], array('yes', 'true', 'y', 't', 'on', '1'));
-                    } elseif ($regs[1] == 'member' && (stripos($regs[2], 'SIP/') === 0 || stripos($regs[2], 'IAX2/') === 0)) {
-                        $this->_log->output('WARN: '.__METHOD__.': agente estático '.
-                            $regs[2].' encontrado en cola '.$queue.' - puede causar problemas. | EN: static agent '.
-                            $regs[2].' found in queue '.$queue.' - may cause problems.');
                     }
                 }
             }

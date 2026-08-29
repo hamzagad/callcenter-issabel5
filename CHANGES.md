@@ -2,6 +2,47 @@
 
 ---
 
+## 67. Remove the Dead Static Queue Member Warning
+**Date**: 2026-08-29
+
+`SQLWorkerProcess` warned when a queue had a static member, testing each
+`member=` line of `queues_additional.conf` with
+`stripos($regs[2], 'SIP/') === 0 || stripos($regs[2], 'IAX2/') === 0`.
+
+Issabel writes **every** static member as a Local channel, whatever the
+extension's technology:
+
+```
+member=Local/101@from-queue/n,0,User101,hint:101@ext-local
+member=Local/102@from-queue/n,0,User102PJSIP,hint:102@ext-local
+member=Local/105@from-queue/n,0,User105IAX,hint:105@ext-local
+```
+
+None start with `SIP/` or `IAX2/`, so the warning could never fire - for any
+technology, not just PJSIP. Confirmed live: 101 (SIP), 102 (PJSIP) and 105
+(IAX2) were all added to queue 502 as static members and the dialer restarted;
+the file was parsed and zero warnings were logged.
+
+This was first filed as "the warning is missing PJSIP". Adding `PJSIP/` would
+have fixed nothing. Re-targeting it at the `Local/<ext>@from-queue` form would
+warn on every normal static member, which is noise, so the check is removed
+instead.
+
+**Fix**: dropped the `elseif` branch. The surrounding loop keeps its real job,
+reading `eventmemberstatus` and `eventwhencalled` per queue.
+
+**Verification performed**: `php -l` clean; the rewritten loop run against the
+live `queues_additional.conf` still returns `eventmemberstatus=true`,
+`eventwhencalled=true` for queues 501, 502 and 503; deployed and dialer
+restarted with `_requerir_nuevaListaAgentes` and queue-membership verification
+running normally, no errors.
+
+**Files affected**:
+- `setup/dialer_process/dialer/SQLWorkerProcess.class.php` (also applied to
+  `/opt/issabel/dialer/`)
+
+---
+
 ## 66. PJSIP Trunks Accepted by Outgoing Campaigns
 **Date**: 2026-08-29
 
