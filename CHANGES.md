@@ -2,6 +2,62 @@
 
 ---
 
+## 68. Scheduled-Call Agent Reservation Crashed on PHP 7.4
+**Date**: 2026-08-30
+
+`Agente::setReserved()` called `_incrementarPausas($ami)` with one argument.
+That method has taken three since commit `c9a1c5d` (2017-06-02, "Record pause
+reason in queue_log"), which added `$reason` and `$nombre_pausa` and updated
+`setBreak()` and `setHold()` - but missed `setReserved()`. On PHP 5 the
+shortfall was a "Missing argument" warning and execution continued; PHP 7.1+
+raises `ArgumentCountError`, and the dialer installs no `set_exception_handler`
+and catches no `Throwable`, so the reservation would take `AMIEventProcess`
+down with it.
+
+The path is reached whenever a `calls` row has `agent IS NOT NULL` inside its
+schedulable window and that agent is logged in:
+`_actualizarLlamadasAgendables()` -> `AMIEventProcess::_agentesAgendables()` ->
+`Agente::setReserved()`. It was latent on this box - `SELECT COUNT(*) FROM calls
+WHERE agent IS NOT NULL` is 0 and `dialerd.log` has no occurrences - so it had
+never been exercised since the PHP 7.4 port.
+
+**Fix**: pass the two missing arguments.
+
+```php
+-            $this->_incrementarPausas($ami);
++            $this->_incrementarPausas($ami, NULL, 'Reserved');
+```
+
+`$reason` is unused inside `_incrementarPausas()`; only `$nombre_pausa` is used,
+as the `Reason` field of the AMI `QueuePause` action, so the pause is now
+recorded as `Reserved` instead of an empty string. Queue scope is unchanged:
+`QueuePause` is still sent with no `Queue` field, so a reserved agent is paused
+in every queue they belong to, which is the intended behaviour.
+
+**Verification performed**: `php -l` clean. Runtime proof with a reflection
+harness that builds an `Agente` without its constructor and calls
+`setReserved()` - against the pre-fix file it returns `ArgumentCountError: Too
+few arguments to function Agente::_incrementarPausas(), 1 passed ... and exactly
+3 expected`, against the fixed file it completes with no error. With queues
+attached and a mock AMI, the action goes out as `QueuePause Queue=(omitted -
+all queues) Paused=true Reason='Reserved'`. Dialer restart to load the fix is
+still pending.
+
+**Test steps**: create an outgoing campaign call assigned to a specific agent
+(`UPDATE calls SET agent = 'Agent/1001' WHERE id = <id>`), log that agent in,
+and let the campaign cycle run. The agent should go to pause and the scheduled
+call should be placed to them, with no dialer crash.
+
+```bash
+grep -E "agentesAgendables|setReserved|Reserved|reservado" /opt/issabel/dialer/dialerd.log | tail -20
+grep -iE "ArgumentCountError|Too few arguments|Fatal error" /opt/issabel/dialer/dialerd.log | tail -10
+```
+
+**Files affected**:
+- `/opt/issabel/dialer/Agente.class.php` (live system; the repo copy under
+  `setup/dialer_process/dialer/` is unchanged)
+
+---
 ## 67. Remove the Dead Static Queue Member Warning
 **Date**: 2026-08-29
 
