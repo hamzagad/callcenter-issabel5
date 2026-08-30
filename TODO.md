@@ -30,6 +30,15 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: Even in predictive mode, counting RINGING agents as "free" may cause over-placement. Analysis needed to determine if this behavior is optimal.
 * **Status**: Untouched
 
+### Attended-Transfer Hold Has No Orphan Check
+
+* **Type**: Bug
+* **Urgency**: Medium
+* **Date Added**: 2026-08-30 (Change #70)
+* **Location**: `extensions_custom.conf:33`, `setup/installer.php:357`
+* **Description**: `[atxfer-hold]` is a bare `MusicOnHold(,1800)` with no check that the agent who put the caller there still exists, so any path that ever leaves a caller in it means up to 30 minutes of music with nobody on the other end. Change #70 removed the one known such path (the `Bridge()` thread race) and added a `SoftHangup` backstop inside `[atxfer-rebridge]`, but the context itself is still a dead end: the residual exposure is a caller orphaned during the ~2 s reconnect window, or by any future path. The `1800` is also now out of step with the 900 s hold cap the `callcenter_hold` parking lot got in Change #69. Proposed fix: have the dialer `SetVar` the agent's channel name onto the client channel at both `Redirect` sites in `ECCPConn::Request_agentauth_atxfercall()`, then run the hold as chunked `MusicOnHold` slices that bail out via `CHANNEL_EXISTS()` once that channel is gone. `res_musiconhold` restores the saved position for `mode=files` classes, so chunking does not restart the music. Deferred from Change #70 to keep that fix to a single file.
+* **Status**: Untouched
+
 ### Hold Timeout Countdown
 
 * **Type**: Feature

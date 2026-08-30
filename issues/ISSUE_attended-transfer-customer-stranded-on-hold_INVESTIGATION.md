@@ -2,10 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | Diagnosed, **NOT FIXED** |
+| **Status** | Diagnosed and **FIXED** - see `CHANGES.md` #70 (2026-08-30) |
 | **Severity** | High — customer is left alone on Music On Hold for up to **30 minutes**, agent's call disappears from the console |
 | **Observed** | 2026-08-30 01:41:12 and 01:43:52 (two back-to-back), plus "randomly a couple of times before" reported by the operator |
 | **Investigated** | 2026-08-30 |
+| **Fixed** | 2026-08-30, Option A generalised into a shared `[atxfer-rebridge]` Gosub - see §7 and §10 |
 | **Affects** | `[cbxfer-consult]` (confirmed) and by inspection `[cbxfer-cancel-consult]`, `[atxfer-consult]`, `[atxfer-cancel-consult]` |
 | **Components** | `/etc/asterisk/extensions_custom.conf`, `setup/installer.php`, `ECCPConn.class.php`, `AMIEventProcess.class.php` |
 
@@ -373,7 +374,13 @@ transfer completed. `NONEXISTENT` is the correct outcome there; do not "fix" it.
 
 ## 7. Proposed fix
 
-Not applied. Two options; **Option A is recommended** — it is confined to one file and has the smaller
+> **Outcome:** Option A was applied on 2026-08-30, factored into a single shared
+> `[atxfer-rebridge]` context that all four Redirect-driven sites `Gosub` into,
+> rather than a block copy-pasted per site. The `ATXFER_ON_HOLD` value is passed
+> as `ARG2` at the two Agent-type sites so the `SoftHangup` backstop can never
+> force-release a *parked* caller - see the note in §10. Details in `CHANGES.md` #70.
+
+Two options were considered; **Option A was recommended** — it is confined to one file and has the smaller
 blast radius.
 
 ### Option A (recommended) — bounded retry with a backstop, dialplan only
@@ -496,8 +503,9 @@ below (`diff -q` clean).
 | `/etc/asterisk/extensions_custom.conf` | 94 | `[cbxfer-consult]` — the broken context |
 | `/etc/asterisk/extensions_custom.conf` | 107 | the racing `Bridge(${ATXFER_HELD_CHAN})`, prio 13 |
 | `/etc/asterisk/extensions_custom.conf` | 47, 73, 83, 107, 118 | all five `Bridge(${ATXFER_HELD_CHAN})` sites |
-| `setup/installer.php` | 356, 417 | `[atxfer-hold]`, `[cbxfer-consult]` generators |
-| `setup/installer.php` | 370, 396, 406, 430, 441 | the same five `Bridge()` sites |
+| `setup/installer.php` | 357, 458 | `[atxfer-hold]`, `[cbxfer-consult]` generators (post-fix) |
+| `setup/installer.php` | 382 | `[atxfer-rebridge]`, the shared reconnect context (post-fix) |
+| `setup/installer.php` | 411, 437, 447, 471, 482 | the same five sites: four now `Gosub`, 447 (`[atxfer-bridge]`) still a direct `Bridge()` |
 | `setup/dialer_process/dialer/ECCPConn.class.php` | 3526-3527 | `SetVar` of `ATXFER_HELD_CHAN` / `ATXFER_AGENT_ID` |
 | `setup/dialer_process/dialer/ECCPConn.class.php` | **3536-3546** | the dual-channel `Redirect` that creates the race |
 | `setup/dialer_process/dialer/ECCPConn.class.php` | 3462-3470 | the Agent-type equivalent `Redirect` |
@@ -508,12 +516,26 @@ below (`diff -q` clean).
 
 ## 10. Open items
 
-- [ ] Fix not applied. Repro still available (`103` unregistered).
-- [ ] Decide Option A vs Option B; apply to site #4 first, then #5, #1, #2 — each tailored (§6).
-- [ ] Mirror any dialplan change into `setup/installer.php` so a fresh install ships it.
-- [ ] Add a `CHANGES.md` entry when the code lands (this investigation document is docs, so it gets none).
-- [ ] Verify test 4 and test 6 explicitly — the `SoftHangup` backstop's interaction with the dialer's
-      call finalization is the one part of the fix with no existing evidence behind it.
-- [ ] Separately consider reducing `MusicOnHold(,1800)` (§5.2).
-- [ ] Sites #1/#2 (`[atxfer-consult]`, `[atxfer-cancel-consult]`) have never been observed failing; §5.1
-      explains why (`Dial(Local/…)` always allocates a channel). They remain theoretically exposed.
+Resolved by `CHANGES.md` #70 (2026-08-30):
+
+- [x] Fix applied - shared `[atxfer-rebridge]` retry context, live and in `setup/installer.php`.
+- [x] Option A chosen, applied to sites #4, #5, #1 and #2, each keeping its own tail.
+- [x] Mirrored into `setup/installer.php`; the `[atxfer-hold]`..`[cbxfer-done]` region of the
+      generator is byte-identical to the live `/etc/asterisk/extensions_custom.conf`.
+- [x] `CHANGES.md` entry added (#70).
+- [x] Tests 4 and 6 verified. The `SoftHangup` backstop was exercised with scratch contexts
+      against a real channel in `[atxfer-hold]`'s MusicOnHold: it releases the caller in the
+      same shape as an ordinary caller hangup, which is what the dialer's finalization expects.
+      The `ARG2="yes"` guard was verified to suppress that release for a parked caller.
+
+Still open:
+
+- [ ] `[atxfer-hold]`'s `MusicOnHold(,1800)` still has no orphan check, and is now also out of
+      step with the 900 s hold cap from Change #69. Tracked in `TODO.md`
+      ("Attended-Transfer Hold Has No Orphan Check"). §5.2.
+- [ ] Sites #1/#2 (`[atxfer-consult]`, `[atxfer-cancel-consult]`) have still never been observed
+      failing; §5.1 explains why. They now use the same retry, but with the release backstop
+      suppressed while `ATXFER_ON_HOLD=yes`: when the agent presses Hold during a consultation
+      the caller is *parked* (Change #69) rather than held in `[atxfer-hold]`, and `Bridge()` on
+      a parked channel legitimately succeeds - that is how `[atxfer-unhold]` retrieves it - so a
+      failure there is an expected outcome, not a stranding.

@@ -361,6 +361,46 @@ exten => s,1,NoOp(Issabel CallCenter: Attended Transfer - Caller on hold)
  same => n,NoOp(Issabel CallCenter: Attended transfer hold expired - releasing caller)
  same => n,Hangup()
 
+; Reconnect the current channel with the held caller channel given in ARG1.
+;   ARG1: held caller channel (${ATXFER_HELD_CHAN})
+;   ARG2: "yes" when that caller is parked because the agent pressed Hold during
+;         the consultation (Agent type only) - see the giveup branch below.
+;
+; An attended transfer starts with ONE AMI Redirect carrying an ExtraChannel, and
+; Asterisk performs an independent async goto on each channel: the agent and the
+; caller then run in separate PBX threads with nothing synchronising them. When
+; the consultation Dial() fails synchronously inside the channel driver (an
+; unregistered chan_sip peer allocates no channel and sends no packet) the agent
+; thread can reach this reconnect before the caller has even left the previous
+; bridge, and Bridge() then returns BRIDGERESULT=FAILURE - a completely silent
+; outcome that left the caller alone on the MusicOnHold of [atxfer-hold].
+;
+; The caller only has to run three dialplan priorities to become bridgeable, so
+; retrying over a bounded window closes the race. SUCCESS, NONEXISTENT (the
+; caller has genuinely gone) and LOOP are final and return at once; only FAILURE
+; is retried.
+[atxfer-rebridge]
+exten => s,1,NoOp(Issabel CallCenter: reconnecting ${CHANNEL} with held caller ${ARG1})
+ same => n,Set(ATXFER_REBRIDGE_TRIES=0)
+ same => n,GotoIf($["${ARG1}" = ""]?nochan)
+ same => n(try),Set(ATXFER_REBRIDGE_TRIES=$[${ATXFER_REBRIDGE_TRIES} + 1])
+ same => n,Bridge(${ARG1})
+ same => n,GotoIf($["${BRIDGERESULT}" != "FAILURE"]?done)
+ same => n,GotoIf($[${ATXFER_REBRIDGE_TRIES} >= 20]?giveup)
+ same => n,Wait(0.1)
+ same => n,Goto(try)
+; Never force-release a parked caller (the agent pressed Hold during the
+; consultation): [atxfer-unhold] retrieves them from parking with Bridge(), and
+; the callcenter_hold lot caps them with its own parkingtime, so a Bridge()
+; failure here is an expected outcome and not a stranding.
+ same => n(giveup),GotoIf($["${ARG2}" = "yes"]?done)
+ same => n,Log(WARNING,Issabel CallCenter: no se pudo reconectar ${CHANNEL} con el cliente retenido ${ARG1} tras ${ATXFER_REBRIDGE_TRIES} intentos - se libera al cliente | EN: could not reconnect ${CHANNEL} with held caller ${ARG1} after ${ATXFER_REBRIDGE_TRIES} attempts - releasing the caller)
+ same => n,SoftHangup(${ARG1})
+ same => n,Goto(done)
+ same => n(nochan),Log(WARNING,Issabel CallCenter: no hay canal de cliente retenido que reconectar | EN: no held caller channel to reconnect with)
+ same => n(done),NoOp(Issabel CallCenter: reconnect finished BRIDGERESULT=${BRIDGERESULT} attempts=${ATXFER_REBRIDGE_TRIES})
+ same => n,Return()
+
 [atxfer-consult]
 exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,Set(__ATXFER_HELD_CHAN=${ATXFER_HELD_CHAN})
@@ -368,7 +408,7 @@ exten => _X.,1,NoOp(Issabel CallCenter: Attended Transfer - Consulting ${EXTEN})
  same => n,Dial(Local/${EXTEN}@from-internal/n,120,gF(atxfer-bridge^s^1)U(atxfer-consult-answered^${AGENT_NUM}))
  same => n,NoOp(Issabel CallCenter: Consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
  same => n,UserEvent(ConsultationEnd,Agent: Agent/${AGENT_NUM},Status: ${DIALSTATUS})
- same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN},${ATXFER_ON_HOLD}))
  same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
  same => n,Goto(atxfer-complete,${AGENT_NUM},1)
  same => n(holdwait),Set(ATXFER_ON_HOLD=)
@@ -394,7 +434,7 @@ exten => s,1,NoOp(Issabel CallCenter: Agent retrieving call from hold via Bridge
 [atxfer-cancel-consult]
 exten => s,1,NoOp(Issabel CallCenter: Cancelling consultation - reconnecting agent to caller)
  same => n,UserEvent(ConsultationEnd,Agent: Agent/${ATXFER_AGENT_NUM})
- same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN},${ATXFER_ON_HOLD}))
  same => n,GotoIf($["${ATXFER_ON_HOLD}" = "yes"]?holdwait)
  same => n,Goto(atxfer-complete,${ATXFER_AGENT_NUM},1)
  same => n(holdwait),Set(ATXFER_ON_HOLD=)
@@ -428,7 +468,7 @@ exten => _X.,1,NoOp(Issabel CallCenter: Callback attended transfer - consulting 
  same => n,Dial(${DIAL_DEVICE},120,gF(atxfer-bridge^s^1)U(cbxfer-consult-answered^${AGENT_ID}))
  same => n,NoOp(Issabel CallCenter: Callback consultation ended DIALSTATUS=${DIALSTATUS} - reconnecting with caller)
  same => n,UserEvent(ConsultationEnd,Agent: ${AGENT_ID},Status: ${DIALSTATUS})
- same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN}))
  same => n,Hangup()
 
 [cbxfer-consult-answered]
@@ -439,7 +479,7 @@ exten => s,1,NoOp(Issabel CallCenter: Callback consult answered by colleague for
 [cbxfer-cancel-consult]
 exten => s,1,NoOp(Issabel CallCenter: Cancelling callback consultation - reconnecting agent to caller)
  same => n,UserEvent(ConsultationEnd,Agent: ${ATXFER_AGENT_ID})
- same => n,Bridge(${ATXFER_HELD_CHAN})
+ same => n,Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN}))
  same => n,Hangup()
 
 [cbxfer-done]

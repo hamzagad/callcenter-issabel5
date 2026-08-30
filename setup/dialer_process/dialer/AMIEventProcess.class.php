@@ -1916,6 +1916,29 @@ class AMIEventProcess extends TuberiaProcess
                 ' (end='.$this->_consultaTerminadaEn[$sAgente].' request='.$fSolicitud.')'.
                 ' | ES: se ignora marca tardía de consulta para '.$sAgente.
                 ': su ConsultationEnd ya fue procesado');
+            /* La consola ya deshabilitó Hold/Transferir al recibir la respuesta
+             * de atxfercall, que se envía antes de saber si la consulta llegó a
+             * existir. Como aquí no se va a emitir ConsultationStart, se
+             * reemite ConsultationEnd con el motivo guardado: el
+             * ConsultationEnd original se emitió mientras el navegador todavía
+             * estaba esperando esa respuesta, así que suele perderse, y la
+             * resincronización por estado no puede entregarlo porque cliente y
+             * servidor coinciden en 'none'. Reemitir es inocuo si el primero
+             * sí llegó: el aviso es un único banner que se reescribe. */
+            /* EN: The console already disabled Hold/Transfer when it got the
+             * atxfercall reply, which is sent before it is known whether the
+             * consultation ever existed. Since ConsultationStart will not be
+             * emitted here, re-emit ConsultationEnd with the stored reason: the
+             * original one was emitted while the browser was still waiting for
+             * that reply, so it is usually lost, and the state resync cannot
+             * deliver it because client and server agree on 'none'. Re-emitting
+             * is harmless if the first one did arrive: the notice is a single
+             * banner whose text is simply rewritten. */
+            $sDialStatus = isset($this->_ultimaConsultaFallida[$sAgente])
+                ? $this->_ultimaConsultaFallida[$sAgente] : '';
+            $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
+                array('ConsultationEnd', array($sAgente, $sDialStatus))
+            ));
             return;
         }
         unset($this->_consultaTerminadaEn[$sAgente]);

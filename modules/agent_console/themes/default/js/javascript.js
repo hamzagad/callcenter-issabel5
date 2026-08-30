@@ -782,6 +782,7 @@ function do_transfer()
         	// Attended transfer consultation started - disable Hold/Transfer buttons
         	$('#btn_hold').button('disable');
         	$('#btn_transfer').button('disable');
+        	arm_consultation_watchdog();
         }
 
         // El cambio de estado de la interfaz se delega a la revisión
@@ -790,6 +791,36 @@ function do_transfer()
 	.fail(function() {
 		mostrar_mensaje_error('Failed to connect to server to run request!');
 	});
+}
+
+/* Undo the speculative Hold/Transfer disable above when the console never
+ * learns that a consultation actually started.
+ *
+ * The dialer answers "consultation started" as soon as its AMI Redirect
+ * succeeds, before it knows whether the consultation took. It marks the
+ * consultation with an asynchronous message sent just before that Redirect, so
+ * when the colleague device fails instantly (unregistered peer, busy) the
+ * ConsultationEnd UserEvent can overtake that message, which is then discarded
+ * on purpose - and ConsultationStart is never emitted. estadoCliente
+ * .consultation therefore stays 'none', the server-side resync in
+ * manejarSesionActiva_checkStatus() sees client and server agreeing on 'none'
+ * and synthesizes no event, and the two buttons disabled just above would stay
+ * disabled until the page is reloaded.
+ *
+ * A consultation that really started moves estadoCliente.consultation to
+ * 'ringing' or 'answered' (either from the Consultation* event or from that
+ * same resync), which makes this watchdog a no-op. The call and hold guards
+ * mirror the ones the consultationend and holdenter handlers already use, so
+ * this never re-enables a button those handlers meant to keep disabled.
+ */
+function arm_consultation_watchdog()
+{
+	setTimeout(function() {
+		if (estadoCliente.consultation != 'none') return;
+		if (estadoCliente.callid == null || estadoCliente.onhold) return;
+		$('#btn_hold').button('enable');
+		$('#btn_transfer').button('enable');
+	}, 5000);
 }
 
 function do_confirm_contact()

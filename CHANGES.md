@@ -2,6 +2,230 @@
 
 ---
 
+## 70. Attended Transfer: Caller Stranded on Hold, and a Console Left With Dead Buttons
+**Date**: 2026-08-30
+
+Three defects on the attended-transfer path, all rooted in state that is
+asynchronous with respect to the transfer it describes. Diagnosis in
+`issues/ISSUE_attended-transfer-customer-stranded-on-hold_INVESTIGATION.md`.
+
+### A. The caller was left alone on Music On Hold
+
+An agent starts an attended transfer, the consultation fails instantly, and
+instead of the agent being reconnected their channel hangs up and the **caller is
+left alone in `[atxfer-hold]`'s `MusicOnHold(,1800)` for up to 30 minutes**, with
+the call gone from the agent console. Observed twice back to back on 2026-08-30
+(01:41:12 and 01:43:52).
+
+`ECCPConn::Request_agentauth_atxfercall()` starts the transfer with a **single**
+AMI `Redirect` carrying an `ExtraChannel`. `action_redirect` performs an
+**independent async goto on each channel**, so the agent and the caller then run
+in separate PBX threads with nothing synchronising them. When the consult
+`Dial()` fails *synchronously inside the channel driver* - an unregistered
+`chan_sip` peer allocates no channel and sends no packet - the agent thread runs
+all 14 priorities of `[cbxfer-consult]` inside one scheduler slice and reaches
+the reconnect **before the caller has even left the previous bridge**:
+
+```
+01:41:12 SIP/101-00000002 left 'simple_bridge' basic-bridge <5466d439-...>
+01:41:12 [103@cbxfer-consult:10] Dial("SIP/101-00000002", "SIP/103,120,gF(...)U(...)")
+01:41:12 NOTICE app_dial.c: Unable to create channel of type 'SIP' (cause 20 - Subscriber absent)
+01:41:12 [103@cbxfer-consult:13] Bridge("SIP/101-00000002", "SIP/120Issabel4-00000001")
+01:41:12 [103@cbxfer-consult:14] Hangup("SIP/101-00000002", "")
+01:41:12 SIP/120Issabel4-00000001 left 'simple_bridge' basic-bridge <5466d439-...>   <- only now
+01:41:12 [s@atxfer-hold:3] MusicOnHold("SIP/120Issabel4-00000001", ",1800")
+```
+
+`Bridge()` cannot take a channel that is still leaving a dissolving bridge, so it
+returned `BRIDGERESULT=FAILURE` - one of the two outcomes `bridge_exec` sets
+**silently**, which is why this produced no diagnostics on either side. All 21
+consultations in the retained log were classified: the 3 whose `Dial()` failed
+instantly account for both strandings (2 of 3), and nothing outside that bucket
+has ever stranded.
+
+**Fix**: a shared `[atxfer-rebridge]` context that retries while `BRIDGERESULT` is
+`FAILURE` - 20 attempts at 100 ms, ~2 s - and treats `SUCCESS`, `NONEXISTENT`
+(the caller has genuinely gone) and `LOOP` as final. The caller only has to run
+three dialplan priorities to become bridgeable, so the window is microseconds
+wide and the budget is orders of magnitude more slack than it needs. The result
+is finally logged, and a `SoftHangup` backstop releases the caller rather than
+leaving them on music should the retries ever be exhausted.
+
+| context | `extensions_custom.conf` | `installer.php` | call |
+|---|---|---|---|
+| `[atxfer-consult]` | 87 | 411 | `Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN},${ATXFER_ON_HOLD}))` |
+| `[atxfer-cancel-consult]` | 113 | 437 | `Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN},${ATXFER_ON_HOLD}))` |
+| `[cbxfer-consult]` | 147 | 471 | `Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN}))` |
+| `[cbxfer-cancel-consult]` | 158 | 482 | `Gosub(atxfer-rebridge,s,1(${ATXFER_HELD_CHAN}))` |
+
+One line replaced by one line at each site, so every priority number and every
+existing tail - including the three `Wait(900)` holdwait timers from Change #69 -
+is untouched. `Bridge()` returns only when the reconnected conversation ends, so
+`Return()` lands back on each site's own tail exactly as the direct call did.
+
+### B. The console's Hold and Transfer buttons could stay disabled forever
+
+Doing quick transfers left the console with Hold and Transfer greyed out and no
+message at all; only a page reload cleared it.
+
+`Request_agentauth_atxfercall()` answers `<consultation>true</consultation>` as
+soon as its Redirect succeeds, before it can know whether the consultation took.
+`do_transfer()` disables Hold/Transfer on that reply, but the *re-enable* lives
+only in the `consultationend` event handler.
+
+The consultation is marked by an **asynchronous** message
+(`marcarConsultationIniciada`) sent just before the Redirect. When the consult
+fails instantly the `ConsultationEnd` UserEvent overtakes that message, which is
+then discarded on purpose - that discard defends a different race and must stay,
+see the comment in `_marcarConsultationIniciada()` - so `ConsultationStart` is
+never emitted and `estadoCliente.consultation` stays `'none'`. The resync in
+`manejarSesionActiva_checkStatus()` then sees client and server agreeing on
+`'none'` and synthesizes nothing:
+
+```
+15:37:08 ConsultationEnd received for agent=SIP/101  was_in_consultation=NO
+15:37:08 _marcarConsultationIniciada - ignoring late consultation mark for SIP/101:
+         its ConsultationEnd was already processed
+```
+
+The intermittency is an ordering coin-flip between two concurrent connections:
+the original `ConsultationEnd` is emitted *while the browser is still waiting for
+the `atxfercall` HTTP reply*. If the event wins it enables the buttons and the
+reply then disables them - stuck; if the reply wins the event re-enables them and
+nothing is wrong. No message appeared because `do_transfer()` only alerts on
+`action == 'error'`.
+
+**Fix**: `arm_consultation_watchdog()`, armed by the same speculative disable,
+undoes it 5 s later if the console never learned that a consultation started. A
+real consultation moves `estadoCliente.consultation` to `'ringing'`/`'answered'`
+and makes the watchdog a no-op; its call and hold guards mirror the ones the
+`consultationend` and `holdenter` handlers already use, so it can never
+re-enable a button another handler meant to keep disabled. Being purely local it
+is immune to both the ordering race and event loss.
+
+### C. The agent was never told why the consultation ended
+
+Same race. The dialer stores the consult `DIALSTATUS` in `_ultimaConsultaFallida`
+and exposes it as `consultation_reason`, but the resync only ships it on a state
+mismatch - and here both sides read `'none'`, so the "colleague busy /
+unavailable" notice was silently dropped.
+
+**Fix**: `_marcarConsultationIniciada()` re-emits `ConsultationEnd` with the
+stored reason when it discards a late mark.
+
+```php
++            $sDialStatus = isset($this->_ultimaConsultaFallida[$sAgente])
++                ? $this->_ultimaConsultaFallida[$sAgente] : '';
++            $this->_tuberia->msg_ECCPProcess_emitirEventos(array(
++                array('ConsultationEnd', array($sAgente, $sDialStatus))
++            ));
+             return;
+```
+
+This fires after the async message is processed, i.e. after the HTTP reply has
+almost certainly landed, so it is the delivery that actually reaches the console.
+Re-emitting is harmless when the first one did arrive: `mostrar_mensaje_info()`
+rewrites the text of a single banner.
+
+### Rejected
+
+- **Reordering `UserEvent(ConsultationEnd)` after the reconnect** - on the success
+  path the reconnected conversation can last minutes, and the console would show
+  "in consultation" for its whole duration.
+- **Gating the ConsultationEnd cleanup on the flag already being set** - that is
+  the race the unconditional `unset` exists to defend; it would wedge the
+  console's "Cancel transfer" cue until a reload.
+- **Setting `estadoCliente.consultation = 'ringing'` in `do_transfer()`** - fixes
+  the buttons, but makes client and server agree on `'ringing'`, suppressing the
+  `consultationstart` resync that is the only reliable delivery of that event and
+  leaving the Hangup button label stuck.
+- **Dropping the speculative disable and relying on `consultationstart`** - opens
+  a double-submit window during exactly the rapid-transfer pattern that already
+  produces `msg_Dial: canal remoto en conflicto`.
+- **Copy-pasting the `[cbxfer-consult]` fix into the two `atxfer-*` sites** - when
+  `ATXFER_ON_HOLD=yes` the held caller is *parked* (Change #69) and `Bridge()` on
+  a parked channel legitimately succeeds, so a retry-then-`SoftHangup` there could
+  force-release a caller already capped by the `callcenter_hold` lot's
+  `parkingtime`. Those two sites pass `ATXFER_ON_HOLD` as `ARG2`, which suppresses
+  the release backstop and nothing else.
+
+Left alone deliberately: `[atxfer-bridge]`, where a `NONEXISTENT` is the caller
+having genuinely hung up before the transfer completed and is the correct
+outcome; and `[atxfer-unhold]`, driven by a single-channel Redirect out of
+parking with no concurrent `ExtraChannel`, so it is not exposed to the race.
+
+**Verification performed**: `php -l` clean on both changed PHP files,
+`node --check` clean on the JS. `dialplan reload` (never an Asterisk restart);
+`dialplan show atxfer-rebridge` loads 16 priorities with every label resolved,
+and the four call sites keep their original priorities - `cbxfer-consult` is
+still 14 priorities with the reconnect at 13.
+
+The give-up branch, the one path with no prior evidence behind it, was exercised
+with scratch contexts (`Bridge()` forced to `FAILURE`) against a real channel
+parked in `[atxfer-hold]`'s MusicOnHold: 20 attempts spanning 15:22:55 to
+15:22:57, the WARNING logged with both channel names and the attempt count,
+`SoftHangup` releasing the held channel - `Stopped music on hold` followed by
+`Spawn extension (atxfer-hold, s, 3) exited non-zero`, the same shape as a caller
+hangup, which is what the dialer's finalization expects - and `Return()` landing
+back on the caller's own tail. The `ARG2="yes"` guard was exercised the same way:
+priority 10 took `1?done`, no WARNING, no `SoftHangup`, parked caller untouched.
+The scratch contexts were removed afterwards.
+
+Confirmed on a real call at 15:32:15, an Agent-type attended transfer to a busy
+102:
+
+```
+[102@atxfer-consult:7] Gosub("SIP/101-00000001", "atxfer-rebridge,s,1(PJSIP/PJSIP120Issabel4-00000004,)")
+[s@atxfer-rebridge:5] Bridge("SIP/101-00000001", "PJSIP/PJSIP120Issabel4-00000004")
+Spawn extension (atxfer-hold, s, 3) exited non-zero on 'Surrogate/PJSIP/PJSIP120Issabel4-00000004'
+```
+
+Reconnected on attempt 1; the `Surrogate/` prefix is the signature of a clean
+yank out of MusicOnHold. The `[atxfer-hold]`..`[cbxfer-done]` region of
+`setup/installer.php` is byte-identical to the live
+`/etc/asterisk/extensions_custom.conf`, so a fresh install ships what is running.
+Dialer restarted clean. Live operator testing across both agent types found no
+issues.
+
+**Test steps**: with a colleague extension defined but **not** registered, take an
+inbound queue call and attended-transfer to it ten times - the agent must be
+reconnected every time and no run may leave the caller alone on hold. Repeat with
+the caller hanging up during the consult: `BRIDGERESULT=NONEXISTENT` returns at
+once with no 2 s spin. Transfer to a registered colleague and complete it, then
+transfer and cancel while it rings - both unchanged. As an Agent-type login,
+press Hold during a consultation and then end the consultation: the caller stays
+parked and End Hold still retrieves them, with no forced release. After a hard
+refresh of the console, a transfer to an unregistered or busy extension must
+re-enable Hold and Transfer on its own and show the busy/unavailable notice.
+
+```bash
+# Did the reconnect need retries, and did it ever give up? (previously silent)
+grep -aE "reconnect finished BRIDGERESULT|could not reconnect|no held caller channel" \
+     /var/log/asterisk/full | tail -20
+
+# Stranding detector: a caller left in atxfer-hold with no following new bridge
+grep -aE "Executing \[s@atxfer-hold:3\] MusicOnHold" /var/log/asterisk/full | tail -20
+
+# The consultation-state race firing, and the re-emitted ConsultationEnd after it
+grep -aE "ConsultationEnd UserEvent received|ignoring late consultation mark" \
+     /opt/issabel/dialer/dialerd.log | tail -20
+
+asterisk -rx "dialplan show atxfer-rebridge"
+```
+
+**Files affected**:
+- `/etc/asterisk/extensions_custom.conf` (live; new `[atxfer-rebridge]`, four
+  `Gosub` call sites)
+- `setup/installer.php` - the same contexts in the generator, so a reinstall does
+  not regenerate the racy dialplan
+- `/opt/issabel/dialer/AMIEventProcess.class.php` (live) and its repo copy under
+  `setup/dialer_process/dialer/`
+- `/var/www/html/modules/agent_console/themes/default/js/javascript.js` (live) and
+  its repo copy under `modules/agent_console/`
+- `TODO.md`, `issues/ISSUE_attended-transfer-customer-stranded-on-hold_INVESTIGATION.md`
+
+---
+
 ## 69. Beep on End Hold, But Only Sometimes
 **Date**: 2026-08-30
 
