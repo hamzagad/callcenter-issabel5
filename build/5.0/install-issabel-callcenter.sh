@@ -352,11 +352,11 @@ print_post_install_notice() {
     unset rootpw
 
     # --- Parking lot: timeout and slot range --------------------------------
-    # Asterisk 18 is guaranteed by the version check above, so parking always
-    # lives in res_parking*. Later files override earlier ones, so keep the last
-    # match found.
-    parkfiles="/etc/asterisk/res_parking.conf /etc/asterisk/res_parking_additional.conf /etc/asterisk/res_parking_custom.conf"
-    parkfilehint="res_parking_additional.conf"
+    # Agent hold parks into the call center's own lot, written by the installer
+    # into res_parking_custom_general.conf. The PBX "default" lot is irrelevant
+    # to hold, so it is deliberately not probed here.
+    parkfilehint="res_parking_custom_general.conf"
+    parkfiles="/etc/asterisk/$parkfilehint"
     parkingtime='unknown'
     parkpos='unknown'
     for f in $parkfiles; do
@@ -380,22 +380,22 @@ print_post_install_notice() {
 
     echo
     echo -e "${YELLOW}============================================${NC}"
-    echo -e "${YELLOW} POST-INSTALL: manual steps still required${NC}"
+    echo -e "${YELLOW} POST-INSTALL: settings to review${NC}"
     echo -e "${YELLOW}============================================${NC}"
-    echo "The installer does NOT change these. Please review them:"
+    echo "Defaults the installer applied - review them for your deployment:"
     echo
-    echo -e "${YELLOW}1) Increase the PBX Park timeout - the agent Hold feature uses Park${NC}"
-    echo "   current: parkingtime = ${parkingtime} s     (recommended: >= 1800)"
-    echo "   A held call is parked; when parkingtime expires the caller is"
-    echo "   returned automatically, so this is the maximum hold time."
-    echo "   Set it in the GUI: PBX → PBX Configuration → Applications → "
-    echo "   Parking → Default Lot -> \"Parking Timeout (seconds)\", then Apply Changes."
-    echo "   Do NOT hand-edit ${parkfilehint} - it is regenerated."
-    echo
-    echo -e "${YELLOW}2) Check the number of parking slots - it caps concurrent holds${NC}"
-    echo "   current: parkpos = ${parkpos} (${parkslots} slots)"
-    echo "   Only that many calls can be on hold at once, system-wide. Widen the"
-    echo "   range in the same Parking Lot screen to cover your concurrent agents."
+    echo -e "${YELLOW}1) Agent Hold uses its own parking lot - review, do not reconfigure${NC}"
+    echo "   lot 'callcenter_hold' in /etc/asterisk/${parkfilehint}"
+    echo "   parkingtime = ${parkingtime} s   (the maximum hold time)"
+    echo "   parkpos     = ${parkpos} (${parkslots} slots - the cap on concurrent holds)"
+    echo "   The PBX Parking screen in the GUI configures the *default* lot and no"
+    echo "   longer affects agent hold. To change these, edit the block marked"
+    echo "   '; BEGIN ISSABEL CALL-CENTER PARKING LOT' and run:"
+    echo "       asterisk -rx \"module reload res_parking\""
+    echo "   Keep parkpos clear of the default lot's range - Asterisk refuses"
+    echo "   overlapping parking extensions. If you raise parkingtime, raise the"
+    echo "   three Wait(900) calls in the call center block of"
+    echo "   /etc/asterisk/extensions_custom.conf to match."
     echo
     return 0
 }

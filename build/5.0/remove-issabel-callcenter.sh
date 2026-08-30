@@ -92,6 +92,17 @@ if [ -f "$EXTENSIONS_FILE" ]; then
     fi
 fi
 
+#remove the call center parking lot from res_parking_custom_general.conf
+PARKING_FILE="/etc/asterisk/res_parking_custom_general.conf"
+if [ -f "$PARKING_FILE" ]; then
+    if grep -q "; BEGIN ISSABEL CALL-CENTER PARKING LOT DO NOT REMOVE THIS LINE" "$PARKING_FILE"; then
+        sed -i '/^; BEGIN ISSABEL CALL-CENTER PARKING LOT DO NOT REMOVE THIS LINE$/,/^; END ISSABEL CALL-CENTER PARKING LOT DO NOT REMOVE THIS LINE$/d' "$PARKING_FILE"
+        echo "Removed call center parking lot from $PARKING_FILE"
+        # Reload parking so the callcenter_hold lot goes away
+        asterisk -rx "module reload res_parking" 2>/dev/null || true
+    fi
+fi
+
 #remove database
 echo ""
 read -p "Do you want to delete the call_center database? (y/n): " DELETE_DB

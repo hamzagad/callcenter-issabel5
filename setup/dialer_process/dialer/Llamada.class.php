@@ -1374,10 +1374,15 @@ class Llamada
         // Debug: Log asyncPark call
         $this->_log->output("DEBUG_HOLD: [" . date('Y-m-d H:i:s.') . substr(microtime(), 2, 3) .
             "] asyncPark called for actualchannel={$this->actualchannel} agentchannel={$this->agentchannel}");
-        // Don't pass AnnounceChannel to suppress parking slot announcement to customer
+        // Don't pass AnnounceChannel to suppress parking slot announcement to customer.
+        // Park into the call center's own lot: it carries no courtesytone, so
+        // neither the agent nor the customer hears a beep when the hold ends.
         $ami->asyncPark(
             $callable, $call_params,
-            $this->actualchannel);
+            $this->actualchannel,
+            NULL,                   // AnnounceChannel - keep the slot announcement suppressed
+            NULL,                   // Timeout - use the lot's own parkingtime
+            'callcenter_hold');     // Parkinglot - silent call center lot
     }
 
     public function _cb_Park($r, $sFuente, $ami, $timestamp)

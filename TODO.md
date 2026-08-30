@@ -35,9 +35,9 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Type**: Feature
 * **Urgency**: Low
 * **Date Added**: Original (pre-2011)
-* **Date Updated**: 2026-08-28
+* **Date Updated**: 2026-08-30
 * **Location**: `AMIEventProcess.class.php:4014-4015`, `agent_console/`
-* **Description**: When agent puts call on hold, call is parked in Asterisk with configurable timeout (default 45-180 seconds, set in `features.conf` parkingtime). The `ParkedCall` AMI event includes `Timeout` parameter (seconds until auto-return) but this is NOT displayed to agents, so an agent has no warning that a held call is about to come back. Add a countdown timer showing the time REMAINING until the call returns. Implementation requires: store the parking timeout in the `Llamada` object, include `parking_timeout` in the ECCP agent status XML, add a JavaScript countdown, and add the UI element. The original request also asked for an on-hold status with a distinct colour in the status bar and an elapsed-hold counter; both were delivered by Change #61, which leaves only the countdown.
+* **Description**: When agent puts call on hold, call is parked in Asterisk with a configurable timeout (900 seconds, the `parkingtime` of the `callcenter_hold` lot in `/etc/asterisk/res_parking_custom_general.conf`; Change #69). The `ParkedCall` AMI event includes `Timeout` parameter (seconds until auto-return) but this is NOT displayed to agents, so an agent has no warning that a held call is about to come back. Add a countdown timer showing the time REMAINING until the call returns. Implementation requires: store the parking timeout in the `Llamada` object, include `parking_timeout` in the ECCP agent status XML, add a JavaScript countdown, and add the UI element. The original request also asked for an on-hold status with a distinct colour in the status bar and an elapsed-hold counter; both were delivered by Change #61, which leaves only the countdown. Note that since Change #69 the timeout no longer returns the caller to the agent — `park-return-routing` has no entry for the 70xxx slots, so Asterisk hangs the parked channel up and the dialer finalizes the call — so the countdown is a warning that the call is about to *end*.
 * **Status**: Partially Solved
 
 ---

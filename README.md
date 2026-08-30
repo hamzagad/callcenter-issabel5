@@ -50,17 +50,26 @@ Post-installation notes
 ----
 
 
-**1. Increase the PBX Park timeout — the agent Hold feature uses Park.** Putting a
-call on hold parks it, so `parkingtime` is effectively the maximum hold time: when
-it expires the caller is returned automatically, with no warning to the agent.
-Raise it to at least 1800 seconds in the GUI under
-*PBX → PBX Configuration → Applications → Parking → Default Lot → "Parking Timeout (seconds)"*, then click
-Apply Changes. Do not hand-edit the Asterisk 11 configuration files — it is regenerated from the database.
+**1. The agent Hold feature has its own parking lot — nothing to configure.** Putting
+a call on hold parks it, but not in the PBX "default" lot: the installer writes a
+dedicated `callcenter_hold` lot into `/etc/asterisk/res_parking_custom_general.conf`,
+with a 900-second `parkingtime` (the maximum hold time) and 100 slots
+(`70001-70100`, the cap on concurrent holds system-wide). The PBX Parking screen in
+the GUI configures the *default* lot only and no longer affects agent hold.
 
-**2. Check the number of parking slots — it caps concurrent holds.** The `parkpos`
-range of the parking lot (default `701-708`, i.e. 8 slots) limits how many calls
-can be on hold at once across the whole system, regardless of agent count. Widen it
-in the same Parking Lot screen to cover the number of concurrent agents you expect.
+To change the hold timeout or the number of slots, edit `parkingtime` / `parkpos`
+inside the `; BEGIN ISSABEL CALL-CENTER PARKING LOT` block of that file and run
+`asterisk -rx "module reload res_parking"`. Keep `parkpos` clear of the default
+lot's range — Asterisk refuses overlapping parking extensions. If you raise
+`parkingtime`, also raise the three `Wait(900)` calls in the call center block of
+`/etc/asterisk/extensions_custom.conf` to match; they cap how long the agent side
+waits during a hold taken around an attended transfer.
+
+**2. The lot deliberately has no `courtesytone`,** so neither the agent nor the
+customer hears a beep when a held call is resumed. This matches the behaviour of a
+hold taken after a cancelled attended transfer, which is resumed by bridging and was
+always silent. Agent-type (app_agent_pool) logins still hear the `custom_beep` from
+`agents.conf` when a call is offered to them, including on resume.
 
 License
 ----

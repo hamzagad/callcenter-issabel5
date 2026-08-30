@@ -2,6 +2,166 @@
 
 ---
 
+## 69. Beep on End Hold, But Only Sometimes
+**Date**: 2026-08-30
+
+Putting a call on hold and resuming it played a beep to the agent *and* to the
+customer - but only on an ordinary hold. A hold taken after a failed or cancelled
+attended transfer was silent at both ends. Same button, same call, two behaviours.
+
+Hold always parks the customer, but the two paths retrieve them by different means
+and only one of them touches the parking API:
+
+| | ordinary hold | hold after a failed transfer |
+|---|---|---|
+| park | AMI `Park` -> lot `default` | AMI `Park` -> lot `default` (same) |
+| resume | `Originate` agent -> `7001@from-internal` -> `ParkedCall()` | `Redirect` agent -> `[atxfer-unhold]` -> `Bridge()` |
+| beeps | `AgentRequest()` alert **+** the lot's `courtesytone` | none |
+
+`/etc/asterisk/res_parking_additional.conf` carries `courtesytone=beep` with
+`parkedplay=both`, so `ParkedCall()` beeps at both ends. `Bridge()` never consults
+the parking lot, hence the silence. Traced on a live Agent-type login (1001 on
+`SIP/101`):
+
+```
+--- ordinary hold / End Hold --------------------------------------------
+12:51:57  Parking 'PJSIP/PJSIP120Issabel4-00000000' in 'default' at space 7001
+12:51:57  Started music on hold, class 'Primasoft', on PJSIP/...-00000000
+12:52:03  AgentRequest(Local/1001@agents-00000001;2, "1001")
+12:52:03  <SIP/101-00000000>              beep   #1  custom_beep    -> AGENT
+12:52:04  ParkedCall(Local/1001@agents-00000001;1, "default,7001")
+12:52:04  <Local/1001@agents-00000001;1>  beep   #2  courtesytone   -> AGENT
+12:52:04  <PJSIP/PJSIP120Issabel4-...>    beep   #3  courtesytone   -> CUSTOMER
+
+--- hold / End Hold after a transfer to 102 was rejected ----------------
+12:53:10  [102@atxfer-consult:5] "Consultation ended DIALSTATUS=BUSY - reconnecting"
+12:53:20  Parking 'PJSIP/PJSIP120Issabel4-00000001' in 'default' at space 7001
+12:53:24  [s@atxfer-unhold:2] Bridge(SIP/101-00000001, PJSIP/...-00000001)
+          (no beep.gsm in this window)
+```
+
+**Fix**: agent hold now parks into a dedicated `callcenter_hold` lot that defines no
+`courtesytone`, so beeps #2 and #3 are gone in every path.
+
+```php
+         // Don't pass AnnounceChannel to suppress parking slot announcement to customer.
++        // Park into the call center's own lot: it carries no courtesytone, so
++        // neither the agent nor the customer hears a beep when the hold ends.
+         $ami->asyncPark(
+             $callable, $call_params,
+-            $this->actualchannel);
++            $this->actualchannel,
++            NULL,                   // AnnounceChannel - keep the slot announcement suppressed
++            NULL,                   // Timeout - use the lot's own parkingtime
++            'callcenter_hold');     // Parkinglot - silent call center lot
+```
+
+The lot is written to `/etc/asterisk/res_parking_custom_general.conf`, an
+IssabelPBX `_custom` file that survives regeneration. It **shares the `parkedcalls`
+context** with the PBX lot: Asterisk only forbids overlapping generated
+*extensions*, and `70000`/`70001-70100` does not overlap `7000`/`7001-7010`.
+Sharing the context means the slots are already reachable from `from-internal`, so
+`ECCPConn::Request_agentauth_unhold()` keeps Originating to
+`${park_exten}@from-internal` unchanged and no new dialplan context is needed.
+Lot settings: `parkingtime=900` (was 300 - the maximum hold time), `parkpos`
+100 slots (was 10 - the cap on concurrent holds system-wide), `comebacktoorigin=no`,
+`parkedmusicclass=default`.
+
+Turning `courtesytone` off on the PBX `default` lot was rejected: it would silence
+parked-call pickup for every extension on the box, and IssabelPBX regenerates
+`res_parking_additional.conf` anyway.
+
+Beep #1 is untouched by design. It is the `agents.conf` `custom_beep` that
+`app_agent_pool` plays whenever a call is offered to an Agent-type agent - the same
+alert they get for a new inbound call, which matters because agents auto-accept.
+End Hold genuinely re-offers the call, so the alert still fires there. Callback
+logins (SIP/PJSIP/IAX2) never go through `AgentRequest()` and are now silent in
+both paths.
+
+Two consequences that came with the change:
+
+- **`Wait(300)` -> `Wait(900)`** at the `holdwait` label of `[atxfer-consult]`,
+  `[atxfer-unhold]` and `[atxfer-cancel-consult]`. On a hold taken around a
+  transfer the customer is capped by `parkingtime` while the agent waits at
+  `holdwait` capped by `Wait`. Both were 300 s and expired together; leaving `Wait`
+  behind would have opened a 10-minute window in which the agent is back in
+  `AgentLogin` and available for a new queue call while a customer is still parked.
+- **A hold left past `parkingtime` now ends the call** instead of ringing the
+  agent's device back. `park-return-routing` only lists 7000-7010, so a 70xxx
+  timeout finds no extension and Asterisk hangs the parked channel up. That is an
+  already-handled outcome, not a new failure: the dialer does not subscribe to
+  `ParkedCallTimeOut` (`AMIEventProcess.class.php:360`, commented out) and
+  `msg_Hangup()`'s `OnHold` branch exists precisely for it - its comment names *"the
+  park timeout return dialed an invalid target and Asterisk hung up the parked
+  channel directly"* - closing the hold audit and finalizing the call so no record
+  is left stuck. No return route was added, deliberately.
+
+**Verification performed**: `php -l` clean on both changed PHP files; `bash -n`
+clean on both changed shell scripts. `module reload res_parking` loaded both lots
+with no overlap complaint, and `dialplan show parkedcalls` reports 112 extensions -
+`7000` + `7001-7010` from `res_parking/default` alongside `70000` +
+`70001-70100` from `res_parking/callcenter_hold`. `dialplan show
+70001@from-internal` resolves to `ParkedCall(callcenter_hold,70001)`, the exact
+target the unhold `Originate` uses, while `7001@from-internal` still resolves to
+`Macro(parked-call,7001,default,parkedcalls)` so PBX parking is untouched. The
+emitted AMI action was captured by driving the real `AMIClientConn::__call`
+arg-mapping with the socket stubbed out:
+
+```
+before: Action: Park / Channel: PJSIP/...-00000099
+after:  Action: Park / Channel: PJSIP/...-00000099 / Parkinglot: callcenter_hold
+```
+
+`AnnounceChannel` and `Timeout` are correctly omitted, so the parking-slot
+announcement stays suppressed and the lot's own `parkingtime` applies.
+`instalarLoteParqueoCallCenter()` was run against a scratch file: it produces
+byte-identical content to the live file, is idempotent across repeated runs, and
+preserves unrelated `[general]` content above its markers; the uninstaller `sed`
+removes the block and leaves that content intact. Dialer restarted clean.
+**Live call testing is still pending** - the beep counts below have not yet been
+re-observed on a real call.
+
+**Test steps**: as Agent-type 1001, take a queue call, Hold, End Hold - the
+customer should hear nothing and the agent only the single call-entry alert. Then
+attempt an attended transfer to 102, have 102 reject it, and Hold/End Hold again -
+silent, as before. Confirm a new inbound queue call still beeps once. Repeat as a
+callback login for zero beeps at both ends in both paths.
+
+```bash
+# One beep per End Hold, on SIP/<agent-device> only - nothing on the customer's
+# PJSIP trunk leg and nothing on Local/1001@agents-...;1
+grep -aE "Playing 'beep.gsm'|Parking '|ParkedCall\(|AgentRequest\(|atxfer-unhold" \
+     /var/log/asterisk/full | tail -50
+
+# Must read callcenter_hold, never default
+grep -a "parking/parking_bridge.c: Parking " /var/log/asterisk/full | tail -10
+
+grep -E "DEBUG_HOLD|asyncPark|_cb_Park|park_exten|ParkedCallGiveUp|RegresaHold" \
+     /opt/issabel/dialer/dialerd.log | tail -40
+```
+
+Worth watching on the first real calls: the retrieval leg no longer runs
+IssabelPBX's `macro-parked-call`, which used to restart MixMonitor and run
+`macro-user-callerid`. Recording should be unaffected - the original MixMonitor
+sits on the customer's channel, which is continuous across park and retrieval - and
+the agent's display after End Hold should now show the customer rather than the
+agent's own extension, since `macro-user-callerid` is no longer overwriting the
+CallerID the dialer sets on the `Originate`.
+
+**Files affected**:
+- `/opt/issabel/dialer/Llamada.class.php` (live) and its repo copy under
+  `setup/dialer_process/dialer/`
+- `/etc/asterisk/res_parking_custom_general.conf` (live; new `callcenter_hold` lot)
+- `/etc/asterisk/extensions_custom.conf` (live; three `Wait(900)`)
+- `setup/installer.php` - new `instalarLoteParqueoCallCenter()`, called beside
+  `instalarContextosEspeciales()`; `Wait(900)` in the contexts heredoc
+- `build/5.0/install-issabel-callcenter.sh` - post-install notice now reports the
+  call center lot instead of advising changes to the PBX lot
+- `build/5.0/remove-issabel-callcenter.sh` - strips the parking block on uninstall
+- `README.md`, `TODO.md`
+
+---
+
 ## 68. Scheduled-Call Agent Reservation Crashed on PHP 7.4
 **Date**: 2026-08-30
 
