@@ -14,6 +14,9 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 - **New feature**: TLS encryption for the ECCP protocol; port 20005 is now TLS-only.
 - **New feature**: PJSIP trunks accepted by outgoing campaigns.
 - **New feature**: Dedicated `callcenter_hold` parking lot.
+- **Bug fix**: Outgoing campaign call no longer ends in the dialer the instant it connects when queue recording is off.
+- **Bug fix**: Calls Detail recordings list expands again; the module no longer loads its own JS twice.
+- **Bug fix**: Calls Detail lists a transferred call's recordings oldest first, so the visible one is the start of the call.
 - **Bug fix**: Attended transfer no longer strands the caller on hold or leaves the console with dead buttons.
 - **Bug fix**: Beep on end of hold now plays consistently.
 - **Bug fix**: Scheduled-call agent reservation crashed on PHP 7.4.

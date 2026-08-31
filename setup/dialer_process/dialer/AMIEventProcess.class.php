@@ -3272,6 +3272,48 @@ Uniqueid: 1429642067.241008
                 $this->_log->output('DEBUG: '.__METHOD__.': ignoro hangup local | EN: ignoring local hangup');
                 return FALSE;
             }
+
+            /* Asterisk saca el par de canales Local del puente en cuanto ambos
+             * lados quedan enlazados ("bridge.c: Move-swap optimizing
+             * Local/<num>@from-internal-XXXXXXXX;1 <-- SIP/<troncal>-YYYYYYYY").
+             * Las dos patas cuelgan entonces con Cause 16 mientras el canal real
+             * del troncal sigue conversando con el agente. En una llamada de
+             * campaña saliente marcada por plan de marcado la pata ;1 lleva el
+             * Uniqueid de la llamada misma, así que la comprobación de arriba la
+             * reconoce y la llamada se daría por terminada estando todavía en
+             * curso. Si la llamada está enlazada a un agente, no está en medio de
+             * una transferencia, y tiene un canal real (no Local) distinto del que
+             * cuelga, esto es la optimización y no el fin de la llamada: se ignora.
+             * El Hangup del canal real la finaliza después, encontrado por el
+             * índice actualchannel más abajo. */
+            /* EN: Asterisk optimizes the Local channel pair out of the bridge as
+             * soon as both sides are linked ("bridge.c: Move-swap optimizing
+             * Local/<num>@from-internal-XXXXXXXX;1 <-- SIP/<trunk>-YYYYYYYY").
+             * Both halves then hang up with Cause 16 while the real trunk channel
+             * keeps talking to the agent. On an outgoing campaign call dialed
+             * through the dialplan the ;1 half carries the call's own Uniqueid, so
+             * the check above matches it and the call would be finalized while it
+             * is still up. If the call is linked to an agent, is not in the middle
+             * of a transfer, and has a real (non-Local) channel other than the one
+             * hanging up, this is the optimization and not the end of the call:
+             * ignore it. The real channel's own Hangup finalizes the call later,
+             * matched by the actualchannel index below. */
+            $llamadaLocal = $this->_listaLlamadas->buscar('uniqueid', $params['Uniqueid']);
+            if (!is_null($llamadaLocal)
+                    && !$llamadaLocal->transfer_pending
+                    && !is_null($llamadaLocal->agente)
+                    && !is_null($llamadaLocal->timestamp_link)
+                    && !is_null($llamadaLocal->actualchannel)
+                    && strpos($llamadaLocal->actualchannel, 'Local/') !== 0
+                    && $llamadaLocal->actualchannel != $params['Channel']) {
+                $this->_log->output('DEBUG: '.__METHOD__.
+                    ': Local channel optimized out of the bridge, call continues on '.
+                    $llamadaLocal->actualchannel.', ignoring hangup'.
+                    ' | uniqueid='.$params['Uniqueid'].' channel='.$params['Channel'].
+                    ' | ES: canal Local optimizado fuera del puente, la llamada sigue en '.
+                    $llamadaLocal->actualchannel.', se ignora el hangup');
+                return FALSE;
+            }
             $this->_log->output('DEBUG: '.__METHOD__.
                 ': Local channel hangup matches tracked call, processing normally'.
                 ' | uniqueid='.$params['Uniqueid'].' channel='.$params['Channel']);
