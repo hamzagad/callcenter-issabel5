@@ -4,6 +4,8 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 **Last Reviewed**: 2026-08-29
 
+`Change #N` references point to the numbered entries in `CHANGES_PRE.md`.
+
 ---
 
 ## High

@@ -8,16 +8,31 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
-RELEASE='5.0.0-1'
 GITHUB_ACCOUNT='ISSABELPBX'
 
 # Resolve this script's directory up front: it is reported to the user when a
-# previous installation blocks the install, and reused by the --local branch.
+# previous installation blocks the install, reused by the --local branch, and
+# used to locate the repository's VERSION file below.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The repository's VERSION file is the single source of truth for the release
+# number. Read it rather than carrying a second copy here, which is what let the
+# installer and the changelog drift apart in the past. A missing file is not
+# fatal: it only affects what is printed, never what is installed.
+read_repo_version() {
+    local f="$1/VERSION"
+    [ -f "$f" ] || return 1
+    local v
+    v=$(head -1 "$f" 2>/dev/null | tr -d '\r' | tr -d '[:space:]')
+    [ -n "$v" ] || return 1
+    printf '%s' "$v"
+}
+
+REPO_VERSION="$(read_repo_version "$SCRIPT_DIR/../..")" || REPO_VERSION='unknown'
 
 usage() {
     cat <<EOF
-Issabel Call Center ${RELEASE} installer
+Issabel Call Center ${REPO_VERSION} installer
 
 Usage: $(basename "$0") [options]
 
@@ -98,14 +113,20 @@ if rpm -q issabel-callcenter &> /dev/null; then
 fi
 
 if [ -n "$FOUND_MARKERS" ]; then
-    INSTALLED_VERSION=""
-    if [ -f /usr/share/issabel/module_installer/callcenter/CHANGELOG ]; then
+    # Prefer the deployed VERSION file. Fall back to the first line of a deployed
+    # CHANGELOG: installations made before VERSION was introduced shipped that
+    # file under that name, so the legacy path is what is on disk there.
+    INSTALLED_VERSION="$(read_repo_version /usr/share/issabel/module_installer/callcenter)" \
+        || INSTALLED_VERSION=""
+    if [ -z "$INSTALLED_VERSION" ] && \
+       [ -f /usr/share/issabel/module_installer/callcenter/CHANGELOG ]; then
         INSTALLED_VERSION=$(head -1 /usr/share/issabel/module_installer/callcenter/CHANGELOG 2>/dev/null | tr -d '\r')
     fi
 
     echo -e "${RED}Error: an Issabel CallCenter dialer is already installed on this system.${NC}"
     if [ -n "$INSTALLED_VERSION" ]; then
         echo -e "${YELLOW}Installed version: ${INSTALLED_VERSION}${NC}"
+        echo -e "${YELLOW}This installer:    ${REPO_VERSION}${NC}"
     fi
     echo
     echo "Detected:"
@@ -125,21 +146,21 @@ fi
 # Check Asterisk version. This release targets Asterisk 18 and nothing else, so
 # any other version is refused up front rather than half-installed: the check
 # runs before the first file is written, so an aborted run changes nothing.
-VERSION=$(asterisk -rx "core show version" 2>/dev/null | awk '{print $2}' | cut -d. -f 1)
+ASTERISK_VERSION=$(asterisk -rx "core show version" 2>/dev/null | awk '{print $2}' | cut -d. -f 1)
 
-if [ -z "$VERSION" ]; then
+if [ -z "$ASTERISK_VERSION" ]; then
     echo -e "${RED}Error: Cannot detect Asterisk version. Is Asterisk running?${NC}"
     exit 1
 fi
 
-if [ "$VERSION" != "18" ]; then
-    echo -e "${RED}Error: Issabel CallCenter ${RELEASE} requires Asterisk 18.${NC}"
-    echo -e "${RED}Detected Asterisk version: ${VERSION}${NC}"
+if [ "$ASTERISK_VERSION" != "18" ]; then
+    echo -e "${RED}Error: Issabel CallCenter ${REPO_VERSION} requires Asterisk 18.${NC}"
+    echo -e "${RED}Detected Asterisk version: ${ASTERISK_VERSION}${NC}"
     echo -e "${RED}Installation aborted - nothing was installed or modified.${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}Info: Detected Asterisk $VERSION. Using app_agent_pool mode.${NC}"
+echo -e "${GREEN}Info: Detected Asterisk $ASTERISK_VERSION. Using app_agent_pool mode.${NC}"
 echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
 echo -e "${GREEN}  - Agent interface: Local/XXXX@agents${NC}"
 echo -e "${GREEN}  - Agent logout: Hangup login channel${NC}"
@@ -178,6 +199,10 @@ else
 fi
 
 cd "$WORK_DIR"
+
+# The clone may be newer than the checkout this script was launched from, so
+# report and deploy the version actually being installed.
+REPO_VERSION="$(read_repo_version "$WORK_DIR")" || true
 
 echo "Installing modules..."
 # Install modules (force overwrite)
@@ -273,7 +298,8 @@ rm -rf /usr/share/issabel/module_installer/callcenter/
 mkdir -p /usr/share/issabel/module_installer/callcenter/
 /bin/cp -rf setup/ /usr/share/issabel/module_installer/callcenter/
 /bin/cp -f menu.xml /usr/share/issabel/module_installer/callcenter/
-/bin/cp -f CHANGELOG /usr/share/issabel/module_installer/callcenter/
+/bin/cp -f CHANGELOG_OLD.md /usr/share/issabel/module_installer/callcenter/
+/bin/cp -f VERSION          /usr/share/issabel/module_installer/callcenter/
 
 # Merge menu
 echo "Merging menu..."
@@ -328,7 +354,7 @@ fi
 
 echo
 echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}Issabel CallCenter ${RELEASE} installation complete!${NC}"
+echo -e "${GREEN}Issabel CallCenter ${REPO_VERSION} installation complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo
 

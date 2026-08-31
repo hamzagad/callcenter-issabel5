@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Diagnosed and **FIXED** - see `CHANGES.md` #70 (2026-08-30) |
+| **Status** | Diagnosed and **FIXED** - see `CHANGES_PRE.md` #70 (2026-08-30) |
 | **Severity** | High — customer is left alone on Music On Hold for up to **30 minutes**, agent's call disappears from the console |
 | **Observed** | 2026-08-30 01:41:12 and 01:43:52 (two back-to-back), plus "randomly a couple of times before" reported by the operator |
 | **Investigated** | 2026-08-30 |
@@ -378,7 +378,7 @@ transfer completed. `NONEXISTENT` is the correct outcome there; do not "fix" it.
 > `[atxfer-rebridge]` context that all four Redirect-driven sites `Gosub` into,
 > rather than a block copy-pasted per site. The `ATXFER_ON_HOLD` value is passed
 > as `ARG2` at the two Agent-type sites so the `SoftHangup` backstop can never
-> force-release a *parked* caller - see the note in §10. Details in `CHANGES.md` #70.
+> force-release a *parked* caller - see the note in §10. Details in `CHANGES_PRE.md` #70.
 
 Two options were considered; **Option A was recommended** — it is confined to one file and has the smaller
 blast radius.
@@ -516,13 +516,13 @@ below (`diff -q` clean).
 
 ## 10. Open items
 
-Resolved by `CHANGES.md` #70 (2026-08-30):
+Resolved by `CHANGES_PRE.md` #70 (2026-08-30):
 
 - [x] Fix applied - shared `[atxfer-rebridge]` retry context, live and in `setup/installer.php`.
 - [x] Option A chosen, applied to sites #4, #5, #1 and #2, each keeping its own tail.
 - [x] Mirrored into `setup/installer.php`; the `[atxfer-hold]`..`[cbxfer-done]` region of the
       generator is byte-identical to the live `/etc/asterisk/extensions_custom.conf`.
-- [x] `CHANGES.md` entry added (#70).
+- [x] `CHANGES_PRE.md` entry added (#70).
 - [x] Tests 4 and 6 verified. The `SoftHangup` backstop was exercised with scratch contexts
       against a real channel in `[atxfer-hold]`'s MusicOnHold: it releases the caller in the
       same shape as an ordinary caller hangup, which is what the dialer's finalization expects.

@@ -99,8 +99,17 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Asterisk conf files: `/etc/asterisk/`
 - Local git repos exist in both `/opt/issabel/dialer/` and `/var/www/html/modules/` for changes tracking
 - Always use English language for the added code, comments, variables, and functions, but logs should be added in En and Es
-- Changes are always stored at CHANGES.md file
+- Changes are always stored at `CHANGES.md`, newest version first. Add points
+  under the current version heading; start each point with its type (Bug fix,
+  New feature, Improve, Removed, ...) and keep it to one short line
 - TODOs are always added to TODO.md file
+- Release version lives in the `VERSION` file at the repo root and is the single
+  source of truth; bump it there and add a matching heading at the top of
+  `CHANGES.md`. The installer reads it into `REPO_VERSION` and deploys it to
+  `/usr/share/issabel/module_installer/callcenter/`, which is how a later
+  install reports the currently-installed version
+- Frozen history, never edited: `CHANGES_PRE.md` (numbered pre-release entries)
+  and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10)
 - Date and time are always calculated in PHP, it should not used as query function
 - **IMPORTANT**: Always modify the live system, don't copy the modified files the repo unless the user explicitly ask
 - **IMPORTANT**: Always check your modifications will not affect any other functionality
