@@ -408,20 +408,10 @@ print_post_install_notice() {
     echo -e "${YELLOW}============================================${NC}"
     echo -e "${YELLOW} POST-INSTALL: settings to review${NC}"
     echo -e "${YELLOW}============================================${NC}"
-    echo "Defaults the installer applied - review them for your deployment:"
     echo
-    echo -e "${YELLOW}1) Agent Hold uses its own parking lot - review, do not reconfigure${NC}"
-    echo "   lot 'callcenter_hold' in /etc/asterisk/${parkfilehint}"
-    echo "   parkingtime = ${parkingtime} s   (the maximum hold time)"
+    echo -e "${YELLOW}1) Agent Hold uses its own parking lot 'callcenter_hold'${NC}"
     echo "   parkpos     = ${parkpos} (${parkslots} slots - the cap on concurrent holds)"
-    echo "   The PBX Parking screen in the GUI configures the *default* lot and no"
-    echo "   longer affects agent hold. To change these, edit the block marked"
-    echo "   '; BEGIN ISSABEL CALL-CENTER PARKING LOT' and run:"
-    echo "       asterisk -rx \"module reload res_parking\""
-    echo "   Keep parkpos clear of the default lot's range - Asterisk refuses"
-    echo "   overlapping parking extensions. If you raise parkingtime, raise the"
-    echo "   three Wait(900) calls in the call center block of"
-    echo "   /etc/asterisk/extensions_custom.conf to match."
+    echo "   ext: 70000, It has 100 slots 70001-70100 , consider not using these numbers"
     echo
     return 0
 }
