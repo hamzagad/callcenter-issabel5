@@ -46,31 +46,6 @@ systemctl status issabeldialer
 systemctl stop issabeldialer
 ```
 
-Post-installation notes
-----
-
-
-**1. The agent Hold feature has its own parking lot — nothing to configure.** Putting
-a call on hold parks it, but not in the PBX "default" lot: the installer writes a
-dedicated `callcenter_hold` lot into `/etc/asterisk/res_parking_custom_general.conf`,
-with a 900-second `parkingtime` (the maximum hold time) and 100 slots
-(`70001-70100`, the cap on concurrent holds system-wide). The PBX Parking screen in
-the GUI configures the *default* lot only and no longer affects agent hold.
-
-To change the hold timeout or the number of slots, edit `parkingtime` / `parkpos`
-inside the `; BEGIN ISSABEL CALL-CENTER PARKING LOT` block of that file and run
-`asterisk -rx "module reload res_parking"`. Keep `parkpos` clear of the default
-lot's range — Asterisk refuses overlapping parking extensions. If you raise
-`parkingtime`, also raise the three `Wait(900)` calls in the call center block of
-`/etc/asterisk/extensions_custom.conf` to match; they cap how long the agent side
-waits during a hold taken around an attended transfer.
-
-**2. The lot deliberately has no `courtesytone`,** so neither the agent nor the
-customer hears a beep when a held call is resumed. This matches the behaviour of a
-hold taken after a cancelled attended transfer, which is resumed by bridging and was
-always silent. Agent-type (app_agent_pool) logins still hear the `custom_beep` from
-`agents.conf` when a call is offered to them, including on resume.
-
 License
 ----
 
@@ -89,6 +64,3 @@ GPLv2 or Later
 >You should have received a copy of the GNU General Public License
 >along with this program; if not, write to the Free Software
 >Foundation, Inc., 51 Franklin Street, Fifth Floor, Bosto
-
-
-
