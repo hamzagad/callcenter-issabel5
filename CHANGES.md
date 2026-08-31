@@ -18,6 +18,7 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 - **Bug fix**: Beep on end of hold now plays consistently.
 - **Bug fix**: Scheduled-call agent reservation crashed on PHP 7.4.
 - **Bug fix**: Device-type defects on PJSIP and IAX2.
+- **Bug fix**: Callback agents added to a queue while logged in stayed unusable until re-login.
 - **Improve**: ECCP XML hardening - escaping helper, serialization fail-safe, explicit database charset.
 - **Improve**: Installer requires Asterisk 18 and aborts before writing anything.
 - **Improve**: Installer help documents the ECCP certificate variables.
