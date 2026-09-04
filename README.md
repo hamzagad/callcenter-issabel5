@@ -16,8 +16,8 @@ Callcenter Issabel 5
 
 Call Center Module for Issabel V5, Updated for installing on rocky 8 , with php compatiblle with v7.4 up to v8.0 , In callback and agent modes. 
 
-esta version puede ser instalada en asterisk 18 en IssabelPBX.
-This repo is tested with Issabel v5 and Asterisk 18, and it is no logner backward compatible with Issabel 4
+esta version puede ser instalada en asterisk 13, 16 o 18 en IssabelPBX.
+This repo is tested with Issabel v5 and Asterisk 13, 16 or 18, and it is no logner backward compatible with Issabel 4
 
 #### Version actualizada por la comunidad de Issabel, cualquier duda o problema escribir a https://t.me/IssabelPBXip:
 Gracias a la colaboracion de Nicolás Gudiño, Hamza ,Julio pacheco, y comunidad de Issabel en telegram

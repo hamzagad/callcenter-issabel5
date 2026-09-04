@@ -41,7 +41,7 @@ Options:
                 instead of cloning the repository from GitHub.
   -h, --help    Show this help and exit
 
-Requires Asterisk 18 - the installer aborts on any other version.
+Requires Asterisk 13, 16 or 18 - the installer aborts on any other version.
 
 Must be run as root, and only performs a CLEAN install: it aborts when a previous
 Call Center installation is detected. Remove that one first with
@@ -143,9 +143,19 @@ if [ -n "$FOUND_MARKERS" ]; then
     exit 1
 fi
 
-# Check Asterisk version. This release targets Asterisk 18 and nothing else, so
-# any other version is refused up front rather than half-installed: the check
-# runs before the first file is written, so an aborted run changes nothing.
+# Check Asterisk version. This release targets Asterisk 13, 16 and 18, the
+# versions the module is checked against, so any other version is refused up
+# front rather than half-installed: the check runs before the first file is
+# written, so an aborted run changes nothing.
+#
+# The three are interchangeable for this module. Their AMI surfaces were
+# compared action by action and field by field: every action the dialer sends
+# and every event it reads exists in all three, with the same fields. All three
+# also run app_agent_pool, so AsteriskCompat drives them through one code path.
+#
+# 13 is end of life (the branch stopped at 13.38.3 in 2021) and the wider
+# Issabel stack has not been checked on it. It is allowed here because the
+# module works on it, not because it is a recommended target.
 ASTERISK_VERSION=$(asterisk -rx "core show version" 2>/dev/null | awk '{print $2}' | cut -d. -f 1)
 
 if [ -z "$ASTERISK_VERSION" ]; then
@@ -153,12 +163,15 @@ if [ -z "$ASTERISK_VERSION" ]; then
     exit 1
 fi
 
-if [ "$ASTERISK_VERSION" != "18" ]; then
-    echo -e "${RED}Error: Issabel CallCenter ${REPO_VERSION} requires Asterisk 18.${NC}"
-    echo -e "${RED}Detected Asterisk version: ${ASTERISK_VERSION}${NC}"
-    echo -e "${RED}Installation aborted - nothing was installed or modified.${NC}"
-    exit 1
-fi
+case "$ASTERISK_VERSION" in
+    13|16|18) ;;
+    *)
+        echo -e "${RED}Error: Issabel CallCenter ${REPO_VERSION} requires Asterisk 13, 16 or 18.${NC}"
+        echo -e "${RED}Detected Asterisk version: ${ASTERISK_VERSION}${NC}"
+        echo -e "${RED}Installation aborted - nothing was installed or modified.${NC}"
+        exit 1
+        ;;
+esac
 
 echo -e "${GREEN}Info: Detected Asterisk $ASTERISK_VERSION. Using app_agent_pool mode.${NC}"
 echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
@@ -412,6 +425,24 @@ print_post_install_notice() {
     echo -e "${YELLOW}1) Agent Hold uses its own parking lot 'callcenter_hold'${NC}"
     echo "   parkpos     = ${parkpos} (${parkslots} slots - the cap on concurrent holds)"
     echo "   ext: 70000, It has 100 slots 70001-70100 , consider not using these numbers"
+    echo
+    echo -e "${YELLOW}2) Queue settings for any queue attached to an outgoing campaign${NC}"
+    echo "   Set these in PBX > Queues. The installer does not change them."
+    echo
+    echo "   Ring Strategy    do NOT use 'ringall'"
+    echo "                    ringall rings every free agent at once, so the dialer"
+    echo "                    cannot tell which agent will take the call and its"
+    echo "                    pacing goes wrong. Use any single-agent strategy."
+    echo
+    echo "   Autofill         Yes"
+    echo "                    Without it the queue hands out one waiting caller at a"
+    echo "                    time, so callers already answered by the dialer sit in"
+    echo "                    the queue while agents are free."
+    echo
+    echo "   Skip Busy Agents 'Yes + (ringinuse=no)'"
+    echo "                    Stops the queue offering a new call to an agent who is"
+    echo "                    already on one, which the dialer would count as a"
+    echo "                    failed delivery."
     echo
     return 0
 }
