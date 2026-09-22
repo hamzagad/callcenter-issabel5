@@ -10,6 +10,17 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## High
 
+### CampaignProcess Keeps Writing to the Rotated Log
+
+* **Type**: Bug
+* **Urgency**: High
+* **Date Added**: 2026-09-22
+* **Location**: `dialerd:25`, `dialerd:465-479`, `MultiplexServer.class.php:172-176`, `HubProcess.class.php:459-466`, `setup/issabeldialer.logrotate`
+* **Description**: After a logrotate cycle `CampaignProcess` can keep its old file descriptor open and carry on writing to the rotated file, so none of its output reaches the live `dialerd.log`. Observed on the client box on 2026-09-22: `/proc/2121/fd/0 -> /opt/issabel/dialer/dialerd.log-20260922`, that rotated file at 878 MB and still growing with its mtime tracking the live log to the second, while `dialerd.log` held zero `(CampaignProcess)` lines. The signal itself is delivered correctly -- `HubProcess` logged `Propagando senal #1 a CampaignProcess... / Completada propagacion`, and `_propagarSIG()` covers every entry in `_tareas` -- but `CampaignProcess` then logged only `INFO: select() finaliza con fallo - senal pendiente?` (the EINTR branch at `MultiplexServer.class.php:175`) and never reached the `switching logs` / `using new log` branch at `dialerd:470-477`. It is intermittent rather than permanent: the same PID handled the previous rotation correctly (`2026-09-21 04:03:33 ... proceso recibio senal 1, usando nuevo log`).
+* **Impact**: (1) With `rotate 7` the held file is eventually unlinked while still open, so its space is not reclaimed until the dialer restarts -- an unbounded disk leak on a box where a full `/var` presents as a broken GUI, failing CDR writes and a dead dialer all at once. (2) Every campaign diagnostic -- agent allocation, call placement, `marking campaign as finished` -- lands in a file nobody greps, which actively misleads anyone investigating a campaign.
+* **Investigation lead (not a confirmed root cause)**: `declare(ticks=8)` at `dialerd:25` only covers statements in that file, so a signal arriving while the child is executing inside a class file is not dispatched until control returns to `dialerd` scope. Confirm before proposing a fix; an explicit `pcntl_signal_dispatch()` in the child loop, or handling the EINTR return in `MultiplexServer::procesarActividad()` instead of only logging it, are the obvious candidates.
+* **Status**: Untouched
+
 ### ECCP Client Authorization
 
 * **Type**: Feature
@@ -39,6 +50,27 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Date Added**: 2026-08-30 (Change #70)
 * **Location**: `extensions_custom.conf:33`, `setup/installer.php:357`
 * **Description**: `[atxfer-hold]` is a bare `MusicOnHold(,1800)` with no check that the agent who put the caller there still exists, so any path that ever leaves a caller in it means up to 30 minutes of music with nobody on the other end. Change #70 removed the one known such path (the `Bridge()` thread race) and added a `SoftHangup` backstop inside `[atxfer-rebridge]`, but the context itself is still a dead end: the residual exposure is a caller orphaned during the ~2 s reconnect window, or by any future path. The `1800` is also now out of step with the 900 s hold cap the `callcenter_hold` parking lot got in Change #69. Proposed fix: have the dialer `SetVar` the agent's channel name onto the client channel at both `Redirect` sites in `ECCPConn::Request_agentauth_atxfercall()`, then run the hold as chunked `MusicOnHold` slices that bail out via `CHANNEL_EXISTS()` once that channel is gone. `res_musiconhold` restores the saved position for `mode=files` classes, so chunking does not restart the music. Deferred from Change #70 to keep that fix to a single file.
+* **Status**: Untouched
+
+### Campaign Finish Check Disagrees With the Dial Query
+
+* **Type**: Bug
+* **Urgency**: Medium
+* **Date Added**: 2026-09-22
+* **Location**: `CampaignProcess.class.php:1194-1220`, `CampaignProcess.class.php:2061-2087`
+* **Description**: `_checkCampaignDataExhausted()` decides a campaign is exhausted by counting rows matching `(status IS NULL OR status NOT IN ("Success","Placing","Ringing","OnQueue","OnHold")) AND retries < campaign.retries AND dnc = 0`. The dial query that actually places the calls adds two restrictions the count does not: `agent IS NULL`, and either all four of `date_init`/`date_end`/`time_init`/`time_end` NULL (branch 2) or a full current-window match (branch 1). Any row that is counted but not dialable blocks the campaign from ever reaching `T`: it is never selected for dialing, so its `retries` never increments, so it stays below the limit permanently and the campaign stays `Active` forever. Two shapes trigger it -- a row with a partially-set window (e.g. `date_init` set but `time_init` NULL, matching neither branch), and a row with a non-NULL `agent` that `_actualizarLlamadasAgendables()` never picks up. Verified latent on the client box on 2026-09-22 (0 such rows across all 8 campaigns), so this is a trap waiting on the first partial-window or orphaned-agent row, not an active fault.
+* **Recommendation**: Have the two sites share one predicate instead of restating it, so the finish check can never count a row the dialer will not dial.
+* **Status**: Untouched
+
+### Campaign List Needs a 'Retries Left' Column
+
+* **Type**: Feature
+* **Urgency**: Medium
+* **Date Added**: 2026-09-22
+* **Location**: `paloSantoCampaignCC.class.php:88-90`, `campaign_out/index.php:195`, `campaign_out/index.php:211-213`, `campaign_out/lang/*.lang`
+* **Description**: The campaign list's `Pending Calls` column counts only never-originated rows (`status IS NULL`, `paloSantoCampaignCC.class.php:90`), but the dialer will not mark a campaign `Finish` until every non-`Success` row has also used up its retries (`_checkCampaignDataExhausted()`). The visible column is therefore not the one that governs the status, and a campaign reading `Pending Calls = 0` sits at `Active` with no on-screen explanation. Seen on the client box on 2026-09-22: campaigns 6, 7 and 8 (`ADSL - Q3'26 - VF/ET/OR`) each showed `Pending Calls = 0` at status `Active` while still holding 1507, 1250 and 456 retryable rows against a retry limit of 5 -- correct dialer behaviour, invisible in the GUI.
+* **Implementation**: Add a `Retries Left` column that **counts the remaining numbers that still have retries available -- one row per phone number still callable -- not the sum of retries remaining and not the retries already consumed**. For campaign 6 above the column reads `1507`. Deliberately reuse the dialer's own exhaustion predicate so the column reaches 0 exactly when the dialer becomes entitled to set `Finish` -- as a `getCampaigns()` subquery: `(SELECT COUNT(*) FROM calls WHERE id_campaign = c.id AND (status IS NULL OR status NOT IN ('Success','Placing','Ringing','OnQueue','OnHold')) AND retries < c.retries AND dnc = 0) AS retries_left`. Then add the cell to the `$arrData[]` row and the header to `setColumns()`, keeping both arrays in the same order; the label goes through `_tr()` with entries in every `lang/<lang>.lang` (en, es, fr, ru, cn, tr, fa).
+* **Open decision**: The predicate above includes never-originated rows, so `Retries Left` is a superset of `Pending Calls` (on the client box campaign 9 showed 13578 pending against 15039 retries-left). Confirm whether that overlap is wanted, or whether never-originated rows should be excluded so the two columns are disjoint -- excluding them breaks the "reaches 0 when the dialer finishes it" property, so the overlap is probably the right call.
 * **Status**: Untouched
 
 ### Hold Timeout Countdown
