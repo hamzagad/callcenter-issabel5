@@ -202,7 +202,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 try {
                     $oProceso = new $sNombreClase($oTuberia);
                     if (!($oProceso instanceof TuberiaProcess)) throw new Exception('Not a subclass of TuberiaProcess!');
-                } catch (Exception $ex) {
+                } catch (Throwable $ex) {
                     $this->_log->output("ERR: al crear $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when creating $sNombreTarea - unhandled exception: ".$ex->getMessage());
                     die("ERR: al crear $sNombreTarea - ".$ex->getMessage()."\n");
                 }
@@ -212,7 +212,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 try {
                     $bContinuar = $oProceso->inicioPostDemonio($this->_config, $this->_log);
                     if ($bContinuar) $this->_log->output("PID = ".posix_getpid().", proceso iniciado normalmente | EN: PID = ".posix_getpid().", process started normally");
-                } catch (Exception $ex) {
+                } catch (Throwable $ex) {
                     $bContinuar = FALSE;
                     $this->_log->output("ERR: al inicializar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when initializing $sNombreTarea - unhandled exception: ".$ex->getMessage());
                 }
@@ -225,7 +225,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                     if (is_null($gsNombreSignal)) {
                         try {
                             $bContinuar = $oProceso->procedimientoDemonio();
-                        } catch (Exception $ex) {
+                        } catch (Throwable $ex) {
                             $bContinuar = FALSE;
                             $this->_log->output("ERR: al ejecutar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when executing $sNombreTarea - unhandled exception: ".$ex->getMessage());
                         }
@@ -250,7 +250,7 @@ class HubProcess extends AbstractProcess implements iRoutedMessageHook
                 // Indicate to the work module why it is finishing
                 try {
                     $oProceso->limpiezaDemonio($gsNombreSignal);
-                } catch (Exception $ex) {
+                } catch (Throwable $ex) {
                     $this->_log->output("ERR: al finalizar $sNombreTarea - excepción no manejada: ".$ex->getMessage()." | EN: error when finalizing $sNombreTarea - unhandled exception: ".$ex->getMessage());
                 }
                 $this->_log->output("PID = ".posix_getpid().", proceso terminó normalmente. | EN: process finished normally.");

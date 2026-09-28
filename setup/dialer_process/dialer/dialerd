@@ -432,7 +432,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             try {
                 $oProceso = new $sNombreTarea();
                 if (!($oProceso instanceof AbstractProcess)) throw new Exception('Not a subclass of AbstractProcess!');
-            } catch (Exception $ex) {
+            } catch (Throwable $ex) {
                 $oMainLog->output("ERR: while creating $sNombreTarea - uncaught exception: ".$ex->getMessage());
                 die("ERR: while instantiating $sNombreTarea - ".$ex->getMessage()."\n");
             }
@@ -442,7 +442,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             try {
                 $bContinuar = $oProceso->inicioPostDemonio($infoConfig, $oMainLog);
                 if ($bContinuar) $oMainLog->output("PID = ".posix_getpid().", process started normally");
-            } catch (Exception $ex) {
+            } catch (Throwable $ex) {
                 $bContinuar = FALSE;
                 $oMainLog->output("ERR: while initializing $sNombreTarea - uncaught exception: ".$ex->getMessage());
             }
@@ -455,7 +455,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
                 if (is_null($gsNombreSignal)) {
                     try {
                         $bContinuar = $oProceso->procedimientoDemonio();
-                    } catch (Exception $ex) {
+                    } catch (Throwable $ex) {
                         $bContinuar = FALSE;
                         $oMainLog->output("ERR: while running $sNombreTarea - uncaught exception: ".$ex->getMessage());
                     }
@@ -484,7 +484,7 @@ function iniciarTarea($sNombreDemonio, $sNombreTarea, $infoConfig, &$oMainLog)
             // Indicate to work module why termination is happening
             try {
                 $oProceso->limpiezaDemonio($gsNombreSignal);
-            } catch (Exception $ex) {
+            } catch (Throwable $ex) {
                 $oMainLog->output("ERR: while cleaning up $sNombreTarea - uncaught exception: ".$ex->getMessage());
             }
             $oMainLog->output("PID = ".posix_getpid().", process terminated normally.");

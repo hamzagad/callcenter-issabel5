@@ -37,6 +37,8 @@ class Predictor
 {
     private $_astConn;  // Conexión al Asterisk
                          // Connection to Asterisk
+    private $_oLogger = NULL;    // Registro de depuración del demonio
+                                 // Daemon debug log
     private $_agentesAppQueue = array();    // Agentes ocupados por llamadas de cola
                                             // Agents busy with queue calls
     private $_infoColas = array();          // Información de colas examinadas
@@ -45,9 +47,10 @@ class Predictor
     private $_enum_complete = TRUE;
     var $timestamp_examen = 0;
 
-    function __construct($astman)
+    function __construct($astman, $oLogger)
     {
         $this->_astConn = $astman;
+        $this->_oLogger = $oLogger;
     }
 
     function examinarColas($colas)
@@ -123,7 +126,7 @@ class Predictor
                 $this->_astConn->multiplexSrv->procesarActividad(0);
             else $this->_astConn->multiplexSrv->procesarActividad(1);
             if (time() - $iTimeoutStart > 10) {
-                $this->_astConn->oLogger->output(
+                $this->_oLogger->output(
                     'WARN: Predictor::_esperarEnumeracion: timeout de 10s esperando respuesta AMI, se aborta enumeración | '.
                     'EN: 10s timeout waiting for AMI enumeration response, aborting enumeration');
                 return FALSE;

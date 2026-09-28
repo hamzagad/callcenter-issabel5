@@ -7,6 +7,11 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.2
+
+- **Bug fix**: Predictor's 10 s AMI enumeration timeout no longer crashes CampaignProcess with an uncaught PHP Error; the timeout warning now reaches dialerd.log.
+- **Improve**: HubProcess and dialerd also catch PHP Errors, so a failing task is logged and ends through its cleanup instead of dying as an uncaught fatal.
+
 ## 5.1.1
 
 - **New feature**: `VERSION` file at the repo root is the single source of truth for the release number.

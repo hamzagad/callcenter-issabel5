@@ -691,7 +691,7 @@ PETICION_CAMPANIAS_ENTRANTES;
 
                 $queueInfo = $this->_tuberia->AMIEventProcess_infoPrediccionCola($campaignData['queue'], $this->_configDB->dialer_predictivo);
                 if (is_null($queueInfo)) {
-                    $oPredictor = new Predictor($this->_ami);
+                    $oPredictor = new Predictor($this->_ami, $this->_log);
                     if ($oPredictor->examinarColas(array($campaignData['queue']))) {
                         $queueInfo = $oPredictor->infoPrediccionCola($campaignData['queue'], $this->_configDB->dialer_predictivo);
                     }
@@ -757,7 +757,7 @@ PETICION_CAMPANIAS_ENTRANTES;
                  * generation takes time due to database queries, and by the
                  * time it moves to the next campaign using that queue, the
                  * information may be obsolete. */
-                $oPredictor = new Predictor($this->_ami);
+                $oPredictor = new Predictor($this->_ami, $this->_log);
                 $this->_processCampaignWithAllocation($tuplaCampania, $oPredictor);
 
                 /* Debido a las consultas a la base de datos realizadas para
