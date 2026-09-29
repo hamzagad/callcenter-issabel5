@@ -9,6 +9,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 GITHUB_ACCOUNT='ISSABELPBX'
+# The first release that deploys a VERSION stamp and has a complete update
+# chain behind it: an installation older than this cannot be updated in place.
+PATCH_FLOOR=5.1.1
 
 # Resolve this script's directory up front: it is reported to the user when a
 # previous installation blocks the install, reused by the --local branch, and
@@ -16,19 +19,26 @@ GITHUB_ACCOUNT='ISSABELPBX'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The repository's VERSION file is the single source of truth for the release
-# number. Read it rather than carrying a second copy here, which is what let the
-# installer and the changelog drift apart in the past. A missing file is not
-# fatal: it only affects what is printed, never what is installed.
-read_repo_version() {
-    local f="$1/VERSION"
-    [ -f "$f" ] || return 1
-    local v
-    v=$(head -1 "$f" 2>/dev/null | tr -d '\r' | tr -d '[:space:]')
-    [ -n "$v" ] || return 1
-    printf '%s' "$v"
-}
+# number. Reading and comparing it is shared with the updater through
+# callcenter-common.sh. The installer must also work as a single file (the
+# script alone, no sibling library), so the library is sourced only when it
+# sits beside this script and CC_LIB_LOADED remembers whether it is available;
+# without it the version is read inline (head -1, \r and blanks stripped).
+CC_LIB_LOADED=false
+if [ -f "$SCRIPT_DIR/callcenter-common.sh" ]; then
+    # shellcheck disable=SC1090
+    source "$SCRIPT_DIR/callcenter-common.sh"
+    CC_LIB_LOADED=true
+fi
 
-REPO_VERSION="$(read_repo_version "$SCRIPT_DIR/../..")" || REPO_VERSION='unknown'
+# Provisional value for --help, which runs before the source is settled
+# below; the authoritative read happens once WORK_DIR is known.
+if [ "$CC_LIB_LOADED" = true ]; then
+    REPO_VERSION="$(cc_read_version "$SCRIPT_DIR/../..")" || REPO_VERSION='unknown'
+else
+    REPO_VERSION="$(head -1 "$SCRIPT_DIR/../../VERSION" 2>/dev/null | tr -d '\r' | tr -d '[:space:]')"
+    [ -n "$REPO_VERSION" ] || REPO_VERSION='unknown'
+fi
 
 usage() {
     cat <<EOF
@@ -43,10 +53,19 @@ Options:
 
 Requires Asterisk 13, 16 or 18 - the installer aborts on any other version.
 
-Must be run as root, and only performs a CLEAN install: it aborts when a previous
-Call Center installation is detected. Remove that one first with
-  bash ${SCRIPT_DIR}/remove-issabel-callcenter.sh
-answering 'n' to its database question to keep your existing data.
+Must be run as root. When no previous Call Center installation is detected it
+performs a CLEAN install. When one is detected, the versions decide:
+  older than this installer  -> updates in place through
+      bash build/5.0/update-issabel-callcenter.sh
+    after a yes/Y confirmation. Updated files are overwritten: customizations
+    in them are lost.
+  same version or newer      -> reports nothing to do and exits 0.
+  installed version not determinable -> refuses. Remove the existing
+    installation first with
+      bash ${SCRIPT_DIR}/remove-issabel-callcenter.sh
+    answering 'n' to its database question to keep your existing data.
+  source VERSION not readable -> refuses without touching the installation:
+    update from a checkout that carries VERSION, with -l.
 
 The installer sets the asterisk user's shell to /bin/bash, then enables and starts
 issabeldialer and runs asterisk -rx 'core reload'.
@@ -101,9 +120,68 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# Refuse to install over an existing installation. Installing on top of a
-# previous version leaves stale files behind and cannot reliably migrate
-# configuration, so a clean install is required.
+# Determine the installation source and read its version BEFORE looking for
+# an existing installation: without -l the installer clones GitHub and
+# installs THAT, so the update decision must be made against the clone, not
+# against the checkout this script was launched from.
+if [ "$LOCAL_INSTALL" = true ]; then
+    # Find the repository root (two levels up from this script)
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+    if [ ! -f "$REPO_ROOT/menu.xml" ]; then
+        echo -e "${RED}Error: Cannot find repository root. Expected menu.xml at $REPO_ROOT${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Installing Issabel CallCenter from local directory: $REPO_ROOT${NC}"
+    WORK_DIR="$REPO_ROOT"
+else
+    echo -e "${GREEN}Installing Issabel CallCenter from GitHub: ${GITHUB_ACCOUNT}/callcenter-issabel5${NC}"
+
+    # Install git if not present
+    if ! command -v git &> /dev/null; then
+        echo "Installing git..."
+        dnf -y install git || yum -y install git
+    fi
+
+    # Clone repository
+    cd /usr/src
+    rm -rf callcenter
+    echo "Cloning repository..."
+    if ! git clone "https://github.com/${GITHUB_ACCOUNT}/callcenter-issabel5.git" callcenter; then
+        echo -e "${RED}Error: Failed to clone repository${NC}"
+        exit 1
+    fi
+    WORK_DIR="/usr/src/callcenter"
+fi
+
+cd "$WORK_DIR"
+
+# A single-file run gets its second chance here: the installation source may
+# carry the library under its own build/5.0/ even when this script has no
+# sibling copy.
+if [ "$CC_LIB_LOADED" != true ] && [ -f "$WORK_DIR/build/5.0/callcenter-common.sh" ]; then
+    # shellcheck disable=SC1090
+    source "$WORK_DIR/build/5.0/callcenter-common.sh"
+    CC_LIB_LOADED=true
+fi
+
+# The clone may be newer than the checkout this script was launched from, so
+# compare, report and deploy the version actually being installed. Without
+# the library the version is read inline: enough to report and deploy, not to
+# drive an in-place update (that needs the comparison functions).
+if [ "$CC_LIB_LOADED" = true ]; then
+    REPO_VERSION="$(cc_read_version "$WORK_DIR")" || REPO_VERSION=''
+else
+    REPO_VERSION="$(head -1 "$WORK_DIR/VERSION" 2>/dev/null | tr -d '\r' | tr -d '[:space:]')"
+fi
+
+# An existing installation is no longer refused outright: it is compared with
+# REPO_VERSION and updated in place when older. Whatever the comparison says,
+# an existing installation never falls through to a clean install. A source
+# whose VERSION cannot be read (or that does not carry the shared library, in
+# a single-file run) is refused without touching the installation: the fault
+# is in the source, so removing a working installation is never the advice.
 FOUND_MARKERS=""
 [ -d /opt/issabel/dialer ] && FOUND_MARKERS="${FOUND_MARKERS}  - /opt/issabel/dialer\n"
 [ -f /etc/systemd/system/issabeldialer.service ] && FOUND_MARKERS="${FOUND_MARKERS}  - /etc/systemd/system/issabeldialer.service\n"
@@ -112,18 +190,11 @@ if rpm -q issabel-callcenter &> /dev/null; then
     FOUND_MARKERS="${FOUND_MARKERS}  - RPM package: $(rpm -q issabel-callcenter)\n"
 fi
 
-if [ -n "$FOUND_MARKERS" ]; then
-    # Prefer the deployed VERSION file. Fall back to the first line of a deployed
-    # CHANGELOG: installations made before VERSION was introduced shipped that
-    # file under that name, so the legacy path is what is on disk there.
-    INSTALLED_VERSION="$(read_repo_version /usr/share/issabel/module_installer/callcenter)" \
-        || INSTALLED_VERSION=""
-    if [ -z "$INSTALLED_VERSION" ] && \
-       [ -f /usr/share/issabel/module_installer/callcenter/CHANGELOG ]; then
-        INSTALLED_VERSION=$(head -1 /usr/share/issabel/module_installer/callcenter/CHANGELOG 2>/dev/null | tr -d '\r')
-    fi
-
+# The refusal for an installation that cannot be updated in place. $1, when
+# non-empty, is the one-line reason.
+refuse_existing_install() {
     echo -e "${RED}Error: an Issabel CallCenter dialer is already installed on this system.${NC}"
+    [ -n "${1:-}" ] && echo -e "${YELLOW}$1${NC}"
     if [ -n "$INSTALLED_VERSION" ]; then
         echo -e "${YELLOW}Installed version: ${INSTALLED_VERSION}${NC}"
         echo -e "${YELLOW}This installer:    ${REPO_VERSION}${NC}"
@@ -131,7 +202,7 @@ if [ -n "$FOUND_MARKERS" ]; then
     echo
     echo "Detected:"
     echo -e "$FOUND_MARKERS"
-    echo -e "${YELLOW}This installer only performs a clean installation.${NC}"
+    echo -e "${YELLOW}This installation cannot be updated in place; a clean installation is required.${NC}"
     echo "Remove the existing installation first, then run this script again:"
     echo
     echo "    bash ${SCRIPT_DIR}/remove-issabel-callcenter.sh"
@@ -141,6 +212,73 @@ if [ -n "$FOUND_MARKERS" ]; then
     echo "break definitions and reports); the new installation will reuse it."
     echo "Answer 'y' only if you want to start from an empty database."
     exit 1
+}
+
+# The refusal when the installation source cannot drive an in-place update:
+# its VERSION is unreadable, or (single-file run) it does not carry the shared
+# library. $1 is the one-line reason naming the source's problem. The existing
+# installation was not touched, and the operator is pointed at a checkout that
+# can update it - never at removing a working installation.
+refuse_unreadable_source() {
+    echo -e "${RED}Error: $1${NC}"
+    if [ -n "$INSTALLED_VERSION" ]; then
+        echo -e "${YELLOW}Installed version: ${INSTALLED_VERSION}${NC}"
+    fi
+    echo
+    echo "Detected:"
+    echo -e "$FOUND_MARKERS"
+    echo -e "${YELLOW}The existing installation was not touched.${NC}"
+    echo "Updating needs a checkout that carries VERSION: run the installer"
+    echo "with -l from that checkout:"
+    echo
+    echo "    bash build/5.0/install-issabel-callcenter.sh -l"
+    exit 1
+}
+
+if [ -n "$FOUND_MARKERS" ]; then
+    # Without the shared library there is no version comparison and no
+    # updater: a single-file installer cannot update an installation in place.
+    if [ "$CC_LIB_LOADED" != true ]; then
+        refuse_unreadable_source "this installer is running as a single file and the installation source ($WORK_DIR) does not carry build/5.0/callcenter-common.sh, so it cannot update in place"
+    fi
+
+    # Prefer the deployed VERSION file. Fall back to the first line of a deployed
+    # CHANGELOG: installations made before VERSION was introduced shipped that
+    # file under that name, so the legacy path is what is on disk there.
+    INSTALLED_VERSION="$(cc_read_version /usr/share/issabel/module_installer/callcenter)" \
+        || INSTALLED_VERSION=""
+    if [ -z "$INSTALLED_VERSION" ] && \
+       [ -f /usr/share/issabel/module_installer/callcenter/CHANGELOG ]; then
+        INSTALLED_VERSION=$(head -1 /usr/share/issabel/module_installer/callcenter/CHANGELOG 2>/dev/null | tr -d '\r')
+    fi
+
+    # A source with no readable version can update nothing.
+    if ! cc_version_valid "$REPO_VERSION"; then
+        refuse_unreadable_source "the installation source ($WORK_DIR) has no readable VERSION (${REPO_VERSION:-none})"
+    fi
+    if ! cc_version_valid "$INSTALLED_VERSION"; then
+        refuse_existing_install "The installed version cannot be determined (${INSTALLED_VERSION:-unknown})."
+    fi
+    if cc_version_lt "$INSTALLED_VERSION" "$PATCH_FLOOR"; then
+        refuse_existing_install "The installed version ${INSTALLED_VERSION} is older than ${PATCH_FLOOR}, the first release that can be updated in place."
+    fi
+    if [ "$INSTALLED_VERSION" = "$REPO_VERSION" ]; then
+        echo -e "${GREEN}Already at ${INSTALLED_VERSION}; nothing to do.${NC}"
+        exit 0
+    fi
+    if ! cc_version_lt "$INSTALLED_VERSION" "$REPO_VERSION"; then
+        echo -e "${YELLOW}Installed ${INSTALLED_VERSION} is newer than this installer (${REPO_VERSION}); nothing to do.${NC}"
+        exit 0
+    fi
+
+    echo -e "${YELLOW}Installed version: ${INSTALLED_VERSION}${NC}"
+    echo -e "${YELLOW}This installer:    ${REPO_VERSION}${NC}"
+    echo -e "${GREEN}Updating in place.${NC}"
+    if [ ! -f "$WORK_DIR/build/5.0/update-issabel-callcenter.sh" ]; then
+        echo -e "${RED}Error: no updater at $WORK_DIR/build/5.0/update-issabel-callcenter.sh; nothing was changed.${NC}"
+        exit 1
+    fi
+    exec bash "$WORK_DIR/build/5.0/update-issabel-callcenter.sh"
 fi
 
 # Check Asterisk version. This release targets Asterisk 13, 16 and 18, the
@@ -178,44 +316,6 @@ echo -e "${GREEN}  - Agent authentication: via ECCP/database${NC}"
 echo -e "${GREEN}  - Agent interface: Local/XXXX@agents${NC}"
 echo -e "${GREEN}  - Agent logout: Hangup login channel${NC}"
 echo
-
-# Determine source directory
-if [ "$LOCAL_INSTALL" = true ]; then
-    # Find the repository root (two levels up from this script)
-    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
-    if [ ! -f "$REPO_ROOT/menu.xml" ]; then
-        echo -e "${RED}Error: Cannot find repository root. Expected menu.xml at $REPO_ROOT${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}Installing Issabel CallCenter from local directory: $REPO_ROOT${NC}"
-    WORK_DIR="$REPO_ROOT"
-else
-    echo -e "${GREEN}Installing Issabel CallCenter from GitHub: ${GITHUB_ACCOUNT}/callcenter-issabel5${NC}"
-
-    # Install git if not present
-    if ! command -v git &> /dev/null; then
-        echo "Installing git..."
-        dnf -y install git || yum -y install git
-    fi
-
-    # Clone repository
-    cd /usr/src
-    rm -rf callcenter
-    echo "Cloning repository..."
-    if ! git clone "https://github.com/${GITHUB_ACCOUNT}/callcenter-issabel5.git" callcenter; then
-        echo -e "${RED}Error: Failed to clone repository${NC}"
-        exit 1
-    fi
-    WORK_DIR="/usr/src/callcenter"
-fi
-
-cd "$WORK_DIR"
-
-# The clone may be newer than the checkout this script was launched from, so
-# report and deploy the version actually being installed.
-REPO_VERSION="$(read_repo_version "$WORK_DIR")" || true
 
 echo "Installing modules..."
 # Install modules (force overwrite)

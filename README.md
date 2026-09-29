@@ -37,6 +37,12 @@ bash build/5.0/install-issabel-callcenter.sh -l
 bash build/5.0/install-issabel-callcenter.sh
 # To see what the installer does (options, installed files, ECCP TLS certificate):
 bash build/5.0/install-issabel-callcenter.sh -h
+# To update an existing installation in place. Re-running the installer on an
+# older installation also updates in place. Both ask for yes or Y: updated
+# files are overwritten, so customizations in them are lost.
+# --dry-run shows the plan and changes nothing:
+bash build/5.0/update-issabel-callcenter.sh --dry-run
+bash build/5.0/update-issabel-callcenter.sh
 # To Uninstall:
 bash build/5.0/remove-issabel-callcenter.sh
 

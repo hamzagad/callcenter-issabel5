@@ -7,6 +7,12 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.4
+
+- **New feature**: the installer updates an older installation in place instead of refusing it; an equal or newer installation reports nothing to do.
+- **New feature**: `build/5.0/update-issabel-callcenter.sh` applies every newer version from `patches/` in order, warns that updated files are overwritten and customizations lost, and requires `yes` or `Y`; a failed step resumes on re-run; logs to `/var/log/issabel/callcenter-update.log`.
+- **New feature**: `patches/<version>/` holds an `update.sh` for database and configuration changes and a `files/` tree copied over as-is; backfilled for 5.1.2 and 5.1.3.
+
 ## 5.1.3
 
 - **Bug fix**: the AMI client's guard against a synchronous call inside another never worked (its counter started as FALSE, which ++ does not change). Nested calls swapped their replies and could freeze the dialer; the guard now refuses them and logs it.

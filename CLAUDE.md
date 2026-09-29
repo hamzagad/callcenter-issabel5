@@ -108,6 +108,13 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
   `CHANGES.md`. The installer reads it into `REPO_VERSION` and deploys it to
   `/usr/share/issabel/module_installer/callcenter/`, which is how a later
   install reports the currently-installed version
+- Every version that changes a file shipped to the box carries
+  `patches/<VERSION>/` (the changed files under `files/` plus the mandatory
+  `update.sh`); that is what `build/5.0/update-issabel-callcenter.sh` applies
+  to update an installation in place. The directory is named after the
+  VERSION bump at land time (`dev.sh commit`), and a renumber on `/finish`
+  renames the directory; `/finish` copies it to the contribution clone with
+  the rest. The layout and the `update.sh` contract: `patches/README.md`
 - Frozen history, never edited: `CHANGES_PRE.md` (numbered pre-release entries)
   and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10)
 - Date and time are always calculated in PHP, it should not used as query function
