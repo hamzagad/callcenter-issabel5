@@ -7,6 +7,15 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.3
+
+- **Bug fix**: the AMI client's guard against a synchronous call inside another never worked (its counter started as FALSE, which ++ does not change). Nested calls swapped their replies and could freeze the dialer; the guard now refuses them and logs it.
+- **Bug fix**: the PAUSECUSTOM cleanup at agent pause and logoff, and the queue-membership refresh, are sent asynchronously, so they no longer run as nested synchronous calls.
+- **Bug fix**: AMI replies are paired to their own request by ActionID.
+- **Bug fix**: a synchronous AMI call gives up after 10 s with an error and a log line instead of waiting forever, and the requests queued behind it are still sent.
+- **Bug fix**: dialer shutdown waits at most 10 s for tasks to confirm, and kills a task still alive 10 s after SIGTERM, so a stuck task no longer runs into systemd's stop timeout.
+- **Bug fix**: an AMI pairing error message printed a literal '.__METHOD__.' instead of the method name.
+
 ## 5.1.2
 
 - **Bug fix**: Predictor's 10 s AMI enumeration timeout no longer crashes CampaignProcess with an uncaught PHP Error; the timeout warning now reaches dialerd.log.

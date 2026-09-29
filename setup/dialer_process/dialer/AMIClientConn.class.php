@@ -62,7 +62,22 @@ class AMIClientConn extends MultiplexConn
     // Lista de peticiones AMI encoladas con su respectivo callback.
     // List of queued AMI requests with their respective callbacks
     private $_queue_requests = array();
-    private $_sync_wait = FALSE;
+
+    /* Era FALSE: los operadores ++ y -- de PHP no alteran un booleano, así que
+     * el guard de reentrada de __call() jamás se disparaba y una llamada
+     * síncrona anidada terminaba esperando dentro de otra espera.
+     * Was FALSE: PHP's ++ and -- never change a boolean, so the reentrancy
+     * guard in __call() never fired and a nested synchronous call ended up
+     * waiting inside another wait. */
+    private $_sync_wait = 0;
+
+    // Secuencia para los ActionID generados cuando el llamante no da uno
+    // Sequence for the ActionIDs generated when the caller gives none
+    private $_nActionID = 0;
+
+    // Límite de espera de una respuesta AMI síncrona, en segundos
+    // Bound for waiting on a synchronous AMI reply, in seconds
+    const AMI_RESPONSE_TIMEOUT = 10;
 
     // Definiciones de los comandos AMI conocidos
     // Definitions of known AMI commands
@@ -373,11 +388,30 @@ class AMIClientConn extends MultiplexConn
         }
     }
 
-    // Implementación de wait_response para compatibilidad con phpagi-asmanager
-    // Implementation of wait_response for compatibility with phpagi-asmanager
-    private function wait_response()
+    /* Espera a lo más self::AMI_RESPONSE_TIMEOUT segundos la respuesta de la
+     * petición cuyo ActionID se indica. Al expirar se abandona la petición: se
+     * quita de la cola (enviada o no) para que su respuesta tardía se
+     * descarte, se reanuda el envío si era la petición en vuelo, y se
+     * devuelve un Error sintético en vez de esperar para siempre.
+     * Waits at most self::AMI_RESPONSE_TIMEOUT seconds for the reply of the
+     * request with the given ActionID. On expiry the request is abandoned:
+     * removed from the queue (sent or not) so its late reply is dropped,
+     * sending is resumed if it was the in-flight request, and a synthetic
+     * Error is returned instead of waiting forever. */
+    private function wait_response($actionid)
     {
+        $tInicio = microtime(TRUE);
         while (!is_null($this->sKey) && is_null($this->_response)) {
+            if ((microtime(TRUE) - $tInicio) >= self::AMI_RESPONSE_TIMEOUT) {
+                $this->oLogger->output('ERR: AMIClientConn::wait_response timeout de '.
+                    self::AMI_RESPONSE_TIMEOUT.'s esperando respuesta AMI, se abandona '.
+                    'petición ActionID='.$actionid.' | EN: AMIClientConn::wait_response '.
+                    'timeout of '.self::AMI_RESPONSE_TIMEOUT.'s waiting for AMI reply, '.
+                    'abandoning request ActionID='.$actionid);
+                $this->_quitarPeticion($actionid);
+                return array('Response' => 'Error',
+                    'Message' => '(internal) AMI response timeout');
+            }
             $this->multiplexSrv->procesarActividad(1);
 
             /* Se requiere recorrer la lista de eventos recogiendo los
@@ -404,6 +438,25 @@ class AMIClientConn extends MultiplexConn
         if (is_null($this->sKey)) {
             $this->oLogger->output('ERR: '.__METHOD__.' conexión AMI cerrada mientras se esperaba respuesta.');
             return NULL;
+        }
+    }
+
+    /* Quitar de la cola la petición con el ActionID dado, esté enviada o no.
+     * Si era la petición en vuelo se reanuda el envío: el cliente es
+     * stop-and-wait, y sin esto todo lo que quedó detrás seguiría sin
+     * enviarse. Remove from the queue the request with the given ActionID,
+     * sent or not. If it was the in-flight request, sending is resumed: the
+     * client is stop-and-wait, and without this everything queued behind it
+     * would stay unsent. */
+    private function _quitarPeticion($actionid)
+    {
+        foreach ($this->_queue_requests as $i => $info) {
+            if ($info[4] === $actionid) {
+                $bEraEnVuelo = is_null($info[0]);
+                array_splice($this->_queue_requests, $i, 1);
+                if ($bEraEnVuelo) $this->_send_next_request();
+                return;
+            }
         }
     }
 
@@ -531,6 +584,12 @@ class AMIClientConn extends MultiplexConn
             $this->_die_log('Undefined AMI request: '.$name);
 
         if (!$async && $this->_sync_wait > 0) {
+            if (!is_null($this->oLogger)) {
+                $this->oLogger->output('WARN: '.__METHOD__.' rechaza comando síncrono '.
+                    'reentrante '.$name.' porque ya hay una espera síncrona en curso '.
+                    '| EN: refusing reentrant synchronous command '.$name.
+                    ': another synchronous wait is in progress');
+            }
             return array(
                 'Response'  => 'Failure',
                 'Message' => '(internal) Avoided reentrant synchronous command.',
@@ -563,13 +622,27 @@ class AMIClientConn extends MultiplexConn
             $i++;
         }
 
+        /* Toda petición lleva exactamente un ActionID: el del llamante si lo
+         * dio, o uno generado con un prefijo que ningún llamante usa, para que
+         * cada Response se aparee con su propia petición y no por orden de
+         * cola. Nunca se añade una segunda cabecera.
+         * Every request carries exactly one ActionID: the caller's own if it
+         * gave one, or a generated one with a prefix no caller uses, so each
+         * Response is paired with its own request and not by queue order. A
+         * second header is never appended. */
+        if (!isset($parameters['ActionID'])) {
+            $this->_nActionID++;
+            $parameters['ActionID'] = 'AMIW-'.posix_getpid().'-'.$this->_nActionID;
+        }
+
         // Cadena de petición
         // Request string
         $req = "Action: $name\r\n";
         foreach($parameters as $var => $val) $req .= "$var: $val\r\n";
         $req .= "\r\n";
 
-        $request_info = array($req, $callback, $callback_params, microtime(TRUE));
+        $request_info = array($req, $callback, $callback_params, microtime(TRUE),
+            $parameters['ActionID']);
 
         if (!$async) $this->_sync_wait++;
         if ($async) {
@@ -587,16 +660,24 @@ class AMIClientConn extends MultiplexConn
                 array_unshift($this->_queue_requests, $head_req);
             $head_req = NULL;
         }
-        $r = $this->_send_next_request();
-        $r = ($r && !$async) ? $this->wait_response() : NULL;
-        if (!$async) $this->_sync_wait--;
+        try {
+            $r = $this->_send_next_request();
+            $r = ($r && !$async) ? $this->wait_response($parameters['ActionID']) : NULL;
+        } finally {
+            /* try/finally: una excepción dentro de la espera no debe dejar el
+             * contador elevado, o el guard rechazaría todo comando síncrono
+             * para siempre. try/finally: an exception inside the wait must not
+             * leave the counter raised, or the guard would refuse every
+             * synchronous command forever. */
+            if (!$async) $this->_sync_wait--;
+        }
         return $r;
     }
 
     private function _emulate_sync_response($paquete)
     {
         if (!is_null($this->_response)) {
-            $this->oLogger->output("ERR: '.__METHOD__.' segundo Response sobreescribe primer Response no procesado: ".
+            $this->oLogger->output('ERR: '.__METHOD__.' segundo Response sobreescribe primer Response no procesado: '.
                 print_r($this->_response, 1));
         }
         $this->_response = $paquete;
@@ -712,7 +793,34 @@ class AMIClientConn extends MultiplexConn
                 return FALSE;
             }
 
-            $callback_info = array_shift($this->_queue_requests);
+            /* Aparear por ActionID: la respuesta pertenece a la petición más
+             * antigua de la cola con ese mismo ActionID. Una respuesta sin
+             * ActionID (una versión que no lo repita) se aparea con la primera
+             * petición de la cola, que en una conexión FIFO es la única
+             * candidata. Nunca se acredita a una petición con ActionID
+             * distinto. Pair by ActionID: the response belongs to the oldest
+             * queued request carrying that same ActionID. A response without
+             * an ActionID (a version that does not echo one) pairs with the
+             * first queued request, the only candidate on a FIFO connection.
+             * A response is never credited to a request with a different
+             * ActionID. */
+            $iIdx = 0;
+            if (isset($parameters['ActionID'])) {
+                $iIdx = NULL;
+                foreach ($this->_queue_requests as $i => $info) {
+                    if ($info[4] === $parameters['ActionID']) { $iIdx = $i; break; }
+                }
+                if (is_null($iIdx)) {
+                    if (!is_null($this->oLogger)) {
+                        $this->oLogger->output('ERR: '.__METHOD__.' se pierde respuesta con '.
+                            'ActionID desconocido: '.print_r($parameters, TRUE).
+                            ' | EN: dropping response with unknown ActionID');
+                    }
+                    return FALSE;
+                }
+            }
+            $callback_info = array_splice($this->_queue_requests, $iIdx, 1);
+            $callback_info = $callback_info[0];
             if (!is_null($callback_info[0])) {
                 if (!is_null($this->oLogger))
                     $this->oLogger->output('ERR: '.__METHOD__.' petición head NO ha sido enviada: '.$callback_info[0]);
@@ -775,6 +883,35 @@ class AMIClientConn extends MultiplexConn
         return $this->parse_database_data($r['data']);
     }
 
+    /* Constructores compartidos del comando de escritura en AstDB: las formas
+     * síncrona y asíncrona no pueden divergir. Shared builders of the AstDB
+     * write command: the sync and async forms cannot drift apart. */
+    private function _database_put_cmd($family, $key, $value)
+    {
+        return "database put ".str_replace(" ","/",$family)." ".str_replace(" ","/",$key)." ".$value;
+    }
+
+    private function _database_del_cmd($family, $key)
+    {
+        return "database del ".str_replace(" ","/",$family)." ".str_replace(" ","/",$key);
+    }
+
+    /** Async twin of database_put: same command string, queued without
+     * waiting for the reply. */
+    function database_put_async($callback, $callback_params, $family, $key, $value)
+    {
+        return $this->asyncCommand($callback, $callback_params,
+            $this->_database_put_cmd($family, $key, $value));
+    }
+
+    /** Async twin of database_del: same command string, queued without
+     * waiting for the reply. */
+    function database_del_async($callback, $callback_params, $family, $key)
+    {
+        return $this->asyncCommand($callback, $callback_params,
+            $this->_database_del_cmd($family, $key));
+    }
+
     /** Add an entry to the asterisk database
      * @param string $family    The family name to use
      * @param string $key       The key name to use
@@ -782,7 +919,7 @@ class AMIClientConn extends MultiplexConn
      * @return bool True if successful
      */
     function database_put($family, $key, $value) {
-        $r = $this->Command("database put ".str_replace(" ","/",$family)." ".str_replace(" ","/",$key)." ".$value);
+        $r = $this->Command($this->_database_put_cmd($family, $key, $value));
 
         $this->raw_response = NULL;
         if (!is_array($r) || !isset($r['data'])) {
@@ -823,7 +960,7 @@ class AMIClientConn extends MultiplexConn
      * @return bool True if successful
      */
     function database_del($family, $key) {
-        $r = $this->Command("database del ".str_replace(" ","/",$family)." ".str_replace(" ","/",$key));
+        $r = $this->Command($this->_database_del_cmd($family, $key));
 
         $this->raw_response = NULL;
         if (!is_array($r) || !isset($r['data'])) {

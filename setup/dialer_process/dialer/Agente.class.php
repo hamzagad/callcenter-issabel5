@@ -765,12 +765,50 @@ class Agente
         } else {
             $partes = preg_split("/\//",$sAgente);
             $numAgente = $partes[1];
-            $epoch = time(); 
+            $epoch = time();
+            /* La escritura en AstDB es asíncrona: este callback puede correr
+             * dentro del wait_response() de otra llamada síncrona (p.ej. el
+             * Hangup del logoff), donde una llamada síncrona sería rechazada
+             * por el guard de reentrada. La misma familia, clave y valor de
+             * siempre, sólo que sin bloquear.
+             * The AstDB write is asynchronous: this callback can run inside
+             * another synchronous call's wait_response() (e.g. the logoff
+             * Hangup), where a synchronous call would be refused by the
+             * reentrancy guard. The same family, key and value as always,
+             * only without blocking. */
             if($nstate==1) {
-                $ami->database_put('PAUSECUSTOM','AGENT/'.$numAgente,"$reason:$epoch");
+                $ami->database_put_async(
+                    array($this, '_cb_DatabaseWrite'),
+                    array($sAgente, TRUE),
+                    'PAUSECUSTOM', 'AGENT/'.$numAgente, "$reason:$epoch");
             } else {
-                $ami->database_del('PAUSECUSTOM','AGENT/'.$numAgente);
+                $ami->database_del_async(
+                    array($this, '_cb_DatabaseWrite'),
+                    array($sAgente, FALSE),
+                    'PAUSECUSTOM', 'AGENT/'.$numAgente);
             }
+        }
+    }
+
+    public function _cb_DatabaseWrite($r, $sAgente, $nstate)
+    {
+        /* Success y Follows son las dos formas en que Asterisk responde un
+         * comando completado (13/16 contestan Follows, 18 Success). No se
+         * juzga el texto de salida: un database del de una clave que no
+         * existe es normal tras un despausa sin escritura previa, y el código
+         * de antes del fix tampoco lo revisaba.
+         * Success and Follows are the two shapes in which Asterisk answers a
+         * completed command (13/16 reply Follows, 18 Success). The output
+         * text is not judged: a database del of a key that does not exist is
+         * normal after an unpause with no earlier write, and the code before
+         * the fix never checked it either. */
+        if (!isset($r['Response']) ||
+            !in_array($r['Response'], array('Success', 'Follows'))) {
+            $this->_log->output('ERR: '.__METHOD__.' no se puede '.
+                ($nstate ? 'escribir' : 'borrar').' PAUSECUSTOM para '.$sAgente.': '.
+                (isset($r['Message']) ? $r['Message'] : '(sin respuesta)').
+                ' | EN: cannot '.($nstate ? 'write' : 'delete').' PAUSECUSTOM for '.
+                $sAgente.': '.(isset($r['Message']) ? $r['Message'] : '(no response)'));
         }
     }
 }

@@ -1745,11 +1745,33 @@ class AMIEventProcess extends TuberiaProcess
             }
         }
 
-        $this->_ami->QueueStatus(NULL, $this->_tmp_actionid_queuestatus);
+        /* Antes esto era una llamada síncrona a QueueStatus: puede correr
+         * dentro del wait_response() de otra llamada (vía
+         * _cb_Command_DatabaseShow -> _nuevaListaAgentes), donde el guard de
+         * reentrada la rechazaría. El ActionID es el mismo de siempre y
+         * QueueStatus_start se sigue llamando a continuación.
+         * This used to be a synchronous QueueStatus call: it can run inside
+         * another call's wait_response() (via _cb_Command_DatabaseShow ->
+         * _nuevaListaAgentes), where the reentrancy guard would refuse it.
+         * The ActionID is the same one as always, and QueueStatus_start is
+         * still called right after it. */
+        $this->_ami->asyncQueueStatus(
+            array($this, '_cb_QueueStatus'),
+            array(),
+            NULL, $this->_tmp_actionid_queuestatus);
         $this->_queueshadow->QueueStatus_start($queueflags);
 
         // En msg_QueueStatusComplete se valida pertenencia a colas dinámicas
         // Dynamic queue membership is validated in msg_QueueStatusComplete
+    }
+
+    public function _cb_QueueStatus($r)
+    {
+        if (!isset($r['Response']) || $r['Response'] != 'Success') {
+            $this->_log->output('ERR: '.__METHOD__.' falló al consultar QueueStatus: '.
+                (isset($r['Message']) ? $r['Message'] : print_r($r, TRUE)).
+                ' | EN: failed to query QueueStatus');
+        }
     }
 
     private function _iniciarAgents()

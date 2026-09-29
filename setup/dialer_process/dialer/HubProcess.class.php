@@ -407,15 +407,30 @@ XML_CRASH_MSG;
         $this->_log->output('INFO: avisando de finalización a todos los procesos... | EN: notifying all processes of termination...');
         $this->_hub->enviarFinalizacion();
         $this->_log->output('INFO: esperando respuesta de todos los procesos... | EN: waiting for response from all processes...');
+        /* La espera de confirmación está acotada: una tarea colgada no puede
+         * confirmar, y esperarla sin límite entregaba el stop al SIGKILL de
+         * systemd a los 30 s. The confirmation wait is bounded: a stuck task
+         * cannot confirm, and waiting for it without a bound handed the stop
+         * to systemd's 30 s SIGKILL. */
+        $iTiempoIniEspera = time();
         while ($this->_hub->numFinalizados() < count(array_filter($this->_tareas))) {
             foreach (array_keys($this->_tareas) as $sTarea)
                 $this->_revisarTareaActiva($sTarea, TRUE);
             if ($this->_hub->procesarPaquetes())
                 $this->_hub->procesarActividad(0);
             else $this->_hub->procesarActividad(1);
+            if (time() - $iTiempoIniEspera >= 10) {
+                $sTareasPendientes = implode(', ', array_keys(array_filter($this->_tareas)));
+                $this->_log->output('WARN: tareas sin confirmar finalización en 10 s '.
+                    '(siguen en ejecución: '.$sTareasPendientes.'), se continúa con la señal '.
+                    '| EN: tasks did not confirm termination within 10 s '.
+                    '(still running: '.$sTareasPendientes.'), proceeding to signal');
+                break;
+            }
         }
 
         $this->_propagarSIG($signum);
+        $iPrimeraSenal = time();
 
         $this->_log->output('INFO: esperando a que todas las tareas terminen... | EN: waiting for all tasks to finish...');
         $bTodosTerminaron = FALSE;
@@ -434,7 +449,21 @@ XML_CRASH_MSG;
 
             if (!$bTodosTerminaron) {
                 $t2 = time();
-                if ($t2 - $t1 >= 4) {
+                /* Una tarea colgada dentro de wait_response() no atiende
+                 * SIGTERM (su manejador sólo corre de vuelta al ámbito de
+                 * dialerd), así que se escala a SIGKILL para que el stop
+                 * completo quede muy por debajo de los 30 s de systemd. A
+                 * task stuck inside wait_response() never sees its SIGTERM
+                 * handler run, so escalate to SIGKILL to keep the whole stop
+                 * well under systemd's 30 s. */
+                if ($t2 - $iPrimeraSenal >= 10) {
+                    $sTareasVivas = implode(', ', array_keys(array_filter($this->_tareas)));
+                    $this->_log->output('WARN: tareas aún vivas 10 s tras la señal '.
+                        '(se envía SIGKILL a: '.$sTareasVivas.') | EN: tasks still alive '.
+                        '10 s after signal (sending SIGKILL to: '.$sTareasVivas.')');
+                    $this->_propagarSIG(SIGKILL);
+                    $iPrimeraSenal = $t2;
+                } elseif ($t2 - $t1 >= 4) {
                     $this->_log->output('WARN: no todas las tareas han terminado, se vuelve a enviar señal... | EN: not all tasks have finished, resending signal...');
                     $this->_propagarSIG($signum);
                     $t1 = $t2;
