@@ -7,6 +7,12 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.6
+
+- **Bug fix**: dialer tasks act on every signal they get: after a log rotation, CampaignProcess and AMIEventProcess no longer keep writing to the rotated `dialerd.log` and holding it open after it is deleted.
+- **Bug fix**: `issabeldialer.service` uses `KillMode=mixed`, so a stop signals only dialerd and every task is told to finish (agents logged out) before it is signalled.
+- **Bug fix**: HubProcess no longer spins at full CPU while it waits for its tasks at shutdown; a stop takes under a second instead of several, with no re-sent signals.
+
 ## 5.1.5
 
 - **Bug fix**: patch 5.1.2 no longer overwrites 6 files a 5.1.1 box already has (calls_detail, Agente, AMIClientConn, AMIEventProcess); it now starts from the 5.1.1 RC release.

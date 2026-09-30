@@ -10,17 +10,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## High
 
-### CampaignProcess Keeps Writing to the Rotated Log
-
-* **Type**: Bug
-* **Urgency**: High
-* **Date Added**: 2026-09-22
-* **Location**: `dialerd:25`, `dialerd:465-479`, `MultiplexServer.class.php:172-176`, `HubProcess.class.php:459-466`, `setup/issabeldialer.logrotate`
-* **Description**: After a logrotate cycle `CampaignProcess` can keep its old file descriptor open and carry on writing to the rotated file, so none of its output reaches the live `dialerd.log`. Observed on the client box on 2026-09-22: `/proc/2121/fd/0 -> /opt/issabel/dialer/dialerd.log-20260922`, that rotated file at 878 MB and still growing with its mtime tracking the live log to the second, while `dialerd.log` held zero `(CampaignProcess)` lines. The signal itself is delivered correctly -- `HubProcess` logged `Propagando senal #1 a CampaignProcess... / Completada propagacion`, and `_propagarSIG()` covers every entry in `_tareas` -- but `CampaignProcess` then logged only `INFO: select() finaliza con fallo - senal pendiente?` (the EINTR branch at `MultiplexServer.class.php:175`) and never reached the `switching logs` / `using new log` branch at `dialerd:470-477`. It is intermittent rather than permanent: the same PID handled the previous rotation correctly (`2026-09-21 04:03:33 ... proceso recibio senal 1, usando nuevo log`).
-* **Impact**: (1) With `rotate 7` the held file is eventually unlinked while still open, so its space is not reclaimed until the dialer restarts -- an unbounded disk leak on a box where a full `/var` presents as a broken GUI, failing CDR writes and a dead dialer all at once. (2) Every campaign diagnostic -- agent allocation, call placement, `marking campaign as finished` -- lands in a file nobody greps, which actively misleads anyone investigating a campaign.
-* **Investigation lead (not a confirmed root cause)**: `declare(ticks=8)` at `dialerd:25` only covers statements in that file, so a signal arriving while the child is executing inside a class file is not dispatched until control returns to `dialerd` scope. Confirm before proposing a fix; an explicit `pcntl_signal_dispatch()` in the child loop, or handling the EINTR return in `MultiplexServer::procesarActividad()` instead of only logging it, are the obvious candidates.
-* **Status**: Untouched
-
 ### ECCP Client Authorization
 
 * **Type**: Feature
