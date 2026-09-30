@@ -39,6 +39,10 @@ Copy every changed path that ships to the box (see the mapping above) into
 `files/` at the same relative path, with its content at the new version.
 Deletions cannot be expressed by a copy: remove deleted files in `update.sh`.
 
+One exception: 5.1.2 starts from the 5.1.1 RC release (`47a702b`), not from
+the 5.1.1 bump (`54ec605`) — work went on under 5.1.1 after the bump, and the
+RC is what 5.1.1 boxes run. So its range is `9836bb6^ 418b3aa`.
+
 ## update.sh — the database and configuration changes
 
 Mandatory in every version directory, even when there is nothing to do: then

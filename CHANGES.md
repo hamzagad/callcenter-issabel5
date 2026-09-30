@@ -7,6 +7,10 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.5
+
+- **Bug fix**: patch 5.1.2 no longer overwrites 6 files a 5.1.1 box already has (calls_detail, Agente, AMIClientConn, AMIEventProcess); it now starts from the 5.1.1 RC release.
+
 ## 5.1.4
 
 - **New feature**: the installer updates an older installation in place instead of refusing it; an equal or newer installation reports nothing to do.
