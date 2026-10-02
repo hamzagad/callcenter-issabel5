@@ -7,6 +7,11 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.7
+
+- **Bug fix**: a break whose name contains a space now writes its `PAUSECUSTOM` entry to AstDB: the value is sent to Asterisk's `database put` as one quoted argument, with `\` and `"` escaped, instead of being rejected for too many arguments.
+- **Improve**: the installer accepts Asterisk 20 (13, 16, 18 or 20); the call-centre suite ran on Asterisk 20.12 with no Asterisk-20-specific failure.
+
 ## 5.1.6
 
 - **Bug fix**: dialer tasks act on every signal they get: after a log rotation, CampaignProcess and AMIEventProcess no longer keep writing to the rotated `dialerd.log` and holding it open after it is deleted.

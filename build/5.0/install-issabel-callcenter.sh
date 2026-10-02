@@ -51,7 +51,7 @@ Options:
                 instead of cloning the repository from GitHub.
   -h, --help    Show this help and exit
 
-Requires Asterisk 13, 16 or 18 - the installer aborts on any other version.
+Requires Asterisk 13, 16, 18 or 20 - the installer aborts on any other version.
 
 Must be run as root. When no previous Call Center installation is detected it
 performs a CLEAN install. When one is detected, the versions decide:
@@ -294,6 +294,10 @@ fi
 # 13 is end of life (the branch stopped at 13.38.3 in 2021) and the wider
 # Issabel stack has not been checked on it. It is allowed here because the
 # module works on it, not because it is a recommended target.
+#
+# 20 is accepted since the call-centre suite ran on Asterisk 20.12 with no
+# Asterisk-20-specific failure, so it is one more of the interchangeable
+# versions above.
 ASTERISK_VERSION=$(asterisk -rx "core show version" 2>/dev/null | awk '{print $2}' | cut -d. -f 1)
 
 if [ -z "$ASTERISK_VERSION" ]; then
@@ -302,9 +306,9 @@ if [ -z "$ASTERISK_VERSION" ]; then
 fi
 
 case "$ASTERISK_VERSION" in
-    13|16|18) ;;
+    13|16|18|20) ;;
     *)
-        echo -e "${RED}Error: Issabel CallCenter ${REPO_VERSION} requires Asterisk 13, 16 or 18.${NC}"
+        echo -e "${RED}Error: Issabel CallCenter ${REPO_VERSION} requires Asterisk 13, 16, 18 or 20.${NC}"
         echo -e "${RED}Detected Asterisk version: ${ASTERISK_VERSION}${NC}"
         echo -e "${RED}Installation aborted - nothing was installed or modified.${NC}"
         exit 1
