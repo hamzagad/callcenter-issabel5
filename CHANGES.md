@@ -7,6 +7,11 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.9
+
+- Bug fix: a console action sent in the instant after the agent session ends is answered as a failure the console shows, instead of a success message or silence
+- Bug fix: the console stops polling once it starts leaving for the login form, so the logged-out answers no longer restart that page's load
+
 ## 5.1.8
 
 - Bug fix: hanging up the agent's phone mid-call returns the agent console to the login form, instead of leaving it polling the server about 12 times a second; the request after a session ends now gets the logged-out event, not a redirect the page cannot follow
