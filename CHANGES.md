@@ -7,6 +7,10 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.8
+
+- Bug fix: hanging up the agent's phone mid-call returns the agent console to the login form, instead of leaving it polling the server about 12 times a second; the request after a session ends now gets the logged-out event, not a redirect the page cannot follow
+
 ## 5.1.7
 
 - **Bug fix**: a break whose name contains a space now writes its `PAUSECUSTOM` entry to AstDB: the value is sent to Asterisk's `database put` as one quoted argument, with `\` and `"` escaped, instead of being rejected for too many arguments.

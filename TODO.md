@@ -329,6 +329,15 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: ECCP login/logout events not parsed for monitoring console. **Issue**: The dialer sends `agentloggedin`, `agentfailedlogin`, and `agentloggedout` events via ECCP, but `paloSantoConsola::esperarEventoSesionActiva()` returns **empty events** (just `break`). **Impact**: Monitoring modules (`rep_agents_monitoring`, `rep_incoming_calls_monitoring`) cannot show real-time login/logout/fail events; rely on periodic `getstatus` polling instead. **Two instances**: (1) `agentloggedin` (line 1132-1135) - should return agent_number, queues[], session_start, (2) `agentfailedlogin` (line 1136-1139) - should return agent_number, reason. Also `agentloggedout` (line 1140-1143) partially implemented but missing queue list. **Implementation requires**: Parse event XML from `$evt`, populate `$evento` array with fields, verify ECCP server sends data.
 * **Status**: Untouched
 
+### Mid-Call Logoff Hangup Target
+
+* **Type**: Bug
+* **Urgency**: Low
+* **Date Added**: 2026-10-03
+* **Location**: `setup/dialer_process/dialer/AMIEventProcess.class.php` (`_ejecutarLogoffAgente`, the `Hangup($llamada->agentchannel)` call)
+* **Description**: For an Agent-type login, `agentchannel` is the device name `Agent/NNNN`, never a channel. So every logoff with a call still up logs "No such channel" and spends one synchronous AMI round trip; the fallback below it finalises the call. `actualAgentChannel` holds the real channel (`Llamada.class.php`). But hanging that up would make a mid-call logoff, from the console button or a supervisor, drop the caller: decide that behaviour first.
+* **Status**: Untouched
+
 ---
 
 ## Deferred
