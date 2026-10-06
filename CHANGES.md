@@ -7,6 +7,10 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.13
+
+- Bug fix: the dialer logs out an agent whose extension stops answering qualify (PeerStatus Unreachable), not only when it unregisters — a PJSIP agent too, whose endpoint never reports Unregistered; a call in progress is hung up, as on an unregister
+
 ## 5.1.12
 
 - Bug fix: the remover no longer puts the MySQL root password on the mysql command line, where ps showed it while the database drop ran
