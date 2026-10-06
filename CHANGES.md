@@ -7,6 +7,15 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.12
+
+- Bug fix: the remover no longer puts the MySQL root password on the mysql command line, where ps showed it while the database drop ran
+- Bug fix: a fresh install no longer puts the MySQL root password on the mysql command line while creating the database
+- Bug fix: the installer aborts when the database installer fails, instead of printing "installation complete!" over a half-built installation
+- Bug fix: the database installer's exit code reflects every step, and a successful run without a staged module no longer reports failure
+- Bug fix: a database that cannot be created or loaded stops the schema steps, leaving one error that names the cause instead of dozens
+- Bug fix: dialerd is executable in git, so a clone cannot ship a dialer that will not start; this version's update restores the bit on a box that lost it
+
 ## 5.1.11
 
 - Bug fix: campaign pages no longer change the database schema on page load, and no longer put the MySQL root password on the mysql command line; the installer and this version's update now create the second and third external-URL columns
