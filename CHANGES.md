@@ -7,6 +7,12 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.10
+
+- Bug fix: campaign monitoring's directly-served libs/api.php — reachable without a session and shell-injectable through the queue parameter — is retired; it now answers HTTP 410 and its data comes from an authenticated module action
+- New feature: getAgentLastCalls action and PaloSantoConsola::leerUltimasLlamadasAgentes() serve each agent's last call with one fixed SQL per campaign type, bound by ID only, on the module's own DSN
+- Improve: "Phone Off" comes from the dialer's per-agent queue_status over ECCP (now documented in the protocol spec), labelled with _tr() and coloured by number gated on the agent's raw status, instead of parsing `asterisk -rx 'queue show'` once at page load
+
 ## 5.1.9
 
 - Bug fix: a console action sent in the instant after the agent session ends is answered as a failure the console shows, instead of a success message or silence
