@@ -79,6 +79,18 @@ if (file_exists($path_script_db))
     crearColumnaSiNoExiste($pDB, 'call_center', 'campaign_entry',
         'id_url',
         "ADD COLUMN id_url int unsigned, ADD FOREIGN KEY (id_url) REFERENCES campaign_external_url (id)");
+    crearColumnaSiNoExiste($pDB, 'call_center', 'campaign',
+        'id_url2',
+        "ADD COLUMN id_url2 int unsigned, ADD INDEX id_url2 (id_url2), ADD CONSTRAINT campaign_ibfk_2 FOREIGN KEY (id_url2) REFERENCES campaign_external_url (id)");
+    crearColumnaSiNoExiste($pDB, 'call_center', 'campaign',
+        'id_url3',
+        "ADD COLUMN id_url3 int unsigned, ADD INDEX id_url3 (id_url3), ADD CONSTRAINT campaign_ibfk_3 FOREIGN KEY (id_url3) REFERENCES campaign_external_url (id)");
+    crearColumnaSiNoExiste($pDB, 'call_center', 'campaign_entry',
+        'id_url2',
+        "ADD COLUMN id_url2 int unsigned, ADD INDEX id_url2 (id_url2), ADD CONSTRAINT campaign_entry_ibfk_4 FOREIGN KEY (id_url2) REFERENCES campaign_external_url (id)");
+    crearColumnaSiNoExiste($pDB, 'call_center', 'campaign_entry',
+        'id_url3',
+        "ADD COLUMN id_url3 int unsigned, ADD INDEX id_url3 (id_url3), ADD CONSTRAINT campaign_entry_ibfk_5 FOREIGN KEY (id_url3) REFERENCES campaign_external_url (id)");
     crearColumnaSiNoExiste($pDB, 'call_center', 'calls',
         'trunk',
         "ADD COLUMN trunk varchar(50)");

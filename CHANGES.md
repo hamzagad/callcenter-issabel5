@@ -7,6 +7,13 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.11
+
+- Bug fix: campaign pages no longer change the database schema on page load, and no longer put the MySQL root password on the mysql command line; the installer and this version's update now create the second and third external-URL columns
+- Bug fix: a new incoming campaign keeps its second and third external URLs, which creating it silently dropped
+- Bug fix: saving an incoming campaign no longer prints its SQL statement into the page
+- Bug fix: incoming and outgoing campaign forms reject a malformed external-URL id instead of casting it to a number
+
 ## 5.1.10
 
 - Bug fix: campaign monitoring's directly-served libs/api.php — reachable without a session and shell-injectable through the queue parameter — is retired; it now answers HTTP 410 and its data comes from an authenticated module action
