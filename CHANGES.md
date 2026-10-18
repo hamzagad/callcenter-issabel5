@@ -7,6 +7,13 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.15
+
+- New feature: an issabel-callcenter5 RPM, built in one command by build/5.0/build-rpm.sh from build/5.0/issabel-callcenter.spec; VERSION 5.1.x becomes Version 5, Release 1.x.el8, and an erase keeps the call_center database
+- New feature: the issabel-callcenter5 RPM refuses to install over the previous issabel-callcenter package, and says to remove it first: that keeps the call_center database, which the install then migrates to a v5-compatible schema
+- New feature: the install, update and remove scripts refuse on a box installed from the issabel-callcenter5 RPM, and name the rpm command to use
+- Bug fix: the installer no longer overwrites, and the remover no longer deletes, the dashboard's icon_headphones.png and its icon mapping, which issabel-system ships
+
 ## 5.1.14
 
 - Removed: campaign monitoring's "Phone Off" label and red row, which also marked healthy logged-in Agent-type agents; a phone that stops answering logs its agent out since 5.1.13
