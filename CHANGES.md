@@ -7,6 +7,11 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.2.17
+
+- New feature: a GitHub Actions workflow (.github/workflows/build-rpm.yml) builds the issabel-callcenter5 RPM on a major release - a VERSION bump outside the last field (5.1.16 -> 5.2.17) - through primasoft-dev/rpm-package-action on Rocky 8, uploads it as an artifact and attaches it to the v<VERSION> GitHub Release; workflow_dispatch builds any version by hand, with the rebuild counter as input
+- New feature: build/5.0/ci-rpm-gate.sh decides from the VERSION before and after a push whether it is a major release - one line on stdout, the reason on stderr, exit 0 whenever it decided; an ordinary last-digit bump builds nothing
+
 ## 5.1.16
 
 - Improve: the issabel-callcenter5 RPM's Version is the whole VERSION and its Release a rebuild counter (CC_RPM_RELEASE, default 1), e.g. issabel-callcenter5-5.1.16-1.el8

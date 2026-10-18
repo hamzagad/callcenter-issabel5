@@ -108,6 +108,16 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
   `CHANGES.md`. The installer reads it into `REPO_VERSION` and deploys it to
   `/usr/share/issabel/module_installer/callcenter/`, which is how a later
   install reports the currently-installed version
+- Numbering: every change bumps the last digit (5.1.16 -> 5.1.17). A major
+  release also bumps the middle digit, and the last digit keeps counting,
+  never reset to 0: 5.1.16 -> 5.2.17, then 5.2.18, so `CHANGES.md` stays one
+  unbroken run of last digits. A move of the middle digit is what makes
+  `.github/workflows/build-rpm.yml` build the RPM and the `v<VERSION>`
+  GitHub Release (the decision is `build/5.0/ci-rpm-gate.sh`'s). This
+  overrides the platform's general rule, which resets the last digit to 0.
+  `dev.sh commit` bumps only the last digit, so for a major release the
+  maestro raises the middle digit in `VERSION` and the `CHANGES.md` heading
+  in the same commit
 - Every version that changes a file shipped to the box carries
   `patches/<VERSION>/` (the changed files under `files/` plus the mandatory
   `update.sh`); that is what `build/5.0/update-issabel-callcenter.sh` applies

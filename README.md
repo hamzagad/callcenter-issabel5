@@ -48,6 +48,9 @@ bash build/5.0/remove-issabel-callcenter.sh
 
 # RPM packaging (one command; the Version is the whole VERSION, the Release a rebuild counter, default 1):
 bash build/5.0/build-rpm.sh
+# GitHub Actions also builds the RPM on a major release (a VERSION bump
+# outside the last field) through primasoft-dev/rpm-package-action: artifact
+# plus the v<VERSION> Release; by hand from the Actions tab, artifact only.
 # Install the produced package with:
 rpm -Uvh issabel-callcenter5-<version>-<release>.el8.noarch.rpm
 # An RPM-installed box is updated with `rpm -Uvh <newer RPM>` (or
