@@ -46,7 +46,7 @@ bash build/5.0/update-issabel-callcenter.sh
 # To Uninstall:
 bash build/5.0/remove-issabel-callcenter.sh
 
-# RPM packaging (one command; the version and the release come from VERSION):
+# RPM packaging (one command; the Version is the whole VERSION, the Release a rebuild counter, default 1):
 bash build/5.0/build-rpm.sh
 # Install the produced package with:
 rpm -Uvh issabel-callcenter5-<version>-<release>.el8.noarch.rpm

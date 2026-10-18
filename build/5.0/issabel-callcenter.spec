@@ -5,14 +5,16 @@
 # Obsoletes), and rpm's own file-conflict check already stops a co-install,
 # so it needs no Conflicts either.
 #
-# Built only by build/5.0/build-rpm.sh, which defines cc_version and
-# cc_release from the repository's VERSION file - its first field as the
-# Version and the rest as the Release; the single source of truth,
-# no version literal appears anywhere in this file, %changelog included -
-# and cc_date for the changelog entry. The payload is exactly the install
-# scripts' own mapping (cc_dest_for() in build/5.0/callcenter-common.sh) plus
-# the /usr/share/issabel/module_installer/callcenter/ archive copy the shell
-# installer deploys; %post mirrors install-issabel-callcenter.sh.
+# Built only by build/5.0/build-rpm.sh, which defines cc_version as the
+# WHOLE VERSION string (the single source of truth; no version literal
+# appears anywhere in this file, %changelog included), cc_release as the
+# rebuild counter (CC_RPM_RELEASE, default 1) and cc_date for the changelog
+# entry. The payload is exactly the install scripts' own mapping
+# (cc_dest_for() in build/5.0/callcenter-common.sh) plus the
+# /usr/share/issabel/module_installer/callcenter/ archive copy the shell
+# installer deploys, MINUS CHANGELOG_OLD.md: the frozen changelog points at
+# the repository, so the RPM does not package it (the shell installer still
+# deploys it). %post mirrors install-issabel-callcenter.sh.
 #
 # The module_installer directory is unversioned (callcenter, not
 # callcenter_<version>) on purpose: cc_read_version() reads
@@ -29,7 +31,7 @@ Version: %{cc_version}
 Release: %{cc_release}%{?dist}
 License: GPLv2+
 URL:     https://github.com/ISSABELPBX/callcenter-issabel5
-Source0: callcenter5_%{cc_version}.%{cc_release}.tgz
+Source0: callcenter5_%{cc_version}.tgz
 BuildArch: noarch
 
 Requires(pre): issabel-framework >= 5.0.0-1
@@ -52,7 +54,7 @@ issabel-callcenter5 afterwards migrates that database to a v5-compatible
 schema.
 
 %prep
-%setup -q -n issabel-callcenter5_%{cc_version}.%{cc_release}
+%setup -q -n issabel-callcenter5_%{cc_version}
 
 %install
 rm -rf $RPM_BUILD_ROOT
@@ -81,9 +83,11 @@ install -m 0755 -D setup/usr/bin/issabel-callcenter-local-dnc \
     $RPM_BUILD_ROOT/usr/bin/issabel-callcenter-local-dnc
 
 # The module_installer archive copy: what install-issabel-callcenter.sh
-# deploys there and what cc_read_version() reads.
+# deploys there and what cc_read_version() reads. CHANGELOG_OLD.md is not
+# packaged (see the header): nothing on a box reads it, and the changelog
+# points at the repository.
 mkdir -p $RPM_BUILD_ROOT/usr/share/issabel/module_installer/callcenter
-cp -a setup menu.xml CHANGELOG_OLD.md VERSION \
+cp -a setup menu.xml VERSION \
     $RPM_BUILD_ROOT/usr/share/issabel/module_installer/callcenter/
 
 # Log directory for the web modules (see callcenter-modules.logrotate).

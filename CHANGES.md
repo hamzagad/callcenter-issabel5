@@ -7,6 +7,11 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.1.16
+
+- Improve: the issabel-callcenter5 RPM's Version is the whole VERSION and its Release a rebuild counter (CC_RPM_RELEASE, default 1), e.g. issabel-callcenter5-5.1.16-1.el8
+- Removed: CHANGELOG_OLD.md from the RPM; the package changelog points to the repository, and the shell installer still deploys it
+
 ## 5.1.15
 
 - New feature: an issabel-callcenter5 RPM, built in one command by build/5.0/build-rpm.sh from build/5.0/issabel-callcenter.spec; VERSION 5.1.x becomes Version 5, Release 1.x.el8, and an erase keeps the call_center database
