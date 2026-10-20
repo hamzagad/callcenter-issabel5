@@ -7,6 +7,10 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.2.19
+
+- Bug fix: a queue's predicted slots are split between the outgoing campaigns sharing it, by the idle agents each holds, with leftovers rotating - they all went to the first campaign in list order, every cycle in which several campaigns held an idle agent; waiting callers are now subtracted once per queue (DIALER_LOGIC.md G2, G3)
+
 ## 5.2.18
 
 - Bug fix: a refused Originate records its Failure in call_progress_log - the failure notice carried no status and a raw epoch timestamp, so MariaDB rejected the row and it was lost
