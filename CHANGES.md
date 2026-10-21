@@ -7,6 +7,10 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.2.21
+
+- Bug fix: the dialer's queue refresh (every 5 minutes, on an ECCP refreshagents and on an Asterisk reload) no longer wipes the call start of every busy queue member, which made predictive campaigns stop counting busy agents as about to free until their next call
+
 ## 5.2.20
 
 - Bug fix: the Calls Detail report sorts every call by when it entered the queue (datetime_entry_queue; an outbound call that never reached the queue by when it was dialled), newest first - abandoned and failed calls, which have no start time, fell below every answered call in phone-number order

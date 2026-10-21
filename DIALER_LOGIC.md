@@ -453,7 +453,8 @@ follows from that gap.
   (`QueueShadow.class.php:400-402`), and `LinkStart` is set only by
   `AgentConnect` **on that specific queue**. An agent talking on queue A shows
   `INUSE` in queue B but with `LinkStart = NULL`, so queue B's prediction skips
-  them. This is the conservative direction.
+  them. This is the conservative direction. Since 5.2.21 the queue refresh
+  keeps `LinkStart` (see Bug Fixes).
 - **Busy and paused agents are excluded everywhere.** Device status is global
   and Asterisk emits `QueueMemberStatus` for every queue the member belongs to,
   so an agent busy anywhere is not `NOT_INUSE` anywhere. Paused members are
@@ -682,6 +683,31 @@ $this->_incrementarPausas($ami, NULL, 'Reserved');
 `$reason` is unused inside `_incrementarPausas()`; only `$nombre_pausa` is used,
 as the `Reason` field of the AMI `QueuePause` action, so the pause is now
 recorded as `Reserved`.
+
+### Fix: Queue Refresh Keeps the Call Start (2026-10-21)
+
+**Problem:** After each queue refresh, a predictive campaign stopped counting
+its busy agents as about to free, so it under-dialed until each busy agent took
+a new call. The refresh re-reads every queue with a QueueStatus enumeration -
+every 5 minutes (`SQLWorkerProcess::_verificarActualizacionAgentes()`), on each
+ECCP `refreshagents` request and on every Asterisk reload - and each one
+dropped the call start of every member on a call at that moment.
+
+**Root Cause:** `QueueShadow::msg_QueueMember()` tested
+`isset($this->_queues[$Queue][$Location])`, missing the `members` level its own
+writes use, so the test was always true for an existing queue. Every re-read
+took the new-member branch and rebuilt each member with `LinkStart = NULL`.
+`infoPrediccionCola()` (`:400-402`) adds a busy member to
+`AGENTES_POR_DESOCUPAR` only when `LinkStart` is set, so the Erlang model saw
+no busy agent after a refresh and the campaign's predictive slots fell to 0
+(`CampaignProcess.class.php:1170`).
+
+**Fix:** `QueueShadow.class.php:90` - the isset now includes the `members`
+level, so a re-read of an existing member keeps its `LinkStart` (the branch
+whose comment already said so) and still refreshes `Status` and `Paused`. A
+member's first enumeration, an agent login (`msg_QueueMemberAdded`) and
+`AgentComplete` are unchanged. ITH scenario `callcenter.27` forces a refresh
+during a busy agent's call and requires the predictive boost to hold after it.
 
 ---
 
