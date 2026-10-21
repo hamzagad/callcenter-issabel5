@@ -121,7 +121,9 @@ Custom binary protocol for agent console ↔ dialer communication. Spec in `setu
 - Every version that changes a file shipped to the box carries
   `patches/<VERSION>/` (the changed files under `files/` plus the mandatory
   `update.sh`); that is what `build/5.0/update-issabel-callcenter.sh` applies
-  to update an installation in place. The directory is named after the
+  to update an installation in place. A file lives only in the newest version
+  that ships it: `bash build/5.0/prune-patches.sh` deletes the older copies,
+  and `/finish` refuses to land while `--check` finds one. The directory is named after the
   VERSION bump at land time (`dev.sh commit`), and a renumber on `/finish`
   renames the directory; `/finish` copies it to the contribution clone with
   the rest. The layout and the `update.sh` contract: `patches/README.md`
