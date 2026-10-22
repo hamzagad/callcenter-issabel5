@@ -7,7 +7,7 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
-## 5.2.24
+## 5.3.24
 
 - Bug fix: the RPM no longer carries icon_headphones.png or patches the dashboard ProcessesStatus applet on install or erase; both belong to issabel-system
 
