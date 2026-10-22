@@ -1,9 +1,9 @@
 # Spec for the Issabel Call Center community module (callcenter-issabel5),
-# packaged as issabel-callcenter5 - deliberately NOT issabel-callcenter,
-# the previous package, still offered by the Issabel 5 repos: this package
-# is neither an alternative nor an update for it, replaces nothing (no
-# Obsoletes), and rpm's own file-conflict check already stops a co-install,
-# so it needs no Conflicts either.
+# packaged as issabel-callcenter-ce (Community Edition) - deliberately NOT
+# issabel-callcenter, the previous package, still offered by the Issabel 5
+# repos: this package is neither an alternative nor an update for it,
+# replaces nothing (no Obsoletes), and rpm's own file-conflict check already
+# stops a co-install, so it needs no Conflicts either.
 #
 # Built only by build/5.0/build-rpm.sh, which defines cc_version as the
 # WHOLE VERSION string (the single source of truth; no version literal
@@ -25,13 +25,13 @@
 %{!?cc_release:%{error:cc_release is not defined - build with build/5.0/build-rpm.sh}}
 %{!?cc_date:%{error:cc_date is not defined - build with build/5.0/build-rpm.sh}}
 
-Summary: Issabel v5 Call Center
-Name:    issabel-callcenter5
+Summary: Issabel v5 Call Center Community Edition
+Name:    issabel-callcenter-ce
 Version: %{cc_version}
 Release: %{cc_release}%{?dist}
 License: GPLv2+
 URL:     https://github.com/ISSABELPBX/callcenter-issabel5
-Source0: callcenter5_%{cc_version}.tgz
+Source0: issabel-callcenter-ce_%{cc_version}.tgz
 BuildArch: noarch
 
 Requires(pre): issabel-framework >= 5.0.0-1
@@ -50,11 +50,11 @@ On a box with the previous call centre package, issabel-callcenter, still
 offered by the Issabel 5 repos, installing this package refuses: remove it
 first (rpm -e issabel-callcenter, or dnf remove issabel-callcenter).
 Removing it keeps the call_center database, and installing
-issabel-callcenter5 afterwards migrates that database to a v5-compatible
+issabel-callcenter-ce afterwards migrates that database to a v5-compatible
 schema.
 
 %prep
-%setup -q -n issabel-callcenter5_%{cc_version}
+%setup -q -n issabel-callcenter-ce_%{cc_version}
 
 %install
 rm -rf $RPM_BUILD_ROOT
@@ -108,10 +108,10 @@ mkdir -p $RPM_BUILD_ROOT/var/log/callcenter-module
 # this package.
 if rpm -q issabel-callcenter >/dev/null 2>&1; then
     echo "Error: the previous call centre package is installed on this system ($(rpm -q issabel-callcenter))." >&2
-    echo "Remove it before installing issabel-callcenter5:" >&2
+    echo "Remove it before installing issabel-callcenter-ce:" >&2
     echo "    rpm -e issabel-callcenter        (or: dnf remove issabel-callcenter)" >&2
     echo "Removing it keeps the call_center database." >&2
-    echo "Installing issabel-callcenter5 afterwards migrates that database to a v5-compatible schema." >&2
+    echo "Installing issabel-callcenter-ce afterwards migrates that database to a v5-compatible schema." >&2
     exit 1
 fi
 exit 0
