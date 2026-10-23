@@ -449,8 +449,9 @@ follows from that gap.
   exactly one campaign per cycle, and the turn advances. If the winner is at
   `max_canales` the next campaign in rotation order takes it.
 - **An agent busy on another queue's call cannot be counted as "about to
-  become free".** `AGENTES_POR_DESOCUPAR` requires a per-queue `LinkStart`
-  (`QueueShadow.class.php:400-402`), and `LinkStart` is set only by
+  become free".** `AGENTES_POR_DESOCUPAR` counts a member whose per-queue
+  `LinkStart` is set and whose device is busy or ringing
+  (`QueueShadow.class.php:396-397`), and `LinkStart` is set only by
   `AgentConnect` **on that specific queue**. An agent talking on queue A shows
   `INUSE` in queue B but with `LinkStart = NULL`, so queue B's prediction skips
   them. This is the conservative direction. Since 5.2.21 the queue refresh
@@ -524,10 +525,15 @@ dialer knows the trunk's real channel count.
 originate.
 
 **G8. RINGING counts as free in predictive mode.**
-(`QueueShadow.class.php:389-392`)
+(`QueueShadow.class.php:396-404`)
 An agent whose phone is already ringing still enters `AGENTES_LIBRES_LISTA`, so
 rotation allocates them again; the boost and the overcommit then multiply that
-inflated base. Tracked separately in `TODO.md` as "RINGING-as-Free Analysis".
+inflated base. One exception, since 5.3.25: a member the dialer knows is on a
+live call - `LinkStart` in QueueShadow, the bridged-channel scan in Predictor -
+counts busy even at RINGING, because Asterisk can leave that stale state on an
+answered member for the whole call (see Bug Fixes). A member that is only
+ringing is still free. Tracked separately in `TODO.md` as "RINGING-as-Free
+Analysis".
 *Idea:* keep RINGING out of the rotation list while still allowing it in the
 prediction, so it inflates the estimate but not the allocation.
 
@@ -708,6 +714,31 @@ whose comment already said so) and still refreshes `Status` and `Paused`. A
 member's first enumeration, an agent login (`msg_QueueMemberAdded`) and
 `AgentComplete` are unchanged. ITH scenario `callcenter.27` forces a refresh
 during a busy agent's call and requires the predictive boost to hold after it.
+
+### Fix: An On-Call Member Stuck at RINGING Counts Busy (2026-10-23)
+
+**Problem:** chan_sip publishes the 180-Ringing device state as NOT-CACHABLE,
+and Asterisk's device-state thread re-publishes that message from a lagging
+dispatcher. When the lag outlives the answer, the stale RINGING lands after
+the answer's INUSE and nothing else publishes for the device until hangup, so
+an answered, bridged member reads RINGING for the whole call. The dialer then
+counted that member free in predictive mode and never added them to
+`AGENTES_POR_DESOCUPAR`, so the Erlang model saw a busy agent as free.
+
+**Root Cause:** The free test and the about-to-free test in
+`infoPrediccionCola()` each matched on the device state alone - RINGING free,
+only INUSE/BUSY/RINGINUSE about to free - ignoring the dialer's own
+live-call knowledge.
+
+**Fix:** A member is on a live call when it has the dialer's live-call marker
+- `LinkStart` in QueueShadow (`:396-397`), the bridged-channel scan in
+Predictor (`:263-264`) - and its device state is INUSE, BUSY, RINGINUSE or
+RINGING. Such a member is never free and always about to free, with its call
+age. The device-state half of the rule stays so a member whose
+`AgentComplete` was lost (or whose call the scan missed) is free again as soon
+as its device reads NOT_INUSE; a member that is only ringing is unchanged
+(G8). ITH scenarios `callcenter.29` and `ccpro.12` feed the dialer's own
+classes the production event sequence, without placing a call.
 
 ---
 
