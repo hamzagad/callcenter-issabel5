@@ -21,7 +21,7 @@
    └─> _countActiveCalls() counts DB calls in Placing/Ringing/OnQueue/OnHold
    └─> effective_max_canales = max_canales - active_calls
    └─> QueueShadow::infoPrediccionCola() returns:
-       - AGENTES_LIBRES (status: NOT_INUSE only; or NOT_INUSE+RINGING if predictive)
+       - AGENTES_LIBRES (status: NOT_INUSE only)
        - AGENTES_LIBRES_LISTA (list of free agent interfaces for rotation)
        - AGENTES_POR_DESOCUPAR (busy agents, predicted to finish soon)
        - CLIENTES_ESPERA (calls already in queue)
@@ -349,8 +349,9 @@ AST_DEVICE_ONHOLD     = 8   // Call on hold
 
 ### Free Agent Detection
 
-**Non-predictive mode:** Only `AST_DEVICE_NOT_INUSE` (1) counts as free
-**Predictive mode:** `AST_DEVICE_NOT_INUSE` (1) and `AST_DEVICE_RINGING` (6) count as free
+**Both modes:** only `AST_DEVICE_NOT_INUSE` (1) counts as free. A member whose
+phone is ringing is being offered a call, the queue will not ring them again
+under `ringinuse=no`, and nothing subtracts the call already ringing them.
 
 ### Status Updates
 
@@ -526,16 +527,24 @@ originate.
 
 **G8. RINGING counts as free in predictive mode.**
 (`QueueShadow.class.php:396-404`)
-An agent whose phone is already ringing still enters `AGENTES_LIBRES_LISTA`, so
-rotation allocates them again; the boost and the overcommit then multiply that
-inflated base. One exception, since 5.3.25: a member the dialer knows is on a
-live call - `LinkStart` in QueueShadow, the bridged-channel scan in Predictor -
-counts busy even at RINGING, because Asterisk can leave that stale state on an
-answered member for the whole call (see Bug Fixes). A member that is only
-ringing is still free. Tracked separately in `TODO.md` as "RINGING-as-Free
-Analysis".
-*Idea:* keep RINGING out of the rotation list while still allowing it in the
-prediction, so it inflates the estimate but not the allocation.
+**Fixed in 5.3.27.** A member whose phone is ringing is not a free agent in
+any mode, in both QueueShadow and the Predictor fallback: only
+`AST_DEVICE_NOT_INUSE` is free. Every Issabel-generated queue runs
+`ringinuse=no`, so the queue will not offer that member another call, and no
+counter subtracts the call already ringing them - counting them free made
+rotation allocate an agent nobody could dial, and the boost and the overcommit
+multiplied that inflated base. A member on a live call still counts busy and
+about to free (the 5.3.25 rule, unchanged); a merely-ringing member is neither,
+and is free again as soon as the device reads NOT_INUSE.
+
+One limit the fix leaves: the ringing member's caller is still counted in
+`CLIENTES_ESPERA` and subtracted from the boost, so with busy agents about
+to free a campaign whose callback agents are ringing places up to one call
+per ringing agent too few, and none at all when no agent is idle.
+Agent-type members never ring (app_agent_pool publishes no RINGING), so it
+does not apply to them, and the error is on the safe side - too few calls,
+not abandoned ones. The exact count is tracked in `TODO.md` as
+"Exact Predictive Count for Ringing Callback Agents".
 
 **G9. The agent list is captured once, but campaigns are processed one at a
 time.** (intentions collected at `:674-744`, campaigns processed from `:769`)
