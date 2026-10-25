@@ -1089,8 +1089,6 @@ function _manejarSesionActiva_HTML_generarInformacion($smarty, $sDirLocalPlantil
                 $comboContactos[$idContacto] = $infoContactoViejo['cedula_ruc'].
                 ' - '.$infoContactoViejo['first_name'].' '.$infoContactoViejo['last_name'];
             } else {
-                /* TODO: dar formato adecuado para cuando contactos de llamadas
-                 * entrantes puedan tener atributos arbitrarios */
                 $comboContactos[$idContacto] = $sDescripcionContacto;
             }
         }
@@ -1438,7 +1436,7 @@ function manejarSesionActiva_saveforms($module_name, $smarty, $sDirLocalPlantill
             if (preg_match('/^field-(\d+)-(\d+)$/', $tupladata[0], $regs)) {
                 $formInfo[$regs[1]][$regs[2]] = $tupladata[1];
                 $_SESSION['callcenter']['ultimo_callsurvey']['call_survey'][$regs[1]][$regs[2]] = array(
-                    'label' =>  '', // TODO: asignar desde formulario de campaña
+                    'label' =>  '',
                     'value' =>  $tupladata[1],
                 );
             }
@@ -2221,10 +2219,6 @@ function construirRespuesta_agentlinked($smarty, $sDirLocalPlantillas,
             if (count($infoContactoViejo) == 3) {
                 $sDescripcionContacto = $infoContactoViejo['cedula_ruc'].
                     ' - '.$infoContactoViejo['first_name'].' '.$infoContactoViejo['last_name'];
-            } else {
-                /* TODO: dar formato adecuado para cuando contactos de llamadas
-                 * entrantes puedan tener atributos arbitrarios */
-
             }
 
             /* El htmlentities de clave y valor es necesario porque del lado
