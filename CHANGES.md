@@ -7,6 +7,10 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.3.31
+
+- Bug fix: an incoming call that leaves its queue before its call_entry row is back from the database (Leave Empty strict with a failover queue) is now recorded abandonada, with its end time, wait, progress entry and recording, instead of staying en-cola for good
+
 ## 5.3.30
 
 - Bug fix: Agents Monitoring's login, talk, break and hold columns stop at the shift end and read 00:00:00 before the shift starts, instead of counting on
