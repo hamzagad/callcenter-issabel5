@@ -267,15 +267,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: Hardcoded English error message when no incoming queues configured. Uses PHP heredoc instead of `_tr()` function and Smarty template. Text: "No queues have been defined for incoming calls..." with hardcoded menu links. Module already has i18n infrastructure (`lang/*.lang` files) but this message was missed. Fix requires: (1) Add translation keys to all lang files (en, es, fr, fa, ru), (2) Replace heredoc with `_tr()` calls, (3) Optionally move to template for better separation. Only displays in misconfigured systems (no queues defined).
 * **Status**: Untouched
 
-### Query Error Display
-
-* **Type**: Investigation
-* **Urgency**: Low
-* **Date Added**: Original (pre-2011)
-* **Location**: `paloSantoConfiguration.class.php:69`
-* **Description**: Determine what to display if query fails.
-* **Status**: Untouched
-
 ### Follow-up Termination
 
 * **Type**: Investigation
