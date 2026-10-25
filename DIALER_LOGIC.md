@@ -16,9 +16,155 @@
 
 ### Standard Flow (Predictive/Progressive Dialing)
 
+#### Flow chart: one cycle over every campaign
+
+Every 3 seconds the dialer runs one review cycle over all its active outgoing
+campaigns. Campaigns that share a queue share its agents, so a cycle works in
+three passes: each campaign first lists the free agents it could use, a
+rotation then gives each free agent to one campaign, and only then does each
+campaign dial, within two budgets, its agents and its channels. The chart
+names functions, not line numbers, which move; they are all in
+`CampaignProcess.class.php` unless another class is named.
+
+```
+┌─ ONE CYCLE, EVERY 3 s (INTERVALO_REVISION_CAMPANIAS) ────────────────────────┐
+│ CampaignProcess::_actualizarCampanias(), over every active outgoing campaign │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
+┌─ 0: HOUSEKEEPING ────────────────────────────────────────────────────────────┐
+│ orphans   Placing or Ringing for over 5 min                → Failure         │
+│           Success or OnHold for over 2 h with no end_time  → Hangup          │
+│ expiry    campaigns past datetime_end                      → estatus 'I'     │
+│ load      outgoing campaigns with estatus 'A', today inside datetime_init    │
+│           ..datetime_end and now inside daytime_init..daytime_end,           │
+│           in database order (the query has no ORDER BY)                      │
+│ announce  new campaigns to AMIEventProcess. Incoming campaigns stop here:    │
+│           they place no calls                                                │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
+┌─ PASS 1: INTENTIONS, each campaign C, from its own queue snapshot ───────────┐
+│ raw_max[C]       = max_canales                       (empty or 0: no limit)  │
+│ active[C]        = C's calls Placing, Ringing, OnQueue or OnHold, or         │
+│                    connected (Success with no end_time)                      │
+│ effective_max[C] = max(0, raw_max[C] - active[C])  the channels C has left   │
+│ wants[C]         = the free members of C's queue: device NOT_INUSE, not      │
+│                    paused, not on a live call (AGENTES_LIBRES_LISTA of       │
+│                    QueueShadow::infoPrediccionCola())                        │
+│                    Campaigns on one queue want the same agents.              │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
+┌─ PASS 2: FAIR ROTATION, _resolveAgentRotation() ─────────────────────────────┐
+│ each free agent once, in the order the campaigns listed them:                │
+│   wanted by 1 campaign   → that campaign, while it holds fewer than          │
+│                            raw_max[C] agents                                 │
+│   wanted by 2+ campaigns → the agent's own turn: its campaigns sorted by     │
+│                            id, starting at its index; a campaign that        │
+│                            already holds raw_max[C] agents is passed over;   │
+│                            all full → nobody. The index moves on by one      │
+│                            every cycle, given or not                         │
+│                            (_getRotationWinnerWithCapacity())                │
+│ capped by RAW max_canales: a call still dialing does not shut a campaign     │
+│ out of the rotation; the channels left are applied in Pass 3                 │
+│ result: allocated[C], each free agent in at most one campaign                │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
+┌─ PREDICTIVE SPLIT, _computePredictiveShares(), only with predictive on ──────┐
+│ per queue; eligible = its campaigns with allocated[C] > 0                    │
+│ P[C]   = busy agents C's Erlang model expects free before a new call is      │
+│          answered (Predictor::predecirNumeroLlamadas(); 0 below 10           │
+│          completed calls)                                                    │
+│ cap[C] = max(0, P[C] - callers waiting in the queue)                         │
+│ total  = the largest cap[C], shared in proportion to allocated[C], none      │
+│          above its cap[C]; leftover slots go one by one in the queue's       │
+│          own turn (_splitPredictiveSlots())                                  │
+│ result: boost[C]                                                             │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
+┌─ PASS 3: DIAL, _processCampaignWithAllocation(), each C in database order ───┐
+│ allocated[C] = 0 ─────────────► skip C, scheduled calls included (it only    │
+│                                 checks whether its rows are used up)         │
+│ scheduled      = due scheduled calls whose reserved agent is idle            │
+│                  (_actualizarLlamadasAgendables(); reserving pauses the      │
+│                  agent in every queue, so no campaign counts them free)      │
+│ want           = allocated[C] + boost[C]                                     │
+│ agent budget   = want - pending - scheduled                                  │
+│                  pending = calls of ANY campaign on C's queue still          │
+│                  waiting for Asterisk's Originate result                     │
+│ channel budget = effective_max[C] - scheduled                                │
+│ N              = min(agent budget, channel budget)                           │
+│ overcommit on and N > 0 → N = N / max(ASR, 0.20), at most effective_max[C]   │
+│                  ASR = the answered share of the calls that finished in      │
+│                  the last 30 min, used once there are 10 of them             │
+│ N = 0 and nothing scheduled ──► skip C (the same check)                      │
+│ numbers  N rows: in-window rows first, then rows with no window, fewest      │
+│          retries first; repeats, DNC numbers and dial strings already in     │
+│          flight are dropped                                                  │
+│ each     status Placing, retries + 1 → Originate through AMIEventProcess     │
+│ no callable row left → campaign estatus 'T' (finished)                       │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
+           next campaign; after the last one, wait for the next cycle
+```
+
+Reading the chart:
+
+- **The rotation decides who may dial, not who answers.** An answered call
+  enters the Asterisk queue, which hands it to whichever member is free at
+  that moment; the queue knows nothing of campaigns. See
+  [How Balancing, Predictive and Overcommit Interact](#how-balancing-predictive-and-overcommit-interact).
+- **The turns of shared agents often move together.** Each agent keeps its
+  own turn, but agents that were free in the same cycles have the same index,
+  so in one cycle one campaign is first in line for all of them, and in the
+  next cycle the other (example 1).
+- **`max_canales` works twice.** Raw, it caps how many agents the rotation
+  gives a campaign; effective (less its live calls), it caps how many calls
+  the campaign places. A campaign can be given more agents than it has
+  channels left for, and the extra agents sit that cycle out (example 1,
+  cycle 1).
+- **Pending originates are counted per queue**, so one campaign's calls that
+  are still dialing also shrink the agent budget of every other campaign on
+  that queue (G4), including calls placed earlier in the same cycle: a call
+  counts as pending as soon as Asterisk accepts its Originate.
+- **The agent lists are taken once, in Pass 1**, and the campaigns then dial
+  one after another, so the last campaign dials on the oldest snapshot (G9).
+
+**Example 1: two campaigns on one queue.** Queue 500 has agents 4001-4004.
+Campaign A (id 1, `max_canales` 2) already has a call talking to 4004;
+campaign B (id 2, `max_canales` 5) has none. 4001-4003 are free. Predictive
+and overcommit are off, and every call placed below is still dialing 6 s
+later.
+
+| cycle | Pass 1: effective_max | Pass 2: first in line, then allocated | Pass 3: A (dials first) | Pass 3: B |
+|---|---|---|---|---|
+| 1 | A 2-1 = 1, B 5 | A for every agent: 4001 → A, 4002 → A, 4003 → B (A holds its raw max of 2) | want 2, channel budget 1: **1 call** | want 1, minus 1 pending (A's call): 0 |
+| 2 | A 2-2 = 0, B 5 | B: 4001, 4002, 4003 → B | no agent: skip | want 3, minus 1 pending: **2 calls** |
+| 3 | A 0, B 5-2 = 3 | A: 4001, 4002 → A, 4003 → B | want 2, minus 3 pending: 0 | want 1, minus 3 pending: 0 |
+
+From cycle 2 on, three calls are dialing for the three free agents, and A is
+at its `max_canales`. Cycle 1 placed one call for three free agents. One of
+A's two agents had no call, because the rotation gave A two agents (its raw
+max) while A had one channel left. B's agent had none either, because A's
+call, accepted moments before, already counted as pending on the queue.
+Cycle 2 caught up.
+
+**Example 2: the predictive split.** Both campaigns on one queue are
+predictive. The rotation gave A 3 agents and B 1. Of the queue's busy agents,
+A's model expects 4 to free in time and B's expects 2 (each campaign has its
+own call length and answer time). 1 caller is waiting.
+
+```
+cap        A = 4 - 1 = 3            B = 2 - 1 = 1
+total      the largest cap = 3
+floors     A = floor(3 x 3/4) = 2   B = floor(3 x 1/4) = 0
+leftover   1, in the queue's turn: A this cycle (A 3, B 0),
+           B the next cycle with the same inputs (A 2, B 1)
+```
+
+#### Step by step: one campaign's cycle, then one call
+
 ```
 1. Campaign Process: Collect campaign intentions (Pass 1)
-   └─> _countActiveCalls() counts DB calls in Placing/Ringing/OnQueue/OnHold
+   └─> _countActiveCalls() counts DB calls in Placing/Ringing/OnQueue/OnHold, and connected ones
    └─> effective_max_canales = max_canales - active_calls
    └─> QueueShadow::infoPrediccionCola() returns:
        - AGENTES_LIBRES (status: NOT_INUSE only)
@@ -28,7 +174,7 @@
 
 2. Fair Rotation: Resolve agent allocation (Pass 2)
    └─> _resolveAgentRotation() allocates free agents to campaigns
-   └─> Respects effective_max_canales per campaign
+   └─> Capped by each campaign's raw max_canales (its channels left apply in step 3)
    └─> Shared agents rotated fairly across campaigns
 
 3. Process campaigns with allocation (Pass 3)
@@ -83,7 +229,7 @@ The campaign process runs every 3 seconds (`INTERVALO_REVISION_CAMPANIAS`). Each
 
 For each active campaign:
 
-1. **Count active calls** via `_countActiveCalls()` — queries DB for calls in `Placing/Ringing/OnQueue/OnHold`
+1. **Count active calls** via `_countActiveCalls()` — queries DB for calls in `Placing/Ringing/OnQueue/OnHold`, and connected calls (`Success` with no `end_time`)
 2. **Calculate effective_max_canales** = `max_canales - active_calls` (for channel budget)
 3. **Store raw max_canales** — original `max_canales` value (for rotation)
 4. **Get free agent list** via `QueueShadow::infoPrediccionCola()` → `AGENTES_LIBRES_LISTA`
@@ -108,13 +254,14 @@ $this->_allocatedAgents = $this->_resolveAgentRotation(
 );
 ```
 
-**Key:** Rotation uses **raw** `max_canales` (not reduced by active calls). This ensures agents aren't pre-excluded just because calls are in transit ("Placing"). The per-agent limiting happens later in Pass 3.
+**Key:** Rotation uses **raw** `max_canales` (not reduced by active calls). This ensures agents aren't pre-excluded just because calls are in transit ("Placing"). The channels left (`effective_max_canales`) limit the calls in Pass 3, so a campaign can be given more agents than it can dial for in that cycle (example 1 under [Standard Flow](#standard-flow-predictiveprogressive-dialing)).
 
 See [Fair Rotation Algorithm](#fair-rotation-algorithm) for details.
 
-### Pass 3: Process Each Campaign (CampaignProcess.class.php:1207-1419)
+### Pass 3: Process Each Campaign (CampaignProcess.class.php:1207-1609)
 
-For each campaign with allocated agents:
+For each campaign with allocated agents (a campaign with none is skipped, its
+scheduled calls included):
 
 ```php
 // Base: one call per allocated agent
@@ -171,29 +318,40 @@ Agent/4002 → [Campaign A, Campaign B]  (shared)
 Agent/4003 → [Campaign B]           (unique)
 ```
 
-#### Step 2: Allocate Unique Agents
-Agents wanted by only one campaign are allocated directly, up to that campaign's `effective_max_canales`:
+#### Step 2: One Pass Over the Agents
+The agents are handed out in one loop, in the order of the map (the campaigns
+in database order, each campaign's agents in queue order), unique and shared
+alike. `$maxCanales` here is each campaign's **raw** `max_canales`
+(`_campaignRawMaxCanales`), not the effective one:
 
 ```php
 if (count($campaigns) == 1) {
+    // Unique: to its campaign, while that holds fewer than raw max_canales
     $campaignId = $campaigns[0];
     if ($allocationCount[$campaignId] < $maxCanales[$campaignId]) {
         $allocated[$campaignId][] = $agent;
         $allocationCount[$campaignId]++;
     }
+} else {
+    // Shared: the agent's own turn
+    $winningCampaign = $this->_getRotationWinnerWithCapacity($agent, $campaigns, $maxCanales, $allocationCount);
 }
 ```
 
-#### Step 3: Allocate Shared Agents with Rotation
-Agents wanted by multiple campaigns use persistent rotation state:
+A shared agent keeps its own rotation state, `$_agentRotation[$agent]`: its
+campaigns sorted by id and an index, reset to 0 when the set of campaigns
+that want it changes. `_getRotationWinnerWithCapacity()` starts at the index,
+passes over a campaign that already holds its raw `max_canales` agents, and
+gives the agent to the first one with room, or to nobody when all are full.
+The index then moves on by one, whether the agent was given or not:
 
 ```php
-// _getRotationWinnerWithCapacity() cycles through campaigns in order
-// Advances index each cycle so next time a different campaign wins
 $rotation['index']++;  // persists across cycles
 ```
 
-If the winning campaign is at capacity, it tries the next campaign in rotation order.
+Because unique and shared agents come in one loop, a shared agent listed early
+can fill a campaign up to its raw `max_canales` before that campaign's unique
+agents come up; those are then left unallocated in that cycle.
 
 ### Example: 2 Campaigns, 1 Shared Agent
 
@@ -206,7 +364,7 @@ Cycle 3: Agent/4002 → Campaign A (rotation index 2 % 2 = 0)
 
 ### Single Campaign Behavior
 
-With only one campaign, rotation degenerates to simple allocation limited by raw `max_canales`. The agent budget applied in Pass 3 ensures the final call count respects the effective (reduced) channel capacity.
+With only one campaign, rotation degenerates to simple allocation limited by raw `max_canales`. The channel budget applied in Pass 3 ensures the final call count respects the effective (reduced) channel capacity.
 
 ---
 
@@ -320,14 +478,18 @@ the interactions still open are in
 
 **How it works:**
 - In Pass 1, `effective_max_canales = max_canales - active_calls` is calculated
-- `active_calls` counts calls in statuses: Placing, Ringing, OnQueue, OnHold
-- `effective_max_canales` limits agent allocation in Pass 2 (rotation)
-- Also caps `iNumLlamadasColocar` in Pass 3 (including after overcommit)
+- `active_calls` counts calls in statuses: Placing, Ringing, OnQueue, OnHold,
+  and connected calls (Success with no `end_time`)
+- The **raw** `max_canales` limits agent allocation in Pass 2 (rotation)
+- `effective_max_canales` caps `iNumLlamadasColocar` in Pass 3: the channel
+  budget, and the re-cap after overcommit
+- An empty or zero `max_canales` means no limit at all (G6)
 
-**Example:** max_canales=3, 1 call in OnQueue:
+**Example:** max_canales=3, 1 call in OnQueue, 4 free agents:
 - effective_max = 3 - 1 = 2
-- Rotation allocates at most 2 agents
-- At most 2 new calls can be placed
+- Rotation allocates at most 3 agents (the raw max)
+- At most 2 new calls can be placed; the third allocated agent waits for a
+  later cycle
 
 ---
 
@@ -391,25 +553,43 @@ Agent status is updated by **AMI events**, specifically:
 
 ## Orphaned Call Cleanup
 
-### At Startup (CampaignProcess.class.php:172-184)
+### At Startup (CampaignProcess.class.php:159-204)
 
-Clears ALL calls stuck in "Placing" status from a previous abnormal termination:
+Empties `current_calls` and `current_call_entry`, closes open incoming calls
+(`fin-monitoreo`), then clears every outgoing call a previous abnormal
+termination left in progress:
 ```sql
 UPDATE calls SET status = 'Failure', failure_cause = 0,
     failure_cause_txt = 'Orphaned call at startup'
-WHERE status = 'Placing'
+WHERE status IN ('Placing', 'Ringing', 'OnQueue');
+
+UPDATE calls SET status = 'Hangup', end_time = CASE
+    WHEN start_time IS NOT NULL THEN start_time ELSE ? END
+WHERE (status = 'OnHold' OR (status = 'Success' AND end_time IS NULL));
 ```
 
-### Periodic Cleanup (_cleanOrphanedPlacingCalls, CampaignProcess.class.php:2174)
+### Periodic Cleanup (CampaignProcess.class.php:2174, :2210)
 
-Runs every campaign cycle. Clears "Placing" calls older than 5 minutes (300 seconds):
+Runs at the start of every campaign cycle.
+
+`_cleanOrphanedPlacingCalls()` clears calls still dialing after 5 minutes
+(300 seconds), which got stuck on a missed OriginateResponse:
 ```sql
 UPDATE calls SET status = 'Failure', failure_cause = 0,
-    failure_cause_txt = 'Orphaned call at startup'
-WHERE status = 'Placing' AND datetime_originate < ?
+    failure_cause_txt = 'Orphaned call - timeout'
+WHERE status IN ('Placing', 'Ringing') AND datetime_originate < ?
 ```
 
-This handles calls that got stuck due to missed OriginateResponse events.
+`_cleanOrphanedConnectedCalls()` closes connected calls with no `end_time`
+after 2 hours, whose Hangup was missed:
+```sql
+UPDATE calls SET status = 'Hangup', end_time = start_time
+WHERE (status = 'Success' OR status = 'OnHold')
+    AND end_time IS NULL AND start_time IS NOT NULL AND start_time < ?
+```
+
+When the AMI connection comes back after an Asterisk restart, both run at
+once with a timeout of 0 (`:343-344`): no call can have survived the restart.
 
 ---
 
@@ -501,8 +681,11 @@ lowers the queue total once instead of one campaign's whole boost.
 The counter walks every call whose campaign's queue matches, so it returns the
 whole queue's in-flight calls - and that number is then subtracted from *each*
 campaign's agent budget. With two campaigns on one queue, campaign A's calls in
-transit also shrink campaign B's budget. This is the opposite direction of G1,
-so a shared queue can over-dial and under-dial at the same time.
+transit also shrink campaign B's budget, even when A placed them earlier in the
+same cycle: a call counts as pending as soon as Asterisk accepts its Originate
+(example 1 under [Standard Flow](#standard-flow-predictiveprogressive-dialing),
+cycle 1). This is the opposite direction of G1, so a shared queue can over-dial
+and under-dial at the same time.
 *Idea:* count pending originates per campaign instead of per queue.
 
 **G5. The overcommit re-cap ignores scheduled calls.** (`:1357-1370`)
