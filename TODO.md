@@ -8,22 +8,18 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ---
 
-## Medium
+## Low
 
 ### Campaign List Needs a 'Retries Left' Column
 
 * **Type**: Feature
-* **Urgency**: Medium
+* **Urgency**: Low
 * **Date Added**: 2026-09-22
 * **Location**: `paloSantoCampaignCC.class.php:88-90`, `campaign_out/index.php:195`, `campaign_out/index.php:211-213`, `campaign_out/lang/*.lang`
 * **Description**: The campaign list's `Pending Calls` column counts only never-dialled rows the dialer can still dial (since 5.4.35, by `_checkCampaignDataExhausted()`'s rule, `paloSantoCampaignCC::getCampaigns()`), but the dialer will not mark a campaign `Finish` until every non-`Success` row has also used up its retries (`_checkCampaignDataExhausted()`). The visible column is therefore not the one that governs the status, and a campaign reading `Pending Calls = 0` sits at `Active` with no on-screen explanation. Seen on the client box on 2026-09-22: campaigns 6, 7 and 8 (`ADSL - Q3'26 - VF/ET/OR`) each showed `Pending Calls = 0` at status `Active` while still holding 1507, 1250 and 456 retryable rows against a retry limit of 5 -- correct dialer behaviour, invisible in the GUI.
 * **Implementation**: Add a `Retries Left` column that **counts the remaining numbers that still have retries available -- one row per phone number still callable -- not the sum of retries remaining and not the retries already consumed**. For campaign 6 above the column reads `1507`. Deliberately reuse the dialer's own exhaustion predicate -- the window/agent rule `_checkCampaignDataExhausted()` counts with, current date and time bound from PHP as the repo requires, never a SQL date function -- so the column reaches 0 exactly when the dialer becomes entitled to set `Finish`: `(SELECT COUNT(*) FROM calls WHERE id_campaign = c.id AND (status IS NULL OR status NOT IN ('Success','Placing','Ringing','OnQueue','OnHold')) AND retries < c.retries AND dnc = 0 AND ((date_init IS NULL AND date_end IS NULL AND time_init IS NULL AND time_end IS NULL AND agent IS NULL) OR (date_init IS NOT NULL AND date_end IS NOT NULL AND time_init IS NOT NULL AND time_end IS NOT NULL AND (date_end > ? OR (date_end = ? AND time_end >= ?))))) AS retries_left`, the three placeholders bound to PHP's `date('Y-m-d')` twice and `date('H:i:s')` once. Then add the cell to the `$arrData[]` row and the header to `setColumns()`, keeping both arrays in the same order; the label goes through `_tr()` with entries in every `lang/<lang>.lang` (en, es, fr, ru, cn, tr, fa).
 * **Open decision**: The predicate above includes never-originated rows, so `Retries Left` is a superset of `Pending Calls` (on the client box campaign 9 showed 13578 pending against 15039 retries-left). Confirm whether that overlap is wanted, or whether never-originated rows should be excluded so the two columns are disjoint -- excluding them breaks the "reaches 0 when the dialer finishes it" property, so the overlap is probably the right call.
 * **Status**: Untouched
-
----
-
-## Low
 
 ### Transfer Bridge Reshuffle Can Finalize a Live Call
 
