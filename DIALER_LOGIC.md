@@ -34,6 +34,7 @@ names functions, not line numbers, which move; they are all in
 ┌─ 0: HOUSEKEEPING ────────────────────────────────────────────────────────────┐
 │ orphans   Placing or Ringing for over 5 min                → Failure         │
 │           Success or OnHold for over 2 h with no end_time  → Hangup          │
+│ expired   never dialed, window over, not DNC               → Failure         │
 │ expiry    campaigns past datetime_end                      → estatus 'I'     │
 │ load      outgoing campaigns with estatus 'A', today inside datetime_init    │
 │           ..datetime_end and now inside daytime_init..daytime_end,           │
@@ -610,6 +611,16 @@ UPDATE calls SET status = 'Hangup', end_time = start_time
 WHERE (status = 'Success' OR status = 'OnHold')
     AND end_time IS NULL AND start_time IS NOT NULL AND start_time < ?
 ```
+
+`_settleExpiredWindowCalls()`, the third pass, runs right after the two
+above. It closes a scheduled call that was never dialed and whose dialing
+window has fully passed: `status` still NULL, not DNC, all four window
+fields set, and the window over (`date_end` before today, or `date_end`
+today with `time_end` already past). It writes `Failure` with cause 0 and
+the reason `Scheduled call expired`, leaving `retries` untouched. It has
+no campaign filter, so rows that expired while the dialer was stopped or
+in a campaign no longer active are closed too. When it closes rows it logs
+`INFO: settled N undialed scheduled call(s) whose window passed | cerradas N llamada(s) agendada(s) no marcada(s) cuya ventana pasó`.
 
 When the AMI connection comes back after an Asterisk restart, both run at
 once with a timeout of 0 (`:343-344`): no call can have survived the restart.
