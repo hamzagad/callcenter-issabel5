@@ -110,7 +110,11 @@ names functions, not line numbers, which move; they are all in
 │          retries first; repeats, DNC numbers and dial strings already in     │
 │          flight are dropped                                                  │
 │ each     status Placing, retries + 1 → Originate through AMIEventProcess     │
-│ no callable row left → campaign estatus 'T' (finished)                       │
+│ finish   no callable row left → campaign estatus 'T' (finished): callable    │
+│          when not answered, not in progress, retries left, not DNC, and      │
+│          either no window and no agent, or a full window not over -          │
+│          checked by _checkCampaignDataExhausted(), called at the no-agents   │
+│          exit, the no-budget exit and the in-cycle guard                     │
 └───────────────────────────────────────┬──────────────────────────────────────┘
                                         ▼
            next campaign; after the last one, the cycle's sweep: reserved

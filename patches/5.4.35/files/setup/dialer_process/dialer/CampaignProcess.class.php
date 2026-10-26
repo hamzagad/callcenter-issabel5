@@ -1498,29 +1498,13 @@ PETICION_LLAMADAS;
         }
 
         if ($iNumTotalLlamadas <= 0) {
-            // Check if there are scheduled calls outside the time window
-            $sPeticionTotal =
-                'SELECT COUNT(*) AS N FROM calls '.
-                'WHERE id_campaign = ? '.
-                    'AND (status IS NULL OR status NOT IN ("Success", "Placing", "Ringing", "OnQueue", "OnHold")) '.
-                    'AND retries < ? '.
-                    'AND dnc = 0';
-            $recordset = $this->_db->prepare($sPeticionTotal);
-            $recordset->execute(array($campaignId, $infoCampania['retries']));
-            $iNumTotal = $recordset->fetch(PDO::FETCH_COLUMN, 0);
-            $recordset->closeCursor();
-            if (!is_null($iNumTotal) && $iNumTotal > 0) {
-                if ($this->DEBUG) {
-                    $this->_log->output("DEBUG: ".__METHOD__." (campaign $campaignId ".
-                        "queue {$infoCampania['queue']}) no calls to ".
-                        "place; $iNumTotal scheduled calls but outside ".
-                        "time range. | (campaña $campaignId ".
-                        "cola {$infoCampania['queue']}) no hay llamadas a ".
-                        "colocar; $iNumTotal llamadas agendadas pero fuera de ".
-                        "horario.");
-                }
-                return FALSE;
-            }
+            /* Nothing to place this cycle. Whether the campaign may finish
+             * is _checkCampaignDataExhausted()'s one rule: calls still up,
+             * or rows still dialable now or later, keep it Active.
+             * Nada que colocar en este ciclo. Si la campaña puede terminar
+             * lo decide la única regla de _checkCampaignDataExhausted(). */
+            $this->_checkCampaignDataExhausted($campaignId, $infoCampania);
+            return FALSE;
         }
 
         // Check DNC list / Verificar lista DNC
@@ -1648,13 +1632,6 @@ SQL_LLAMADA_COLOCADA;
                 (isset($datosTrunk['CID']) ? $datosTrunk['CID'] : $tupla['phone']),
                 $sCadenaVar, (is_null($tupla['retries']) ? 0 : $tupla['retries']) + 1,
                 $infoCampania['trunk']);
-        }
-
-        // Mark campaign as finished if no more calls
-        if ($iNumLlamadasColocar > 0 && $iNumTotalLlamadas <= 0) {
-            $this->_log->output('INFO: marking campaign as finished: '.$campaignId.' | marcando campaña como finalizada: '.$campaignId);
-            $sth = $this->_db->prepare('UPDATE campaign SET estatus = "T" WHERE id = ?');
-            $sth->execute(array($campaignId));
         }
 
         return TRUE;
@@ -2318,16 +2295,31 @@ PETICION_LLAMADAS_AGENTE;
             return; // Still have calls in progress, don't mark as finished
         }
 
-        // Check if there are any remaining callable records (regardless of time window)
-        // Verificar si quedan registros marcables (sin importar ventana de tiempo)
+        // Verificar si quedan registros marcables: una fila cuenta sólo si el
+        // marcador todavía puede marcarla, ahora o más tarde - sin ventana y
+        // sin agente (una fila de CSV), o una ventana completa aún no vencida.
+        // Una ventana que ya pasó se deja ir: el marcador no puede volver a
+        // marcarla, así que ya no mantiene la campaña abierta.
+        // Check if there are any remaining callable records: a row counts
+        // only when the dialer can still dial it, now or later - no window
+        // and no agent (a CSV row), or a full window not yet over. A window
+        // that has passed is let go: the dialer can never dial it again, so
+        // it no longer keeps the campaign open.
+        $sFechaSys = date('Y-m-d');
+        $sHoraSys = date('H:i:s');
         $sPeticion =
             'SELECT COUNT(*) FROM calls '.
             'WHERE id_campaign = ? '.
                 'AND (status IS NULL OR status NOT IN ("Success", "Placing", "Ringing", "OnQueue", "OnHold")) '.
                 'AND retries < ? '.
-                'AND dnc = 0';
+                'AND dnc = 0 '.
+                'AND ((date_init IS NULL AND date_end IS NULL AND time_init IS NULL AND time_end IS NULL '.
+                    'AND agent IS NULL) '.
+                'OR (date_init IS NOT NULL AND date_end IS NOT NULL AND time_init IS NOT NULL AND time_end IS NOT NULL '.
+                    'AND (date_end > ? OR (date_end = ? AND time_end >= ?))))';
         $recordset = $this->_db->prepare($sPeticion);
-        $recordset->execute(array($campaignId, $infoCampania['retries']));
+        $recordset->execute(array($campaignId, $infoCampania['retries'],
+            $sFechaSys, $sFechaSys, $sHoraSys));
         $iNumRemaining = $recordset->fetch(PDO::FETCH_COLUMN, 0);
         $recordset->closeCursor();
 
@@ -2336,6 +2328,10 @@ PETICION_LLAMADAS_AGENTE;
                 ' | datos de campaña agotados, marcando como finalizada: '.$campaignId);
             $sth = $this->_db->prepare('UPDATE campaign SET estatus = "T" WHERE id = ? AND estatus = "A"');
             $sth->execute(array($campaignId));
+        } elseif ($this->DEBUG) {
+            $this->_log->output("DEBUG: ".__METHOD__." campaign $campaignId still has ".
+                "$iNumRemaining dialable row(s), stays Active | campaña $campaignId ".
+                "aún tiene $iNumRemaining fila(s) marcable(s), sigue Activa");
         }
     }
 
