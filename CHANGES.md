@@ -7,6 +7,11 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.3.33
+
+- Bug fix: the agentconsole ECCP client no longer ships the well-known default password - fresh installs and updates create or leave a random one, and a password an admin set is never overwritten
+- Improve: the 44 eccp-examples take their ECCP credentials from ECCP_SERVER/ECCP_USER/ECCP_PASS instead of a hardcoded default, and refuse to run without a password
+
 ## 5.3.32
 
 - Bug fix: a form answer is measured in characters, not bytes - an Arabic answer over 125 characters was refused as too large though its column holds 250 characters

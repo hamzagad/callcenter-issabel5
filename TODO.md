@@ -10,16 +10,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## Medium
 
-### Default ECCP Console Password
-
-* **Type**: Security
-* **Urgency**: Medium
-* **Date Added**: 2026-10-25
-* **Location**: `paloSantoConsola.class.php:80-97` (`_obtenerConexion('ECCP')`), `paloSantoConsola.class.php:101-102` (the in-code TODO "configure credentials"), `agents/libs/Agentes.class.php:704-720` and `cb_extensions/libs/Agentes.class.php:264-280` (`_refreshDialerAgentList()`), `ECCPConn.class.php:382-384` (`Request_login`)
-* **Description**: Every install has the ECCP user `agentconsole` with the well-known password `agentconsole`: the three GUI sites above insert it when the row is missing. The listener is reachable from the network ("ECCP Listen Address"), so anyone who can reach the port can log in and use every `eccpauth` request: `getcallinfo` (customer number and attributes), campaign and queue status, and the event stream. Agent actions still need that agent's own `eccp_password` hash. The built-in consoles never send the plaintext: the browser talks to Apache, and PHP connects to `localhost`, reads `md5_password` from the table and sends the hash itself, which `Request_login` accepts (`md5_password = ?`). Measured on the dev box 2026-10-25: `agentconsole` still has the default password.
-* **Implementation**: (1) Fresh install: `setup/installer.php` creates the `agentconsole` row with a random password, and the three insert sites create a random one rather than `agentconsole`. No config file is needed, since every built-in reader takes the hash from the table. (2) Boxes installed by the script: the release's `patches/<VERSION>/update.sh`, run by `build/5.0/update-issabel-callcenter.sh`, replaces the password only where it is still `MD5('agentconsole')`, so one an admin set in ECCP Users is kept. The RPM is not distributed yet, so it needs nothing now. (3) `eccp-examples/*.php` hardcode `agentconsole`/`agentconsole`; have them take credentials as arguments.
-* **Status**: Untouched
-
 ### Attended-Transfer Hold Has No Orphan Check
 
 * **Type**: Bug
