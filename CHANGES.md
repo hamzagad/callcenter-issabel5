@@ -15,7 +15,7 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ## 5.4.37
 
-- Bug fix: a dialer task waiting for an answer from a task that was stopped now gives up when it is told to stop, so it exits and is restarted instead of hanging; under Call Center Pro a short licence-check failure no longer leaves campaigns undialed until a restart
+- Bug fix: a dialer task waiting for an answer from a task that was stopped now gives up when it is told to stop, so it exits and is restarted instead of hanging
 - Bug fix: a cycle that gets no answer from AMIEventProcess to its call list places no call, instead of marking rows Placing that nothing dials
 
 ## 5.4.36

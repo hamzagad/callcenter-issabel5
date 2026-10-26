@@ -40,7 +40,7 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Urgency**: Low
 * **Date Added**: 2026-10-26
 * **Location**: `setup/dialer_process/dialer/TuberiaMensaje.class.php` (`RPC()`, the wait loop); `setup/dialer_process/dialer/HubServer.class.php` (`rutearMensaje()`, which drops a request to an absent task)
-* **Description**: The caller of `TuberiaMensaje::RPC()` waits until its peer answers or the hub link closes, and since 5.4.37 also stops waiting on a pending SIGTERM/SIGINT/SIGQUIT. A peer that dies without the caller being signalled - SIGKILL, or a crash while the hub's restart is suppressed, as under Pro's licence gate - still leaves it waiting, and the hub restarts only tasks that exited, so the caller is never replaced. A time limit alone is wrong: `AMIEventProcess_ejecutarOriginate` can rightly take 30 s to answer, and a late answer arriving after a bounded wait would be read by the next RPC as its own. The fix is request ids on RPC answers.
+* **Description**: The caller of `TuberiaMensaje::RPC()` waits until its peer answers or the hub link closes, and since 5.4.37 also stops waiting on a pending SIGTERM/SIGINT/SIGQUIT. A peer that dies without the caller being signalled - SIGKILL, or a crash while the hub's restart is suppressed - still leaves it waiting, and the hub restarts only tasks that exited, so the caller is never replaced. A time limit alone is wrong: `AMIEventProcess_ejecutarOriginate` can rightly take 30 s to answer, and a late answer arriving after a bounded wait would be read by the next RPC as its own. The fix is request ids on RPC answers.
 * **Status**: Untouched
 
 ### Failed Calls Redialled With No Pause
