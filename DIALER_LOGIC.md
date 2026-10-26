@@ -42,6 +42,15 @@ names functions, not line numbers, which move; they are all in
 │           they place no calls                                                │
 └───────────────────────────────────────┬──────────────────────────────────────┘
                                         ▼
+┌─ RESERVATION PRE-PASS, over every campaign's scheduled rows ─────────────────┐
+│ reserved  = agents with a scheduled call due within 30 s, of ANY active      │
+│             campaign (_listarAgentesAgendadosReserva(); _agentesAgendables()│
+│             reserves each of them, which pauses them in every queue)         │
+│ Pass 1 drops them from every campaign's free list: a reserved agent belongs  │
+│ to its scheduled call, and the queue's Paused flag reaches the free list     │
+│ only a cycle later                                                           │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        ▼
 ┌─ PASS 1: INTENTIONS, each campaign C, from its own queue snapshot ───────────┐
 │ raw_max[C]       = max_canales                       (empty or 0: no limit)  │
 │ active[C]        = C's calls Placing, Ringing, OnQueue or OnHold, or         │
@@ -81,13 +90,14 @@ names functions, not line numbers, which move; they are all in
 └───────────────────────────────────────┬──────────────────────────────────────┘
                                         ▼
 ┌─ PASS 3: DIAL, _processCampaignWithAllocation(), each C in database order ───┐
-│ allocated[C] = 0 ─────────────► skip C, scheduled calls included (it only    │
-│                                 checks whether its rows are used up)         │
-│ scheduled      = due scheduled calls whose reserved agent is idle            │
-│                  (_actualizarLlamadasAgendables(); reserving pauses the      │
-│                  agent in every queue, so no campaign counts them free)      │
+│ scheduled      = due scheduled calls of C, read and placed BEFORE the        │
+│                  no-agent exit (_actualizarLlamadasAgendables()): a due      │
+│                  callback is placed whatever this cycle allocated, because  │
+│                  it dials its own agent directly                             │
+│ allocated[C] = 0 and nothing scheduled ──► skip C (it only checks whether    │
+│                                            its rows are used up)             │
 │ want           = allocated[C] + boost[C]                                     │
-│ agent budget   = want - pending - scheduled                                  │
+│ agent budget   = want - pending   (a scheduled call takes no queue agent)    │
 │                  pending = calls of ANY campaign on C's queue still          │
 │                  waiting for Asterisk's Originate result                     │
 │ channel budget = effective_max[C] - scheduled                                │
@@ -103,7 +113,10 @@ names functions, not line numbers, which move; they are all in
 │ no callable row left → campaign estatus 'T' (finished)                       │
 └───────────────────────────────────────┬──────────────────────────────────────┘
                                         ▼
-           next campaign; after the last one, wait for the next cycle
+           next campaign; after the last one, the cycle's sweep: reserved
+           agents with no schedulable call left anywhere are released
+           (_liberarReservasHuerfanas()), and the dialer waits for the
+           next cycle
 ```
 
 Reading the chart:
@@ -181,7 +194,7 @@ leftover   1, in the queue's turn: A this cycle (A 3, B 0),
    └─> iNumLlamadasColocar = numAllocatedAgents
    └─> + predictive boost (if enabled)
    └─> Capped by effective_max_canales
-   └─> - scheduled calls placed in this cycle
+   └─> - scheduled calls: channel budget only (they dial their own agent)
    └─> + overcommit adjustment (if enabled, re-capped by effective_max_canales)
 
 4. Originate calls
@@ -203,18 +216,22 @@ leftover   1, in the queue's turn: A this cycle (A 3, B 0),
 ### Scheduled Calls Flow (Agent-Specific Calls)
 
 ```
-1. Campaign Process: Check for scheduled calls
+1. Reservation pre-pass, before any campaign's free-agent list is taken
+   └─> _listarAgentesAgendadosReserva() lists the agents with a scheduled call
+       due within 30 s; AMIEventProcess::_agentesAgendables() marks them
+       'reserved' (pausing them in every queue), and Pass 1 drops them from
+       every campaign's free list
+
+2. Campaign Process: check for scheduled calls, before the no-agent exit
    └─> _actualizarLlamadasAgendables() queries calls table WHERE agent IS NOT NULL
 
-2. Agent reservation
-   └─> AMIEventProcess::_agentesAgendables() marks agent as 'reserved'
-   └─> Agent must be: logged-in, no active call, no pending scheduled call, only 1 pause (reserved)
-
 3. Place scheduled call
+   └─> Agent must be: logged-in, no active call, no pending scheduled call, only 1 pause (reserved)
    └─> Call is linked to specific agent via agente_agendado property
    └─> Scheduled calls are placed BEFORE regular calls in the same cycle
-   └─> Their count is subtracted from regular call budget (they consume channels
-       not yet reflected in Pass 1's _countActiveCalls)
+   └─> Their count is subtracted from the channel budget only: they consume
+       channels not yet reflected in Pass 1's _countActiveCalls, but they dial
+       their own agent directly and take no queue agent
 
 4. Flow continues as standard, but only assigned agent can take this call
 ```
@@ -260,8 +277,8 @@ See [Fair Rotation Algorithm](#fair-rotation-algorithm) for details.
 
 ### Pass 3: Process Each Campaign (CampaignProcess.class.php:1207-1609)
 
-For each campaign with allocated agents (a campaign with none is skipped, its
-scheduled calls included):
+For each campaign (due scheduled calls are read and placed before the no-agent
+exit, so a campaign with no allocated agents still places its due callbacks):
 
 ```php
 // Base: one call per allocated agent
@@ -271,10 +288,12 @@ $iNumLlamadasColocar = $numAllocatedAgents;
 $iNumLlamadasColocar += $iPredictiveBoost;
 
 // === TWO-BUDGET CALL LIMITING ===
-// Budget 1 (Agent): allocated agents - calls in transit to agents
+// Budget 1 (Agent): allocated agents - calls in transit to agents.
+// A scheduled call dials its own agent directly and takes no queue agent,
+// so it is not subtracted here.
 $iPendingOriginate = $this->_contarLlamadasEsperandoRespuesta($queue);
 $iScheduledThisCycle = count($listaLlamadasAgendadas);
-$iAgentBudget = $iNumLlamadasColocar - $iPendingOriginate - $iScheduledThisCycle;
+$iAgentBudget = $iNumLlamadasColocar - $iPendingOriginate;
 
 // Budget 2 (Channel): effective_max - scheduled calls
 $iChannelBudget = $effectiveMaxCanales - $iScheduledThisCycle;
@@ -607,7 +626,7 @@ overcommit multiplies that:
 ```
 allocated_agents = fair rotation result          (rotation,        :749)
         + predictive_boost_share                 (queue split, :763, read :1263)
-        - pending_originate - scheduled          (agent budget,   :1284-1287)
+        - pending_originate                      (agent budget,   :1284-1287)
    min  effective_max_canales - scheduled        (channel budget, :1295-1298)
         / ASR   (floor 0.20)                     (overcommit,     :1335-1353)
    cap  effective_max_canales                    (re-cap,         :1355-1370)

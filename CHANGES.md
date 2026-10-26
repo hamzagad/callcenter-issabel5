@@ -7,6 +7,12 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.3.34
+
+- Bug fix: a due same-agent callback is placed even in a cycle that allocated no agents, instead of pausing its agent until logoff
+- Bug fix: no ordinary call is placed for an agent reserved for a callback, and a free agent is no longer idled beside a due callback
+- Bug fix: a reservation whose callback can no longer be placed is released in the same cycle, not at logoff
+
 ## 5.3.33
 
 - Bug fix: the agentconsole ECCP client no longer ships the well-known default password - fresh installs and updates create or leave a random one, and a password an admin set is never overwritten
