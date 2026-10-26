@@ -7,6 +7,12 @@ entries) and `CHANGELOG_OLD.md` (release notes up to 5.0.0-10).
 
 ---
 
+## 5.4.38
+
+- Bug fix: deleting an outgoing campaign removes its calls' current_calls rows first, so a stale row no longer fails the delete with foreign key error 1451
+- Bug fix: deleting an incoming campaign removes its calls' current_call_entry rows first, for the same reason
+- Bug fix: the dialer's sweeper that closes orphaned connected calls also deletes their current_calls rows, so a missed Hangup no longer leaves one behind until the next dialer restart
+
 ## 5.4.37
 
 - Bug fix: a dialer task waiting for an answer from a task that was stopped now gives up when it is told to stop, so it exits and is restarted instead of hanging; under Call Center Pro a short licence-check failure no longer leaves campaigns undialed until a restart

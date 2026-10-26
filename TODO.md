@@ -53,6 +53,15 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Recommendation**: Failed calls should be retried at the end of the campaign, not again straight away. Keep the `retries` ordering, and add a minimum interval between attempts on the same row: a row with `retries > 0` is offered only when its last attempt (`datetime_originate`) is at least N minutes old, the cutoff computed in PHP and bound into both branches of the dial query. N is a per-campaign setting on the campaign form, with a default to be decided. `_checkCampaignDataExhausted()` must keep counting such a row as dialable, so a campaign waiting out the interval stays Active; its rule has no time test on retries, so it already does.
 * **Status**: Untouched
 
+### A Trunk's Hangup Is Sometimes Never Matched to Its Call
+
+* **Type**: Investigation
+* **Urgency**: Low
+* **Date Added**: 2026-10-26
+* **Location**: `AMIEventProcess.class.php` (`msg_Hangup`, the "Local channel optimized out of the bridge, call continues on …, ignoring hangup" branch)
+* **Description**: Sometimes a trunk channel's Hangup is never matched to its call: seen on a GSM-gateway trunk whose call went through a Local channel that was optimised away. The dialer saw the Local legs hang up and ignored them (that branch assumes the real trunk channel is still up), but the trunk channel itself was already gone - an AMI hangup request for it answered "No such channel" seconds later, and no Hangup event for it was ever processed. The call then stays `Success` with no `end_time` until the 2-hour orphan sweeper (`_cleanOrphanedConnectedCalls()`) force-closes it. Since 5.4.37 that sweeper also deletes the call's `current_calls` row, so the leftover is bounded - but the call's true end time and duration are still lost. Next step: capture AMI events on a trunk that shows this, to learn whether the Hangup never reaches the dialer or arrives renamed by a Local-channel masquerade.
+* **Status**: Untouched
+
 ### Exact Predictive Count for Ringing Callback Agents
 
 * **Type**: Improvement
