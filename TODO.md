@@ -34,6 +34,16 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## Low
 
+### Failed Calls Redialled With No Pause
+
+* **Type**: Feature
+* **Urgency**: Low
+* **Date Added**: 2026-10-26
+* **Location**: `CampaignProcess.class.php:1446-1470` (the dial query), `CampaignProcess.class.php:1543-1548` (placement stamps `datetime_originate` and `retries + 1`), the campaign form in `campaign_out`
+* **Description**: A failed call (busy, congestion, no answer - any failure) is offered again in the next cycle, with no wait. The dial query orders rows by `retries` (after `dummy_priority`), so in a campaign with many numbers a failed row already waits until every row with fewer attempts has been dialled: in effect it is retried at the end of the pass. But nothing spaces the attempts on one row in time. When few rows are left - near the end of any campaign, or in a campaign with one number - a failed number is dialled again seconds after its failure, until its retries are used up. Seen in a lab test on 2026-10-26 with a one-number campaign: congestion at 14:37:03, dialled again at 14:37:05. A number that was just busy or unanswered is likely to be so again seconds later, so those retries are spent for nothing.
+* **Recommendation**: Failed calls should be retried at the end of the campaign, not again straight away. Keep the `retries` ordering, and add a minimum interval between attempts on the same row: a row with `retries > 0` is offered only when its last attempt (`datetime_originate`) is at least N minutes old, the cutoff computed in PHP and bound into both branches of the dial query. N is a per-campaign setting on the campaign form, with a default to be decided. `_checkCampaignDataExhausted()` must keep counting such a row as dialable, so a campaign waiting out the interval stays Active; its rule has no time test on retries, so it already does.
+* **Status**: Untouched
+
 ### Exact Predictive Count for Ringing Callback Agents
 
 * **Type**: Improvement
