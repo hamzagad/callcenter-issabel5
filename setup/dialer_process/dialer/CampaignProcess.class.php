@@ -1533,6 +1533,23 @@ PETICION_LLAMADAS;
         // Send to AMIEventProcess for monitoring / Enviar a AMIEventProcess para monitoreo
         if (count($listaLlamadas) > 0) {
             $listaKeyRepetidos = $this->_tuberia->AMIEventProcess_nuevasLlamadasMarcar($listaLlamadas);
+
+            /* Sin respuesta de AMIEventProcess (el proceso se detiene, o se
+             * perdió el enlace al hub) nadie marcaría ni monitorearía las
+             * llamadas de este ciclo: una fila marcada Placing consume un
+             * reintento y queda huérfana de inmediato. No se coloca nada.
+             * With no answer from AMIEventProcess (the process is stopping,
+             * or the hub link was lost) nothing would dial or monitor this
+             * cycle's calls: a row marked Placing uses up a retry and is
+             * orphaned at once. Nothing is placed. */
+            if (!is_array($listaKeyRepetidos)) {
+                $this->_log->output('WARN: AMIEventProcess no respondió a la lista de '.
+                    'llamadas (proceso deteniéndose o sin enlace al hub), no se coloca '.
+                    'ninguna llamada en este ciclo | EN: no answer from AMIEventProcess '.
+                    'to the call list (stopping, or the hub link closed), no call placed '.
+                    'this cycle');
+                return FALSE;
+            }
             foreach ($listaKeyRepetidos as $k) {
                 $sKey = $listaLlamadas[$k]['actionid'];
                 $sCanalTrunk = $listaLlamadas[$k]['dialstring'];
