@@ -10,15 +10,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 
 ## Medium
 
-### Attended-Transfer Hold Has No Orphan Check
-
-* **Type**: Bug
-* **Urgency**: Medium
-* **Date Added**: 2026-08-30 (Change #70)
-* **Location**: `extensions_custom.conf:33`, `setup/installer.php:357`
-* **Description**: `[atxfer-hold]` is a bare `MusicOnHold(,1800)` with no check that the agent who put the caller there still exists, so any path that ever leaves a caller in it means up to 30 minutes of music with nobody on the other end. Change #70 removed the one known such path (the `Bridge()` thread race) and added a `SoftHangup` backstop inside `[atxfer-rebridge]`, but the context itself is still a dead end: the residual exposure is a caller orphaned during the ~2 s reconnect window, or by any future path. The `1800` is also now out of step with the 900 s hold cap the `callcenter_hold` parking lot got in Change #69. Proposed fix: have the dialer `SetVar` the agent's channel name onto the client channel at both `Redirect` sites in `ECCPConn::Request_agentauth_atxfercall()`, then run the hold as chunked `MusicOnHold` slices that bail out via `CHANNEL_EXISTS()` once that channel is gone. `res_musiconhold` restores the saved position for `mode=files` classes, so chunking does not restart the music. Deferred from Change #70 to keep that fix to a single file.
-* **Status**: Untouched
-
 ### Campaign List Needs a 'Retries Left' Column
 
 * **Type**: Feature
@@ -33,6 +24,15 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 ---
 
 ## Low
+
+### Transfer Bridge Reshuffle Can Finalize a Live Call
+
+* **Type**: Bug
+* **Urgency**: Low
+* **Date Added**: 2026-10-27
+* **Location**: `AMIEventProcess.class.php` (`msg_Link`, the "transferred to an unmonitored extension" detection); `Llamada.class.php` (`llamadaFinalizaSeguimiento`, which clears the agent's call reference)
+* **Description**: During an attended-transfer consultation, `msg_Link`'s transfer detection can read a bridge reshuffle (a `msg_BridgeEnter` pairing) as a transfer to an unmonitored extension, and finalize the call. The misfire logs only DEBUG lines, so it is invisible on a dialer running at INFO: the agent silently loses the call while the client is still up. Seen once in eleven runs (2026-10-27): the session-end path then found no client channel to hang up and the call record closed with the client still bridged to the colleague. The session-end path no longer depends on that reference: the held client's channel is saved at the consultation start and used when the call or its channel is unknown. Proposed fix: skip that finalize while a consultation flag is set for the call's agent; check the console's Complete transfer first, because it may rely on this same detection.
+* **Status**: Untouched
 
 ### A Task Killed Mid-RPC Without a Stop Signal Still Hangs Its Caller
 
@@ -305,15 +305,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: Placeholder for future "contacts per campaign" feature in incoming campaigns. **Current architecture**: Incoming campaigns use **global** `contact` table shared across all campaigns (lookup by `call_entry.id_contact`). Outgoing campaigns have campaign-specific contacts via `calls` table. **TODO intent**: If incoming campaigns were given their own contact lists (like outgoing), the `delete_campaign()` function would need SQL to delete campaign-specific contacts (e.g., `DELETE FROM campaign_contact_entry WHERE id_campaign = ?`). **Note**: This is a design note for hypothetical future enhancement, not an active bug. Current global contact model works but has limitations: same phone number cannot have different attributes per campaign, no data isolation between campaigns.
 * **Status**: Untouched
 
-### Mid-Call Logoff Hangup Target
-
-* **Type**: Bug
-* **Urgency**: Low
-* **Date Added**: 2026-10-03
-* **Location**: `setup/dialer_process/dialer/AMIEventProcess.class.php` (`_ejecutarLogoffAgente`, the `Hangup($llamada->agentchannel)` call)
-* **Description**: For an Agent-type login, `agentchannel` is the device name `Agent/NNNN`, never a channel. So every logoff with a call still up logs "No such channel" and spends one synchronous AMI round trip; the fallback below it finalises the call. `actualAgentChannel` holds the real channel (`Llamada.class.php`). But hanging that up would make a mid-call logoff, from the console button or a supervisor, drop the caller: decide that behaviour first.
-* **Status**: Untouched
-
 ### Customer Name Taken From Attribute 1
 
 * **Type**: Improvement
@@ -366,15 +357,6 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Date Added**: 2026-10-25
 * **Location**: `AMIEventProcess.class.php:4191-4192` (`msg_QueueMemberStatus()`)
 * **Description**: The handler passes only the queue and the status to `Agente::actualizarEstadoEnCola()` (update status in queue); the event's `Paused` field is ignored there, although `QueueShadow` records it for the same member (`QueueShadow.class.php:190`). Decide whether the agent object needs it, for example to notice a pause made outside the dialer.
-* **Status**: Untouched
-
-### Agent Logoff With a Call on Hold
-
-* **Type**: Investigation
-* **Urgency**: Low
-* **Date Added**: 2026-10-25
-* **Location**: `SQLWorkerProcess.class.php:1187-1188` (`_AgentLogoff()`)
-* **Description**: At logoff the worker closes every open pause, hold included, but nothing handles the call that hold parked: the in-code TODO asks what happens to it. Since Change #69 a parked call that times out is hung up and finalized, so it ends at the latest after the 900 s parking time; whether it should end at logoff instead belongs with "Mid-Call Logoff Hangup Target".
 * **Status**: Untouched
 
 ### Hold End Restates the Current-Calls Update
