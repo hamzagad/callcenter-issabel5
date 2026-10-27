@@ -391,6 +391,24 @@ Unresolved issues for the call center module. Items are sorted by urgency (Criti
 * **Description**: The function prepares a campaign's script text for loading into the rich-text editor: it turns curly quotes into straight ones, single quotes into `&#39;`, and line breaks into spaces. The in-code TODO asks to check what escaping is actually needed. Check it against the editor the pages load today, and keep one copy.
 * **Status**: Untouched
 
+### Attended Transfer to the Agent's Own Extension
+
+* **Type**: Improvement
+* **Urgency**: Low
+* **Date Added**: 2026-10-27
+* **Location**: `setup/dialer_process/dialer/ECCPConn.class.php:3400-3404` (`Request_agentauth_atxfercall()`)
+* **Description**: The attended-transfer request checks only that the target is digits, so it accepts the agent's own extension: for an Agent-type login, the extension the agent logged in from, whose phone carries the session call (the request already reads its `login_channel`, `:3421-3432`); for a callback login, the agent's own extension. A transfer to the phone that is already on the call has no use, and what it does has not been measured. Refuse it before any `Redirect`, with a failure the console shows.
+* **Status**: Untouched
+
+### Disconnection Reason in the Reports
+
+* **Type**: Feature
+* **Urgency**: Low
+* **Date Added**: 2026-10-27
+* **Location**: `setup/call_center.sql` (`audit`, `call_entry`, `calls`), `modules/login_logout`, `modules/calls_detail`
+* **Description**: The reports do not say why an agent's session or a call ended. A session row (`audit`) has only its start and end times, an incoming call row (`call_entry`) only its status, and an outgoing call row (`calls`) has `failure_cause` only for a call that never connected. The dialer knows why it ends a session: the agent's own logout, a logoff from the console or by a supervisor, the end of an Agent-type agent's session call, a phone that unregistered or stopped answering qualify, a removal from all the agent's queues, a dialer stop or restart. A call has its own reasons: which side hung up, Asterisk's hangup cause (a BYE is 16, a lost phone's RTP timeout 44), or the dialer ending it at a session end. Record the reason with the row and show it in Login Logout and Calls Detail. Seen on a lab box on 2026-10-27: the dialer logged an agent off, mid-call, because its phone's registration had lapsed for ten seconds, and nothing on screen said why.
+* **Status**: Untouched
+
 ---
 
 ## Deferred
